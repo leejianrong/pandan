@@ -2177,3 +2177,357 @@ button.primary:disabled {
   font-size: 0.8rem;
   color: var(--muted);
 }
+
+/* =====================================================================
+   Notification inbox (V39, KAN-303) — a bell + unread badge in the top
+   bar (Inbox.svelte) opening an anchored popover of notifications.
+   Global (like .ui-popup / .board-switcher) because Bits portals the
+   popover content to <body>, out of the component's <style> scope. One
+   shared look with the rest of the app: tokens only, no hard-coded
+   colours; the icon chips reuse Activity.svelte's feed-icon pattern.
+   ===================================================================== */
+
+/* ---- Bell trigger + unread badge (sits in .topbar-user) ---- */
+.bell-btn {
+  position: relative;
+}
+.bell-btn[data-state="open"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--border);
+}
+.unread-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  /* Teal to match the app's "attention to a person" language; danger red stays
+     reserved for the blocked/CI rows inside the panel (KAN-303 approved design). */
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  border-radius: 999px;
+  border: 2px solid var(--card-bg);
+}
+
+/* ---- Panel surface (Popover.Content) ---- */
+.inbox-panel {
+  z-index: 120;
+  width: 384px;
+  max-width: calc(100vw - 2rem);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: min(560px, var(--bits-floating-available-height, 560px));
+}
+
+.inbox-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.8rem 0.9rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+.inbox-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.inbox-count {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  font-variant-numeric: tabular-nums;
+}
+.inbox-count.zero {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+.inbox-mark-all {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.28rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+}
+.inbox-mark-all:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+.inbox-mark-all:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.inbox-mark-all:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- All / Unread filter ---- */
+.inbox-filter {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+.inbox-tab {
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+}
+.inbox-tab:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.inbox-tab.active {
+  background: var(--accent-soft);
+  border-color: var(--border);
+  color: var(--accent);
+}
+.inbox-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- Status / loading / error line ---- */
+.inbox-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1.5rem 1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* ---- List + rows ---- */
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+.note {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 0.65rem;
+  padding: 0.6rem 0.55rem 0.6rem 0.7rem;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+  transition: background 0.12s ease;
+}
+.note:hover {
+  background: var(--hover);
+}
+/* Unread: a teal left rail + faint accent wash so it reads at a glance. */
+.note.unread {
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+  border-left-color: var(--accent);
+  padding-left: 0.55rem;
+}
+.note.unread:hover {
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+}
+.note.read {
+  opacity: 0.72;
+}
+
+.note-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  flex: none;
+  margin-top: 0.05rem;
+}
+.note-icon.needs_human {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.note-icon.blocked {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.note-icon.ci_failed {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.note-icon.assigned {
+  background: var(--agent-soft);
+  color: var(--agent);
+}
+
+.note-body {
+  min-width: 0;
+}
+.note-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+}
+.note-kind.needs_human {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.note-kind.blocked {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.note-kind.ci_failed {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.note-kind.assigned {
+  background: var(--agent-soft);
+  color: var(--agent);
+}
+.note-text {
+  margin: 0.3rem 0 0;
+  font-size: 0.83rem;
+  line-height: 1.4;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.note-time {
+  display: block;
+  margin-top: 0.28rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.note-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+.unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+  margin-top: 0.35rem;
+}
+.note-mark {
+  display: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.note-mark:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.note-mark:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Reveal the mark-read button on hover/focus, hiding the dot in its place. Touch /
+   no-hover devices keep the button visible (they can't hover). */
+.note.unread:hover .note-mark,
+.note.unread:focus-within .note-mark {
+  display: grid;
+}
+.note.unread:hover .unread-dot,
+.note.unread:focus-within .unread-dot {
+  display: none;
+}
+@media (hover: none) {
+  .note.unread .note-mark {
+    display: grid;
+  }
+  .note.unread .unread-dot {
+    display: none;
+  }
+}
+
+.inbox-foot {
+  padding: 0.55rem 0.9rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.74rem;
+  color: var(--muted);
+  flex: none;
+}
+
+/* ---- Empty state ---- */
+.inbox-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 2.2rem 1.5rem 2.4rem;
+  text-align: center;
+}
+.inbox-empty-ring {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.inbox-empty h4 {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+.inbox-empty p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  max-width: 26ch;
+  line-height: 1.45;
+}

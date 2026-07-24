@@ -718,6 +718,48 @@ export async function listActivity(
   return { entries, nextCursor: res.headers.get(NEXT_CURSOR_HEADER) };
 }
 
+// --- Notifications (V37 API, KAN-301; surfaced in the UI by V39, KAN-303) -----
+// A per-user inbox of events a human shouldn't miss. Poll/pull only (ADR 0007) —
+// no websockets; the client polls `GET /notifications`. Owner-scoped: a caller
+// only ever sees their own rows. `read_at` is null while unread.
+
+// Mirrors the backend VALID_NOTIFICATION_KINDS (models.py) — the four events a
+// human shouldn't miss.
+export type NotificationKind = "needs_human" | "blocked" | "ci_failed" | "assigned";
+
+export interface Notification {
+  id: number;
+  // The recipient (UUID) — always the current caller on the owner-scoped list.
+  user_id: string;
+  board_id: number;
+  // The card the event is about, or null once that card is purged (SET NULL).
+  card_id: number | null;
+  kind: NotificationKind;
+  body: string;
+  // ISO timestamp once marked read; null while unread.
+  read_at: string | null;
+  created_at: string;
+}
+
+// List the caller's notifications, newest-first. `unread: true` → only the unread
+// ones (server-side `?unread=true`); default returns all.
+export async function listNotifications(
+  opts: { unread?: boolean } = {},
+): Promise<Notification[]> {
+  const suffix = opts.unread ? "?unread=true" : "";
+  const res = await fetch(`${API}/notifications${suffix}`);
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+// Mark one of the caller's notifications read (idempotent server-side). Returns the
+// updated row so the caller could reconcile, though the store just refetches.
+export async function markNotificationRead(id: number): Promise<Notification> {
+  const res = await fetch(`${API}/notifications/${id}`, { method: "PATCH" });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // --- Board metrics (M5 V17 API, surfaced in the UI by V16, KAN-249/KAN-250) --
 // Derived fleet-flow metrics for a board over a period — throughput, cycle time,
 // aging WIP, and a per-assignee breakdown. All computed server-side from the

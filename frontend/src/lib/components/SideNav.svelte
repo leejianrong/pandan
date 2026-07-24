@@ -9,6 +9,7 @@
   // picked via `onNavigate`, and open/close via `open` + `onClose`.
   import {
     Activity,
+    Inbox,
     KeyRound,
     Layers,
     LayoutDashboard,
@@ -30,11 +31,19 @@
   let {
     view,
     open,
+    unread = 0,
+    onOpenInbox,
     onNavigate,
     onClose,
   }: {
     view: string;
     open: boolean;
+    // Unread notification count for the Inbox entry's badge (V39, KAN-303).
+    unread?: number;
+    // Open the notification inbox popover (owned by App.svelte, anchored to the
+    // top-bar bell). The Inbox entry is a second way in — it doesn't switch `view`,
+    // so it's handled apart from `onNavigate`.
+    onOpenInbox?: () => void;
     onNavigate: (view: DrawerView) => void;
     onClose: () => void;
   } = $props();
@@ -72,6 +81,19 @@
     </button>
   </div>
   <nav class="drawer-nav">
+    <!-- Inbox (V39, KAN-303): opens the top-bar bell popover rather than switching a
+         view, and carries the same unread count as its badge. -->
+    <button
+      class="drawer-item"
+      onclick={() => onOpenInbox?.()}
+      tabindex={open ? 0 : -1}
+    >
+      <Inbox size={18} />
+      <span>Inbox</span>
+      {#if unread > 0}
+        <span class="drawer-badge">{unread > 9 ? "9+" : unread}</span>
+      {/if}
+    </button>
     {#each items as item (item.id)}
       {@const ItemIcon = item.icon}
       <button
@@ -175,6 +197,23 @@
   }
   .drawer-item.active :global(svg) {
     color: var(--accent);
+  }
+  /* Unread count on the Inbox entry (V39, KAN-303) — the drawer twin of the top-bar
+     bell badge, same teal treatment. */
+  .drawer-badge {
+    margin-left: auto;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    display: grid;
+    place-items: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 999px;
+    flex: none;
   }
 
   /* Matches app.css .icon-btn so the close button reads identically. */

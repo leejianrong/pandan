@@ -6,6 +6,7 @@
   import Dashboard from "./lib/components/Dashboard.svelte";
   import Brand from "./lib/components/Brand.svelte";
   import Epics from "./lib/components/Epics.svelte";
+  import Inbox from "./lib/components/Inbox.svelte";
   import Landing from "./lib/components/Landing.svelte";
   import BoardSwitcher from "./lib/components/BoardSwitcher.svelte";
   import CommandPalette from "./lib/components/CommandPalette.svelte";
@@ -19,6 +20,11 @@
   import type { MenuItem } from "./lib/components/ui";
   import { refetch, refetchBoards, refetchEpics, refetchLabels, refetchViews, setQuery } from "./lib/board.svelte";
   import { refetchTokens } from "./lib/tokens.svelte";
+  import {
+    startNotificationPolling,
+    stopNotificationPolling,
+    unreadCount,
+  } from "./lib/notifications.svelte";
   import { setSessionUser } from "./lib/session.svelte";
   import { initTheme, themeStore, toggleTheme } from "./lib/theme.svelte";
   import { kbd } from "./lib/keyboard.svelte";
@@ -43,6 +49,10 @@
 
   // The ⌘K command palette's open state (V35, KAN-299).
   let paletteOpen = $state(false);
+
+  // The notification inbox popover's open state (V39, KAN-303). Owned here (not in
+  // Inbox.svelte) so the side-nav's Inbox entry can open the same popover.
+  let inboxOpen = $state(false);
 
   // ⌘K / Ctrl-K toggles the command palette. This is a deliberate GLOBAL — it
   // fires even while focus is in an input/search box (that's the whole point of a
@@ -96,10 +106,15 @@
       refetchEpics();
       refetchLabels();
       refetchViews();
+      // Start polling the notification inbox (V39, KAN-303) — user-scoped, so it
+      // runs independent of the active board and keeps the top-bar badge fresh.
+      startNotificationPolling();
     }
   });
 
   async function handleLogout() {
+    // Stop the inbox poll before the session goes away (also clears the badge).
+    stopNotificationPolling();
     await logout();
     user = null;
     setSessionUser(null);
@@ -177,6 +192,7 @@
       />
     </div>
     <div class="topbar-user">
+      <Inbox bind:open={inboxOpen} />
       <button
         class="icon-btn theme-toggle"
         title={themeStore.theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
@@ -207,6 +223,11 @@
   <SideNav
     {view}
     open={drawerOpen}
+    unread={unreadCount()}
+    onOpenInbox={() => {
+      inboxOpen = true;
+      drawerOpen = false;
+    }}
     onNavigate={navigateFromDrawer}
     onClose={() => (drawerOpen = false)}
   />
