@@ -75,6 +75,11 @@ VALID_ACTIVITY_ACTIONS = (
     "resolved",
     "purged",
 )
+# Notification kinds (V37, KAN-301) — the four events a human shouldn't miss. A
+# plain varchar guarded by a CHECK constraint (the ``card.column`` pattern) so a
+# new kind needs no ``ALTER TYPE`` migration. Kept in sync with the emit call-sites
+# (``app.notifications`` callers) and ``NotificationKind`` (schemas).
+VALID_NOTIFICATION_KINDS = ("needs_human", "blocked", "ci_failed", "assigned")
 
 
 class Board(Base):
@@ -606,6 +611,66 @@ class CardTemplate(Base):
     # The list of card payloads as JSON. Portable ``JSON`` type (maps to Postgres
     # ``json``); always written by the router from a validated ``CardTemplateCreate``.
     cards: Mapped[list] = mapped_column(JSON, nullable=False, server_default=text("'[]'"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Notification(Base):
+    """A poll/pull inbox item for a board owner (V37, KAN-301) — an event a human
+    shouldn't miss: a card flagged ``needs_human``, a card newly ``blocked`` by a
+    dependency, a linked PR's CI failing, or a card being assigned.
+
+    Poll/pull only (ADR 0007 — no websockets, no real-time): rows are written at the
+    board write path (:mod:`app.notifications`, the notification analogue of the
+    activity logger) in the SAME sync transaction as the mutation, and read back via
+    ``GET /api/v1/notifications``.
+
+    Design notes:
+    - ``user_id`` FK → ``user`` (``ON DELETE CASCADE``, NOT NULL): the **recipient**.
+      The MVP recipient is always the **board owner** (``board.owner_id``) — a real
+      ``User``, which makes owner-scoping trivial (you only ever see your own rows).
+      A board with no owner never produces a notification (the emit helper skips it).
+      Cascade: a deleted user's inbox goes with them (unlike ``Activity``, this is
+      not history — it is a personal inbox).
+    - ``board_id`` FK → ``board`` (``ON DELETE CASCADE``): the notification belongs to
+      a board and is hard-deleted with it.
+    - ``card_id`` FK → ``card`` (``ON DELETE SET NULL``, nullable): the card the event
+      is about (all four kinds are card events today, but kept nullable + SET NULL so
+      a purged card leaves the human-readable ``body`` — which names the ticket —
+      standing rather than cascading the inbox item away).
+    - ``kind`` is a varchar guarded by a CHECK constraint (the ``card.column``
+      pattern) rather than a native PG enum.
+    - ``read_at`` NULL = unread; a mark-read (``PATCH``) stamps it once (idempotent).
+    """
+
+    __tablename__ = "notification"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('needs_human', 'blocked', 'ci_failed', 'assigned')",
+            name="ck_notification_kind",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # The recipient (a UUID). NOT NULL — every notification has a real owner.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    board_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("board.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The card the event is about. Nullable + SET NULL: a purged card leaves the row
+    # (its ``body`` names the ticket) rather than cascading the inbox item away.
+    card_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("card.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL = unread; stamped once when the owner marks it read.
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -142,6 +142,12 @@ class FakeClient:
     def list_activity(self, board_id, **kw):
         return self._call("list_activity", board_id=board_id, **kw)
 
+    def list_notifications(self, **kw):
+        return self._call("list_notifications", **kw)
+
+    def mark_notification_read(self, notification_id):
+        return self._call("mark_notification_read", notification_id=notification_id)
+
     def list_views(self, board_id):
         return self._call("list_views", board_id=board_id)
 
@@ -593,6 +599,47 @@ def test_activity_human_output(monkeypatch, env, capsys):
     assert cli.run(["activity", "--board", "2"]) == 0
     out = capsys.readouterr().out
     assert "agent-a" in out and "moved" in out and "moved KAN-3 to done" in out
+
+
+# --- notification inbox (V37, KAN-301) --------------------------------------
+
+NOTIFICATIONS = [
+    {"id": 2, "kind": "needs_human", "read_at": None, "body": "KAN-3 needs a human"},
+    {"id": 1, "kind": "assigned", "read_at": "2026-07-17T12:00:00Z",
+     "body": "KAN-1 assigned to me"},
+]
+
+
+def test_notify_list_calls_client_all(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"notifications": NOTIFICATIONS}))
+    assert cli.run(["notify", "list"]) == 0
+    # No --board (per-user); unread omitted → None (all).
+    assert fake.calls == [("list_notifications", {"unread": None})]
+
+
+def test_notify_list_unread_flag(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"notifications": []}))
+    assert cli.run(["notify", "list", "--unread"]) == 0
+    assert fake.calls == [("list_notifications", {"unread": True})]
+
+
+def test_notify_list_human_output(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result={"notifications": NOTIFICATIONS}))
+    assert cli.run(["notify", "list"]) == 0
+    out = capsys.readouterr().out
+    assert "needs_human" in out and "unread" in out and "KAN-3 needs a human" in out
+    assert "read" in out  # the assigned one is read
+
+
+def test_notify_read_marks_by_id(monkeypatch, env, capsys):
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(result={"id": 2, "kind": "needs_human", "read_at": "2026-07-18T00:00:00Z",
+                           "body": "KAN-3 needs a human"}),
+    )
+    assert cli.run(["notify", "read", "2"]) == 0
+    assert fake.calls == [("mark_notification_read", {"notification_id": 2})]
+    assert "needs_human" in capsys.readouterr().out
 
 
 def test_resolve(monkeypatch, env):

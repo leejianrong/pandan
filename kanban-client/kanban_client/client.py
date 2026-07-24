@@ -607,6 +607,29 @@ class KanbanClient:
             result["next_cursor"] = next_cursor
         return result
 
+    # --- notification inbox (V37 API / KAN-301 adapter) ---------------------
+
+    def list_notifications(self, *, unread: bool | None = None) -> dict[str, Any]:
+        """List the caller's own notifications (V37, KAN-301), newest-first — inbox
+        items for events a human shouldn't miss (``needs_human`` / ``blocked`` /
+        ``ci_failed`` / ``assigned``). ``unread=True`` returns only the unread ones;
+        omit (or ``None``) for all. Owner-scoped by the API (you only see your own).
+        Poll/pull only (ADR 0007). Returns ``{"notifications": [<notification>, ...]}``."""
+        params = _clean({"unread": unread})
+        return {
+            "notifications": self._request(
+                "GET", "/notifications", params=params
+            ).json()
+        }
+
+    def mark_notification_read(self, notification_id: int) -> dict[str, Any]:
+        """Mark one of your notifications read (stamp ``read_at``); idempotent —
+        re-marking leaves the timestamp untouched. 404 if it doesn't exist or isn't
+        yours. Returns the updated notification."""
+        return self._request(
+            "PATCH", f"/notifications/{notification_id}"
+        ).json()
+
     # --- saved views (M5 V14 API / KAN-247 adapter) -------------------------
 
     def list_views(self, board_id: int) -> dict[str, Any]:

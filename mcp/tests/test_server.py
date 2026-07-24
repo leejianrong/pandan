@@ -46,6 +46,8 @@ EXPECTED_TOOLS = {
     "resolve",
     "metrics",
     "activity",
+    "list_notifications",
+    "mark_read",
     "list_views",
     "create_view",
     "delete_view",
@@ -323,6 +325,33 @@ def _capture_get(monkeypatch, response):
     monkeypatch.setattr(server, "_client", client)
     monkeypatch.setattr(server, "_default_board_id", None)
     return seen
+
+
+def test_list_notifications_reads_inbox(monkeypatch):
+    seen = _capture_get(
+        monkeypatch, httpx.Response(200, json=[{"id": 1, "kind": "needs_human"}])
+    )
+    out = server.list_notifications()
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/notifications"
+    assert seen["params"] == {}  # not board-scoped; unread defaults off → no param
+    assert out == {"notifications": [{"id": 1, "kind": "needs_human"}]}
+
+
+def test_list_notifications_passes_unread_filter(monkeypatch):
+    seen = _capture_get(monkeypatch, httpx.Response(200, json=[]))
+    server.list_notifications(unread=True)
+    assert seen["params"] == {"unread": "true"}
+
+
+def test_mark_read_patches_notification_by_id(monkeypatch):
+    seen = _capture_get(
+        monkeypatch, httpx.Response(200, json={"id": 5, "read_at": "2026-01-01T00:00:00Z"})
+    )
+    out = server.mark_read(5)
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/notifications/5"
+    assert out["read_at"] == "2026-01-01T00:00:00Z"
 
 
 def test_activity_reads_board_feed(monkeypatch):

@@ -116,6 +116,13 @@ def _humanize(result: Any, *, noun: str = "card") -> str:
     if isinstance(result, dict) and "cycles" in result:  # list_cycles
         cycles = result["cycles"]
         return "\n".join(_cycle_line(c) for c in cycles) if cycles else "(no cycles)"
+    if isinstance(result, dict) and "notifications" in result:  # list_notifications
+        rows = result["notifications"]
+        return (
+            "\n".join(_notification_line(n) for n in rows)
+            if rows
+            else "(no notifications)"
+        )
     if isinstance(result, dict) and "activity" in result:  # list_activity
         rows = result["activity"]
         if not rows:
@@ -139,6 +146,10 @@ def _humanize(result: Any, *, noun: str = "card") -> str:
     # matched before the generic card/epic/board branches below.
     if isinstance(result, dict) and "body" in result and "author_id" in result:
         return _comment_line(result)
+    # A single notification (mark_read) carries ``kind`` (distinctive — nothing else
+    # does) + ``body``; matched before the generic branches below.
+    if isinstance(result, dict) and "kind" in result and "body" in result:
+        return _notification_line(result)
     if isinstance(result, dict) and "card" in result:  # dispatch / next (peek/claim)
         card = result["card"]
         return _card_line(card) if card else "(no card ready)"
@@ -292,6 +303,19 @@ def _activity_line(row: dict[str, Any]) -> str:
             str(row.get("actor_label") or "-"),
             str(row.get("action", "")),
             str(row.get("summary", "")),
+        )
+    )
+
+
+def _notification_line(n: dict[str, Any]) -> str:
+    """One concise line for a notification (V37, KAN-301): id, kind, read/unread
+    state, body (tab-separated)."""
+    return "\t".join(
+        (
+            str(n.get("id", "?")),
+            str(n.get("kind", "")),
+            "read" if n.get("read_at") else "unread",
+            str(n.get("body", "")),
         )
     )
 
@@ -647,6 +671,19 @@ def _cmd_activity(client: KanbanClient, config: Config, args: argparse.Namespace
         actor=args.actor,
         action=args.action,
     )
+
+
+# --- notification handlers --------------------------------------------------
+# Notifications are per-USER, not board-scoped (no --board): you only see your own,
+# addressed to you as a board owner. Poll/pull only (ADR 0007).
+
+
+def _cmd_notify_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.list_notifications(unread=args.unread or None)
+
+
+def _cmd_notify_read(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.mark_notification_read(args.notification_id)
 
 
 # --- ops handlers -----------------------------------------------------------
@@ -1271,6 +1308,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--cursor", help="pagination cursor from a previous page's next-cursor line"
     )
     p_activity.set_defaults(func=_cmd_activity)
+
+    # --- notify subcommands (nested group; parity with /api/v1/notifications) -
+    # Per-user, not board-scoped: no --board targeting here.
+    p_notify = sub.add_parser(
+        "notify", help="your notification inbox (list / read)"
+    )
+    notify_sub = p_notify.add_subparsers(
+        dest="notify_command", metavar="<subcommand>", required=True
+    )
+
+    p_notify_list = notify_sub.add_parser(
+        "list", parents=[common], help="list your notifications, newest-first"
+    )
+    p_notify_list.add_argument(
+        "--unread", action="store_true", help="only unread notifications"
+    )
+    p_notify_list.set_defaults(func=_cmd_notify_list, noun="notification")
+
+    p_notify_read = notify_sub.add_parser(
+        "read", parents=[common], help="mark a notification read by id"
+    )
+    p_notify_read.add_argument(
+        "notification_id", type=int, metavar="ID", help="a notification id"
+    )
+    p_notify_read.set_defaults(func=_cmd_notify_read, noun="notification")
 
     # --- board subcommands (nested group; parity with /api/v1/boards) --------
     p_board = sub.add_parser("board", help="manage boards (list / create)")

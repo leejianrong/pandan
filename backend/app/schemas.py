@@ -529,6 +529,25 @@ class ActivityRead(BaseModel):
     ts: datetime
 
 
+class NotificationRead(BaseModel):
+    """One inbox notification for a board owner (V37, KAN-301). Mirrors the
+    ``Notification`` model's real columns. ``kind`` ∈ {needs_human, blocked,
+    ci_failed, assigned}; ``read_at`` is null while unread. Poll/pull only (ADR
+    0007) — there is no push channel; a client polls ``GET /notifications``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    # The recipient (UUID) — always the current caller on the owner-scoped list.
+    user_id: uuid.UUID
+    board_id: int
+    card_id: int | None
+    kind: str
+    body: str
+    read_at: datetime | None
+    created_at: datetime
+
+
 class TokenScope(str, Enum):
     """A PAT's capability (M5 V18, KAN-251). ``read`` = observer (GET only);
     ``write`` = operator (the owning user's full board access, the default)."""
