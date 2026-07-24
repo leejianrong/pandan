@@ -36,9 +36,16 @@ from sqlalchemy.orm import Session
 
 from .db import SessionLocal
 from .models import Board, Card, CardComment, CardLink
+from .notifications import record_notification
 from .ordering import next_position, renumber_column
 
 logger = logging.getLogger("app.autosync")
+
+# check_suite ``conclusion`` / status ``state`` values that mean CI **failed** — the
+# ones that warrant a notification (V37, KAN-301). A passing / neutral / in-progress
+# result posts the usual CI comment but raises no notification.
+_CI_FAILURE_CONCLUSIONS = frozenset({"failure", "timed_out", "startup_failure"})
+_CI_FAILURE_STATES = frozenset({"failure", "error"})
 
 # A card ticket looks like ``KAN-123``. Matched case-insensitively (branch names
 # are often lowercased) and normalised back to the canonical upper-case form used
@@ -172,8 +179,19 @@ def on_check_suite(payload: dict) -> None:
         resolved = _resolve_synced_board(db, ticket)
         if resolved is None:
             return
-        card, _ = resolved
+        card, board = resolved
         _post_comment(db, card, body)
+        # Notify the board owner when the suite's CI failed (V37, KAN-301) — a linked
+        # PR's checks going red is something a human shouldn't miss.
+        conclusion = (suite.get("conclusion") or "").lower()
+        if conclusion in _CI_FAILURE_CONCLUSIONS:
+            record_notification(
+                db,
+                board_id=board.id,
+                card_id=card.id,
+                kind="ci_failed",
+                body=f"CI failed on {card.ticket_number} (check_suite: {conclusion})",
+            )
         db.commit()
 
 
@@ -190,6 +208,19 @@ def on_status(payload: dict) -> None:
         resolved = _resolve_synced_board(db, ticket)
         if resolved is None:
             return
-        card, _ = resolved
+        card, board = resolved
         _post_comment(db, card, body)
+        # Notify the board owner when the status is a CI failure (V37, KAN-301).
+        state = (payload.get("state") or "").lower()
+        if state in _CI_FAILURE_STATES:
+            record_notification(
+                db,
+                board_id=board.id,
+                card_id=card.id,
+                kind="ci_failed",
+                body=(
+                    f"CI failed on {card.ticket_number} "
+                    f"({payload.get('context')} → {state})"
+                ),
+            )
         db.commit()

@@ -840,3 +840,33 @@ def test_list_activity_passes_actor_action_and_reads_cursor_header():
     )
     assert seen["params"] == {"actor": "agent-7", "action": "moved", "limit": "2"}
     assert out == {"activity": [{"id": 1}], "next_cursor": "abc"}
+
+
+# --- notification inbox (V37 API / KAN-301) ---------------------------------
+
+
+def test_list_notifications_gets_inbox_and_wraps_result():
+    handler, seen = capture(
+        httpx.Response(200, json=[{"id": 1, "kind": "needs_human", "read_at": None}])
+    )
+    out = make_client(handler).list_notifications()
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/notifications"
+    assert seen["params"] == {}  # unread omitted → no query param
+    assert out == {"notifications": [{"id": 1, "kind": "needs_human", "read_at": None}]}
+
+
+def test_list_notifications_passes_unread_filter():
+    handler, seen = capture(httpx.Response(200, json=[]))
+    make_client(handler).list_notifications(unread=True)
+    assert seen["params"] == {"unread": "true"}
+
+
+def test_mark_notification_read_patches_by_id():
+    handler, seen = capture(
+        httpx.Response(200, json={"id": 5, "kind": "assigned", "read_at": "2026-01-01T00:00:00Z"})
+    )
+    out = make_client(handler).mark_notification_read(5)
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/notifications/5"
+    assert out["read_at"] == "2026-01-01T00:00:00Z"

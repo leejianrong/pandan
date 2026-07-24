@@ -592,6 +592,29 @@ def activity(
     )
 
 
+# --- notification inbox (V37 API / KAN-301 tools) --------------------------
+
+
+@mcp.tool()
+def list_notifications(unread: bool = False) -> dict[str, Any]:
+    """List YOUR notification inbox (V37) — items for events a human shouldn't miss:
+    a card flagged needs_human, a card newly blocked by a dependency, a linked PR's
+    CI failing, or a card being assigned. Notifications are **per-user, not
+    board-scoped** (no board_id): you only ever see your own, addressed to you as a
+    board owner. ``unread=true`` returns only unread ones; default returns all,
+    newest-first. Poll/pull only (ADR 0007 — there is no push channel; poll this).
+    Returns ``{"notifications": [...]}``."""
+    return _client_instance().list_notifications(unread=unread or None)
+
+
+@mcp.tool()
+def mark_read(notification_id: int) -> dict[str, Any]:
+    """Mark one of YOUR notifications read (stamp its read_at); idempotent —
+    re-marking leaves the timestamp untouched. 404 if it doesn't exist or isn't
+    yours. Returns the updated notification."""
+    return _client_instance().mark_notification_read(notification_id)
+
+
 # --- saved views (M5 V14 API / KAN-247 tools) ------------------------------
 
 

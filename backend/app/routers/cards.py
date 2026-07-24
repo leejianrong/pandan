@@ -41,6 +41,7 @@ from ..models import (
     Epic,
     Label,
 )
+from ..notifications import record_notification
 from ..ordering import next_position, renumber_column
 from ..pagination import NEXT_CURSOR_HEADER, decode_cursor, encode_cursor
 from ..schemas import (
@@ -614,6 +615,9 @@ def _apply_card_update(db: Session, principal: User, card: Card, data: dict) -> 
     # ``priority`` is an enum on the schema but a varchar column — store its value.
     if data.get("priority") is not None:
         data["priority"] = PriorityEnum(data["priority"]).value
+    # Capture the assignee before the edit so we notify only on the *transition* into
+    # a new assignee (V37, KAN-301) — one row per assignment, not per unrelated edit.
+    assignee_before = card.assignee
     for field, value in data.items():
         setattr(card, field, value)
     if label_ids_sent:
@@ -627,6 +631,18 @@ def _apply_card_update(db: Session, principal: User, card: Card, data: dict) -> 
         action="updated",
         summary=f"updated {card.ticket_number}",
     )
+    # Notify the board owner when a card is (re)assigned to someone (V37, KAN-301):
+    # ``assignee`` was sent, is truthy (empty string = un-assign → no notification),
+    # and actually changed. Same transaction as the edit (record_notification adds,
+    # never commits) — so a single PATCH and a batch item both emit exactly once.
+    if data.get("assignee") and data["assignee"] != assignee_before:
+        record_notification(
+            db,
+            board_id=card.board_id,
+            card_id=card.id,
+            kind="assigned",
+            body=f"{card.ticket_number} assigned to {data['assignee']}",
+        )
 
 
 @router.patch("/batch", response_model=list[CardRead])
@@ -820,6 +836,9 @@ def flag_needs_human(
     activity event. **404** unless the card is live; owner/member-gated (WRITE)."""
     card = _get_or_404(db, card_id)
     authorize_board(db, principal, card.board_id, Access.WRITE)
+    # Notify only on the transition into needs-human (V37, KAN-301): re-flagging an
+    # already-flagged card emits nothing (exactly one row per event).
+    was_flagged = card.needs_human
     card.needs_human = True
     card.attention_note = payload.attention_note
     record_activity(
@@ -835,6 +854,18 @@ def flag_needs_human(
             else f"flagged {card.ticket_number} for a human"
         ),
     )
+    if not was_flagged:
+        record_notification(
+            db,
+            board_id=card.board_id,
+            card_id=card.id,
+            kind="needs_human",
+            body=(
+                f"{card.ticket_number} needs a human: {payload.attention_note}"
+                if payload.attention_note
+                else f"{card.ticket_number} needs a human"
+            ),
+        )
     db.commit()
     db.refresh(card)
     return _attach_one(db, card)
@@ -1031,7 +1062,34 @@ def add_dependency(
             detail="dependency would create a cycle",
         )
 
+    # Notify the board owner when THIS edge transitions the card into "blocked"
+    # (V37, KAN-301): it had no active (non-``done``, live) blocker before and the
+    # new blocker isn't ``done`` yet — so it flips from ready → blocked. Emit only on
+    # that transition (a card that was already blocked stays blocked → no new row).
+    blocker_alias = aliased(Card)
+    active_blockers_before = db.scalar(
+        select(func.count())
+        .select_from(CardDependency)
+        .join(blocker_alias, blocker_alias.id == CardDependency.blocker_id)
+        .where(
+            CardDependency.blocked_id == card.id,
+            blocker_alias.column != ColumnEnum.done.value,
+            blocker_alias.deleted_at.is_(None),
+        )
+    )
+    newly_blocked = (
+        active_blockers_before == 0 and blocker.column != ColumnEnum.done.value
+    )
+
     db.add(CardDependency(blocker_id=blocker_id, blocked_id=card.id))
+    if newly_blocked:
+        record_notification(
+            db,
+            board_id=card.board_id,
+            card_id=card.id,
+            kind="blocked",
+            body=f"{card.ticket_number} is now blocked by {blocker.ticket_number}",
+        )
     db.commit()
     return _attach_one(db, card)
 
