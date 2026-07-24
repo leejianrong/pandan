@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from . import outbound
 from .models import Board, Notification
 
 
@@ -56,4 +57,8 @@ def record_notification(
         body=body,
     )
     db.add(notification)
+    # Queue a best-effort signed outbound POST for this notification, dispatched only
+    # AFTER the caller's transaction commits (V38, KAN-302). Never sent here — the row
+    # is uncommitted and the transaction may still roll back. See :mod:`app.outbound`.
+    outbound.queue_delivery(db, notification, board)
     return notification

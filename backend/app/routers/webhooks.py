@@ -22,8 +22,6 @@ Verification policy:
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import logging
 import os
@@ -31,6 +29,7 @@ import os
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from .. import autosync
+from ..webhook_signing import verify as verify_signature  # noqa: F401 (re-exported)
 
 logger = logging.getLogger("app.webhooks.github")
 
@@ -39,17 +38,10 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 # Event types this receiver routes on. Anything else is acked (200) and ignored.
 HANDLED_EVENTS = {"pull_request", "check_suite", "status"}
 
-
-def verify_signature(secret: str, body: bytes, header: str | None) -> bool:
-    """Constant-time-compare the ``sha256=<hex>`` signature GitHub sends.
-
-    GitHub signs the **raw** request body with HMAC-SHA256 keyed on the shared
-    secret and sends it as ``X-Hub-Signature-256: sha256=<hexdigest>``.
-    """
-    if not header or not header.startswith("sha256="):
-        return False
-    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, header)
+# ``verify_signature`` is the shared HMAC verifier (:mod:`app.webhook_signing`) — the
+# SAME ``sha256=<hex>`` scheme the outbound signer (:mod:`app.outbound`) mirrors, so
+# inbound-verify and outbound-sign stay in lockstep. Re-exported here under its
+# historical name so the endpoint below (and its tests) read unchanged.
 
 
 # --- per-event handlers ------------------------------------------------------

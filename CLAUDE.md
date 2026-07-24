@@ -234,6 +234,21 @@ only the inbound webhook; it's separate from `AUTH_SECRET`. Per-board opt-in (`a
 `autosync_advance_to_done`, both default OFF) is set via `PATCH /api/v1/boards/{id}`. Full setup/ops:
 [docs/guides/autosync-github-setup.md](docs/guides/autosync-github-setup.md) (ADR 0016).
 
+**Outbound signed webhook (V38, KAN-302)** — the *outbound* mirror of the inbound `WEBHOOK_SECRET`
+verification. Per-board opt-in (mirrors autosync): `outbound_webhook_url` + `outbound_webhook_secret`
++ `outbound_webhook_enabled` (default OFF/NULL) set via `PATCH /api/v1/boards/{id}` (the **secret is
+write-only** — accepted on PATCH, never returned in a board read). When enabled with a URL set,
+creating a notification fires one HMAC-SHA256-signed `POST` to the URL using the **same**
+`X-Hub-Signature-256: sha256=<hex>` scheme (the shared signer lives in
+[backend/app/webhook_signing.py](backend/app/webhook_signing.py); dispatch in
+[backend/app/outbound.py](backend/app/outbound.py)). Delivery is best-effort, fired **after** the
+mutation's transaction commits (a SQLAlchemy `after_commit` session event — `record_notification`
+only queues it), so a slow/failed POST is swallowed + logged and **never** rolls back or blocks the
+mutation. No worker infra (MVP). Env (all optional): `OUTBOUND_WEBHOOK_TIMEOUT` (default `3.0`s
+per attempt), `OUTBOUND_WEBHOOK_RETRIES` (default `0` extra attempts), `OUTBOUND_WEBHOOK_MIN_INTERVAL`
+(default `1.0`s per-board throttle so a burst can't hammer the target; in-process, resets on restart —
+same tradeoff as the V27 limiter).
+
 **Observability env vars (KAN-172, ADR 0017)** — wired in [backend/app/observability.py](backend/app/observability.py):
 - `LOG_LEVEL` — level for the `kanban.access` structured JSON request logger (one line per request:
   method/path/status/latency/principal id). Default `INFO`. The formatter allow-lists its fields and

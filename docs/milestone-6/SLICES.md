@@ -181,6 +181,19 @@ this epic** since the palette builds on U2's Bits UI Command primitive.
 - **Tests:** integration — signature correctness; opt-in gating (off → no POST); failure logged, not
   fatal. Unit — the signer.
 - **Acceptance:** request-bin demo; suite green. Additive migration (board settings) — deploys.
+- **Shipped (KAN-302):** `board.outbound_webhook_{url,secret,enabled}` (additive migration
+  `a4f5050820ce`, all default OFF/NULL). The signer is factored into `app/webhook_signing.py`
+  (`sign`/`verify`), shared by the inbound receiver and the new outbound path so the
+  `X-Hub-Signature-256: sha256=<hex>` scheme is symmetric. Dispatch is a SQLAlchemy `after_commit`
+  session event (`app/outbound.py`): `record_notification` only *queues* the delivery intent, so the
+  signed POST fires **after** the mutation's transaction commits — best-effort + non-fatal (any
+  network/timeout/5xx is swallowed + logged; the committed mutation is never rolled back). The
+  **secret is write-only** — accepted on `PATCH /boards/{id}`, omitted from every board read. Bounds:
+  short per-request `OUTBOUND_WEBHOOK_TIMEOUT` (3s), optional `OUTBOUND_WEBHOOK_RETRIES` (default 0),
+  and a per-board `OUTBOUND_WEBHOOK_MIN_INTERVAL` (1s) throttle so a burst can't hammer the target
+  (in-process, resets on restart — same tradeoff as V27). Parity: MCP `update_board` + kanban-client
+  `update_board` gained the three fields (the CLI has no `board update` command — a pre-existing gap,
+  autosync flags aren't CLI-settable either; noted as a possible follow-up).
 
 ### V39 · Inbox UI + unread badge (N3)
 - **Build:** a read-first **Inbox** nav panel listing notifications newest-first with mark-read, + an
