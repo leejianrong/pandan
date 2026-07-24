@@ -107,6 +107,22 @@ class Board(Base):
     autosync_advance_to_done: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # Outbound signed webhook opt-in (V38, KAN-302) — mirrors the autosync per-board
+    # opt-in above. When ``outbound_webhook_enabled`` is true AND
+    # ``outbound_webhook_url`` is set, creating a notification fires one HMAC-SHA256
+    # signed ``POST`` to the URL — the *same* ``X-Hub-Signature-256: sha256=<hex>``
+    # scheme this app *verifies* on the inbound GitHub webhook (symmetric; see
+    # :mod:`app.webhook_signing`). The delivery is best-effort and fired **after** the
+    # mutation's transaction commits (:mod:`app.outbound`), so a slow/failed POST never
+    # rolls back or blocks the mutation. Default OFF, so it is a no-op until a board
+    # owner turns it on. ``outbound_webhook_secret`` keys the signature and is
+    # **write-only** — accepted on ``PATCH`` but never returned in a board read (like a
+    # password); see ``BoardRead`` (which omits it) vs. ``BoardUpdate`` (which accepts it).
+    outbound_webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outbound_webhook_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outbound_webhook_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

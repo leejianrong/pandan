@@ -29,7 +29,8 @@ MAX_LABEL_COLOR_LEN = 32  # label.color varchar(32)
 MAX_EMAIL_LEN = 320  # RFC 5321 upper bound (member lookup)
 MAX_DESCRIPTION_LEN = 20_000  # Text column — long markdown
 MAX_TEXT_LEN = 10_000  # Text columns — comment body, attention note
-MAX_URL_LEN = 2_000  # card_link.url (Text column)
+MAX_URL_LEN = 2_000  # card_link.url + board.outbound_webhook_url (Text columns)
+MAX_WEBHOOK_SECRET_LEN = 255  # board.outbound_webhook_secret (Text column — app cap)
 MAX_SEARCH_LEN = 500  # free-text search term (feeds the expensive full-text path)
 MAX_LABEL_IDS = 100  # labels attachable to one card in one request
 
@@ -424,17 +425,36 @@ class BoardUpdate(BaseModel):
     only renamable field; ownership isn't reassignable here. ``autosync_enabled``
     turns the GitHub-webhook card auto-sync on for this board (default OFF);
     ``autosync_advance_to_done`` separately allows PR-merge to move a card to
-    ``done``. All optional — only the fields sent are applied."""
+    ``done``. All optional — only the fields sent are applied.
+
+    Outbound signed webhook (V38, KAN-302) — mirrors the autosync opt-in:
+    ``outbound_webhook_enabled`` turns on a signed ``POST`` on every notification-create;
+    ``outbound_webhook_url`` is the target; ``outbound_webhook_secret`` keys the
+    HMAC-SHA256 signature and is **write-only** (accepted here, never echoed back in
+    ``BoardRead``). Send ``null`` for the url/secret to clear it."""
 
     name: Annotated[str | None, Field(max_length=MAX_NAME_LEN)] = None
     autosync_enabled: bool | None = None
     autosync_advance_to_done: bool | None = None
+    outbound_webhook_url: Annotated[str | None, Field(max_length=MAX_URL_LEN)] = None
+    outbound_webhook_secret: Annotated[
+        str | None, Field(max_length=MAX_WEBHOOK_SECRET_LEN)
+    ] = None
+    outbound_webhook_enabled: bool | None = None
 
     @field_validator("name")
     @classmethod
     def name_non_empty(cls, v: str | None) -> str | None:
         if v is not None and not v.strip():
             raise ValueError("name must not be empty")
+        return v
+
+    @field_validator("outbound_webhook_url", "outbound_webhook_secret")
+    @classmethod
+    def webhook_field_non_blank(cls, v: str | None) -> str | None:
+        # Allow ``null`` (clear), but a provided value must not be blank whitespace.
+        if v is not None and not v.strip():
+            raise ValueError("must not be empty (send null to clear)")
         return v
 
 
@@ -455,6 +475,12 @@ class BoardRead(BaseModel):
     # Auto-sync opt-ins (KAN-43); both default false.
     autosync_enabled: bool
     autosync_advance_to_done: bool
+    # Outbound signed webhook (V38, KAN-302): the opt-in flag + the target URL are
+    # readable (a settings UI needs them), but ``outbound_webhook_secret`` is
+    # **deliberately absent** — it is write-only (set via BoardUpdate, never returned),
+    # exactly like a password.
+    outbound_webhook_url: str | None
+    outbound_webhook_enabled: bool
     # The *caller's* effective role on this board (KAN-15): "owner" if they own it,
     # else their board_member role (viewer/editor). Attached transiently by the
     # list router (not an ORM column), mirroring MemberRead.email; the switcher

@@ -159,8 +159,29 @@ class KanbanClient:
         """Create a board owned by the caller's user."""
         return self._request("POST", "/boards", json={"name": name}).json()
 
-    def update_board(self, board_id: int, *, name: str | None = None) -> dict[str, Any]:
-        payload = _clean({"name": name})
+    def update_board(
+        self,
+        board_id: int,
+        *,
+        name: str | None = None,
+        outbound_webhook_url: str | None = None,
+        outbound_webhook_secret: str | None = None,
+        outbound_webhook_enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        """PATCH a board's settings — only the arguments you pass are sent.
+
+        ``name`` renames it; the ``outbound_webhook_*`` trio configures the V38 signed
+        outbound webhook (``_url`` target, ``_secret`` write-only HMAC key, ``_enabled``
+        on/off). ``_clean`` drops unset (None) args, so an omitted field is left
+        untouched (clearing a value needs the raw API, which accepts explicit null)."""
+        payload = _clean(
+            {
+                "name": name,
+                "outbound_webhook_url": outbound_webhook_url,
+                "outbound_webhook_secret": outbound_webhook_secret,
+                "outbound_webhook_enabled": outbound_webhook_enabled,
+            }
+        )
         return self._request("PATCH", f"/boards/{board_id}", json=payload).json()
 
     def get_board(self, board_id: int) -> dict[str, Any]:
