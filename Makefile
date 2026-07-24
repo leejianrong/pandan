@@ -28,11 +28,19 @@ WT_SLUG := $(shell basename "$(CURDIR)")
 WT_PORT := $(shell echo "$(CURDIR)" | cksum | awk '{print 15432 + ($$1 % 2000)}')
 WT_DB_URL := postgresql+psycopg://kanban:kanban@localhost:$(WT_PORT)/kanban
 
+# Per-worktree e2e ports (KAN-391). The e2e ports are ENV-overridable
+# (FRONTEND_PORT / BACKEND_PORT, defaulting to 5173 / 8000) so a worktree run can
+# dodge a foreign app squatting on the defaults. These derive stable, per-path
+# offsets the same way WT_PORT does, so `make worktree-e2e` here always reuses the
+# same ports and won't clash with the primary checkout's 5173/8000.
+WT_FRONTEND_PORT := $(shell echo "$(CURDIR)fe" | cksum | awk '{print 5200 + ($$1 % 300)}')
+WT_BACKEND_PORT  := $(shell echo "$(CURDIR)be" | cksum | awk '{print 8100 + ($$1 % 300)}')
+
 .DEFAULT_GOAL := help
 
 .PHONY: help up demo down down-v clean db install migrate dev \
         test test-integration e2e lint check \
-        worktree-db worktree-db-url worktree-db-down
+        worktree-db worktree-db-url worktree-db-down worktree-e2e
 
 help: ## Show this help (the default target)
 	@awk 'BEGIN {FS = ":.*##"; printf "\nSimple Kanban — make targets\n\nUsage: make <target>\n\n"} \
@@ -76,6 +84,10 @@ worktree-db-url: ## Print just this worktree's DATABASE_URL
 
 worktree-db-down: ## Stop & remove THIS worktree's ephemeral Postgres
 	@docker rm -f kanban-db-$(WT_SLUG) >/dev/null 2>&1 && echo 'Removed kanban-db-$(WT_SLUG).' || echo 'No kanban-db-$(WT_SLUG) container to remove.'
+
+worktree-e2e: ## Run Playwright e2e on THIS worktree's own ports + ephemeral DB (needs `make worktree-db` first)
+	@echo 'e2e on frontend :$(WT_FRONTEND_PORT), backend :$(WT_BACKEND_PORT), db $(WT_DB_URL)'
+	cd $(FRONTEND) && DATABASE_URL=$(WT_DB_URL) FRONTEND_PORT=$(WT_FRONTEND_PORT) BACKEND_PORT=$(WT_BACKEND_PORT) npm run e2e
 
 install: ## Install deps: backend `uv sync` + frontend `npm ci`
 	cd $(BACKEND) && uv sync
