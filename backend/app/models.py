@@ -28,6 +28,7 @@ from sqlalchemy import (
     Computed,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -260,10 +261,10 @@ class CardDependency(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     blocker_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False, index=True
     )
     blocked_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -284,7 +285,7 @@ class CardLink(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     card_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False, index=True
     )
     label: Mapped[str] = mapped_column(String(255), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -310,7 +311,7 @@ class CardComment(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     card_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # The authoring user (a UUID). Nullable + SET NULL so a deleted author leaves
     # the note in place, unattributed (mirrors Board.owner_id).
@@ -380,6 +381,10 @@ class Card(Base):
             "priority IN ('none', 'low', 'medium', 'high', 'urgent')",
             name="ck_card_priority",
         ),
+        # GIN index over the full-text ``search_vector`` (M5 V15, KAN-248). The DDL
+        # lives in ``0017_card_search_vector``; this declaration must mirror it
+        # (name + ``postgresql_using='gin'``) so autogenerate sees no drift (KAN-307).
+        Index("ix_card_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
