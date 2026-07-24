@@ -9,7 +9,13 @@ import {
 // Every card these tests create is prefixed so they can be cleaned up and so the
 // suite tolerates pre-existing dev data (tests run against the docker-compose DB).
 export const E2E_PREFIX = "e2e-";
-const API_ORIGIN = "http://localhost:8000";
+// The backend origin the cleanup helpers hit directly (not through the Vite proxy).
+// ENV-overridable (KAN-391) so a worktree run on non-default ports resolves the
+// right backend: an explicit API_ORIGIN wins, else it's derived from BACKEND_PORT,
+// both defaulting to today's http://localhost:8000 so CI + normal dev are unchanged.
+const API_ORIGIN =
+  process.env.API_ORIGIN ??
+  `http://localhost:${Number(process.env.BACKEND_PORT) || 8000}`;
 
 export function uniqueTitle(label = "card"): string {
   return `${E2E_PREFIX}${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;

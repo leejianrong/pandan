@@ -164,6 +164,21 @@ make worktree-db-down                         # tear it down when the worktree i
 `make db`/`make up`/`make dev` (shared :5432 compose Postgres) remain the loop for the primary
 checkout. Integration tests are unaffected — they spin up throwaway testcontainers of their own.
 
+**Running e2e from a worktree — the ports are env-overridable too (KAN-391).** Playwright uses
+`reuseExistingServer` in dev, and the backend/Vite origins default to `:8000`/`:5173`; on a
+multi-project machine those ports are often held by an unrelated local app, so a worktree e2e run
+silently reuses the foreign server and every spec fails at auth (`test-login` 404s) — a false red.
+`FRONTEND_PORT` / `BACKEND_PORT` (read by `frontend/vite.config.ts`, `frontend/playwright.config.ts`,
+and `frontend/e2e/helpers.ts`) let a worktree run on free ports **with no source edits**, defaulting
+to `5173`/`8000` so CI and normal dev are unchanged (`API_ORIGIN` can also be set explicitly to
+override the helpers' backend origin outright). The Vite `/api` proxy target follows `BACKEND_PORT`:
+```bash
+BACKEND_PORT=8010 FRONTEND_PORT=5183 npm run e2e   # from frontend/, needs DATABASE_URL set
+make worktree-e2e                                  # picks stable per-worktree ports + this worktree's DB
+```
+`make worktree-e2e` derives deterministic per-path ports (like `worktree-db`) and points the run at
+this worktree's ephemeral DB — bring the DB up first with `make worktree-db`.
+
 For parallel file-mutating work, **prefer [treehouse](https://github.com/kunchenguid/treehouse)** — it
 manages a bounded, recycled pool of worktrees (config in [`treehouse.toml`](treehouse.toml),
 `max_trees = 4`) so they don't pile up as one-off checkouts and clog disk (the mess KAN-240's cleanup
