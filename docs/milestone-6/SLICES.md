@@ -34,7 +34,9 @@ CLI parity** (R6.4) — endpoint first, then the MCP tool + `kan` verb, then any
 | **V38 · Signed outbound webhook** *(tail)* | per-board HMAC webhook | N2 | 3 | Point at a request-bin, raise a notification, see the signed `POST` |
 | **V39 · Inbox UI + badge** *(tail)* | read-first inbox panel | N3 | 3 | An unread badge appears; opening the Inbox clears it |
 
-> **Status:** planned (0/14). Board cards: **KAN-290…KAN-303** (this file's V26–V39), under the five
+> **Status:** ✅ **all 14 shipped (14/14)** — Wave 1 Harden (V26–V30) + Wave 2 Sharpen (V31–V34) +
+> the Wave 3 notifications tail (V37–V39, EPIC-50) all done, deployed, and prod-verified; V35–V36
+> shipped under EPIC-49 (below). Board cards: **KAN-290…KAN-303** (this file's V26–V39), under the five
 > `M6:` epics **EPIC-46…EPIC-50**. The sister-app kickoff is **KAN-304** (human-owned).
 
 ### Wave 4 — UI Enhancement & Design System (EPIC-49)
@@ -58,7 +60,10 @@ this epic** since the palette builds on U2's Bits UI Command primitive.
 > **Status:** ✅ **EPIC-49 COMPLETE** — all 7 planned cards + a discoverability follow-up (KAN-392)
 > done + deployed + prod-verified (PRs #168, #170, #174, #175, #173, #177, #178, #180). **Build order:**
 > U1 solo → U2 (design-first) → U3 ‖ U4 (design-first) ‖ U5 → V35 (on U2's Command) → V36 → KAN-392.
-> **EPIC-50 (notifications, V37–V39) stays deferred.**
+> **EPIC-50 (notifications, V37–V39) is now ✅ COMPLETE** — shipped, deployed + prod-verified (PRs
+> #184, #185, #186): V37 notification store + inbox API (emit-on-event, owner-scoped, +MCP/CLI parity),
+> V38 signed per-board outbound webhook (post-commit, HMAC `X-Hub-Signature-256`, write-only secret),
+> V39 Inbox popover + teal unread badge (bell + drawer entry, All/Unread, 60s poll).
 
 ---
 
