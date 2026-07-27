@@ -19,7 +19,7 @@ dependencies = [
     # a no-op otherwise — so dev + tests never report. Installed so prod can opt in
     # via a Fly secret with no code change; its FastAPI/Starlette integration is
     # auto-enabled by sentry_sdk.init().
-    "sentry-sdk[fastapi]>=2.66.0",
+    "sentry-sdk[fastapi]>=2.66.1",
     # Application rate limiting (V27, KAN-291). In-memory storage (single machine,
     # resets on cold-start — acceptable MVP). Driven from a single classifying
     # middleware (app/ratelimit.py) over slowapi's bundled `limits` engine, since
