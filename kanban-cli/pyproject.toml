@@ -21,7 +21,7 @@ build = [
 ]
 dev = [
     "pytest>=8.3",
-    "ruff>=0.15.22",
+    "ruff>=0.16.0",
 ]
 
 [project.scripts]
