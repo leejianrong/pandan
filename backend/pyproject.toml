@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Simple Kanban MVP backend — FastAPI + sync SQLAlchemy 2.0 + psycopg v3"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.139.2",
+    "fastapi>=0.140.6",
     "uvicorn[standard]>=0.51.0",
     "sqlalchemy[asyncio]>=2.0.51",
     "psycopg[binary]>=3.3.4",
@@ -14,7 +14,7 @@ dependencies = [
     # is async-only, so this pulls in the SQLAlchemy async stack (greenlet) used by
     # a second, async engine alongside the sync one (ADR 0008 preserved).
     "fastapi-users[sqlalchemy,oauth]>=15.0.5",
-    "greenlet>=3.1",
+    "greenlet>=3.5.4",
     # Error tracking (KAN-172, ADR 0017). Only activated when SENTRY_DSN is set —
     # a no-op otherwise — so dev + tests never report. Installed so prod can opt in
     # via a Fly secret with no code change; its FastAPI/Starlette integration is
@@ -33,7 +33,7 @@ dev = [
     "pytest>=8.3",
     "httpx>=0.28",
     "testcontainers[postgres]>=4.14.2",
-    "ruff>=0.15.22",
+    "ruff>=0.16.0",
 ]
 
 [tool.uv]
