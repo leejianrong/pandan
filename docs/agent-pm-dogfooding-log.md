@@ -216,7 +216,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
 - **Docs pin exact tool counts in prose** ("10 tools") in CLAUDE.md + mcp README/docstrings, so every
   parity slice silently staleness them. As PM, either budget a doc-sweep card or stop pinning counts.
 - **What works well:** the MCP/backend is genuinely pleasant to extend — API-first means feature cards
-  like KAN-10/11 are pure thin-adapter slices (add a `KanbanClient` method + a `@mcp.tool()`, mirror
+  like KAN-10/11 are pure thin-adapter slices (add a `PandanClient` method + a `@mcp.tool()`, mirror
   the `_clean`/`{"deleted": id}` conventions, bump the exact-match `EXPECTED_TOOLS` test). Sub-agents
   finish these in one pass. Lean into small, self-contained parity/tooling cards early.
 - **Worktree sub-agents start from your CURRENT local `main`, not `origin/main`.** After you merge a
@@ -829,7 +829,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   (`0021`) with an apply endpoint that seeds a plan in one call.
   - **The card's premise about existing batch-create was wrong, and the agent's correction was the
     right one.** The card assumed a backend batch-create endpoint existed (from KAN-40) to build on.
-    It doesn't — KAN-40's "batch create" is a **client-side fail-fast loop** in `KanbanClient.create_cards`
+    It doesn't — KAN-40's "batch create" is a **client-side fail-fast loop** in `PandanClient.create_cards`
     (loops `POST /cards`), explicitly non-atomic. The agent did not add a redundant public batch-create
     endpoint; instead it got atomic multi-card creation for free by extracting `_create_card_row`
     (flush-not-commit) and reusing it inside template-apply's single transaction. Lesson: "build on the

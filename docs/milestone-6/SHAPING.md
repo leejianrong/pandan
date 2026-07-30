@@ -12,7 +12,7 @@ agent-native, no-real-time* board — without importing their complexity.
 
 So M6 is two movements: **harden** (defend the deploy) then **sharpen** (a curated set of
 tracker-parity features). A third strand — the **simple-markdown** sister app — is *recorded here as
-intent* but built as a separate project (see [simple-markdown-vision](../simple-markdown-vision.md)).
+intent* but built as a separate project (see [kaya-vision](../kaya-vision.md)).
 
 This records a single **shape-of-record** — the maintainer settled scope directly (hardening-first;
 four named parity features; sister-app recorded-not-built) — with the fit check confirming coverage.

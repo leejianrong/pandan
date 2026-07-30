@@ -1,7 +1,7 @@
 # Agent onboarding guide
 
 This guide gets a coding agent — Claude Code, or anything that speaks MCP — driving a
-Simple Kanban board end to end: minting a token, wiring the MCP server, verifying the
+Pandan board end to end: minting a token, wiring the MCP server, verifying the
 connection, and running real workflows. There's also a CLI path for CI and non-MCP agents.
 
 If you just want the short version: log in to the [hosted board](https://simple-kanban-jian.fly.dev),
@@ -11,9 +11,9 @@ agent to "list my boards".
 
 ## Why this board is agent-friendly
 
-Simple Kanban is API-first by design (ADR [0005](../adr/0005-api-first-mcp-ready.md)):
+Pandan is API-first by design (ADR [0005](../adr/0005-api-first-mcp-ready.md)):
 every action the web UI can take is a plain REST call under `/api/v1`, and the UI is just
-the first client rather than the only way in. The MCP server and the `kan` CLI are both
+the first client rather than the only way in. The MCP server and the `pandan` CLI are both
 thin adapters over that same surface — one tool (or subcommand) per endpoint — so an agent
 gets full CRUD parity with a human, including epics, card dependencies, work-links, and
 comments. There's no hidden capability locked behind the browser.
@@ -35,7 +35,7 @@ boards and only you can see or change them. This is the fastest way to try thing
 for more than one person, see [Single-owner boards](#single-owner-boards-and-what-that-means-today)
 below — run it yourself. See [Self-hosting](#self-hosting) at the end.
 
-Either way, the rest of this guide is the same; only `KANBAN_API_URL` changes.
+Either way, the rest of this guide is the same; only `PANDAN_API_URL` changes.
 
 ## 2. Mint a personal access token (PAT)
 
@@ -47,7 +47,7 @@ There is no shared service token — the old `API_TOKENS` mechanism was removed 
 1. Log in to the board (hosted or your own).
 2. Open the **Tokens** tab in the top bar.
 3. Click **New token**, give it a name, and create it.
-4. Copy the `kanban_pat_…` secret. It is shown **once** — the server only stores a hash, so
+4. Copy the `pandan_pat_…` secret. It is shown **once** — the server only stores a hash, so
    if you lose it you revoke it and mint a new one.
 
 A PAT authenticates **as you**. It is owner-gated exactly like your logged-in session: it
@@ -68,13 +68,13 @@ the server straight from `mcp/`, so there's nothing to download or build:
 ```json
 {
   "mcpServers": {
-    "kanban": {
+    "pandan": {
       "command": "uv",
       "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
-        "KANBAN_API_URL": "https://simple-kanban-jian.fly.dev",
-        "KANBAN_TOKEN": "kanban_pat_…",
-        "KANBAN_BOARD_ID": "1"
+        "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
+        "PANDAN_TOKEN": "pandan_pat_…",
+        "PANDAN_BOARD_ID": "1"
       }
     }
   }
@@ -83,38 +83,49 @@ the server straight from `mcp/`, so there's nothing to download or build:
 
 Three env vars carry the config:
 
-- `KANBAN_API_URL` — the API origin. Use `https://simple-kanban-jian.fly.dev` for the hosted
+- `PANDAN_API_URL` — the API origin. Use `https://simple-kanban-jian.fly.dev` for the hosted
   board, or `http://localhost:8000` for a local backend. The `/api/v1` prefix is added for you.
-- `KANBAN_TOKEN` — your `kanban_pat_…` from step 2. Required; empty or bad → `401`.
-- `KANBAN_BOARD_ID` — the default board (an integer id) for calls that omit `board_id`. **Set
+- `PANDAN_TOKEN` — your `pandan_pat_…` from step 2. Required; empty or bad → `401`.
+- `PANDAN_BOARD_ID` — the default board (an integer id) for calls that omit `board_id`. **Set
   this.** If you leave it empty, `list_*` tools span *all* your boards and `create_*` tools land
   on your *earliest* board, which is an easy way to write to the wrong place. The example presets
   it to `1` (the seeded default board) — run `list_boards` once and change it to your real id.
+
+> **Migrating from the old names?** The pre-rebrand `KANBAN_API_URL` / `KANBAN_TOKEN` /
+> `KANBAN_BOARD_ID` still work, per key, as a **deprecated fallback** — read after the `PANDAN_*`
+> spelling, with a one-line notice on stderr — so an existing `.mcp.json` or CI job keeps working while
+> you switch over. Same for a `kanban_pat_…` token, an old `kanban` server key in `.mcp.json`, and a
+> `~/.config/kan/config.toml` (migrated to `~/.config/pandan/` on first use). All of it is scheduled
+> for removal, so move to the `PANDAN_*` names when convenient.
+
+> The hosted origin is still `simple-kanban-jian.fly.dev`. That is deliberate — the Fly app rename is
+> deferred behind the k8s migration (ADR 0018, KAN-424), so the URL keeps the retired name while
+> everything else says *pandan*.
 
 `--directory ./mcp` is relative to where Claude Code launches the server (the repo root); use
 an absolute path if you run the client from elsewhere.
 
 ### Run the prebuilt ghcr.io image
 
-`.mcp.json.example` also ships a `kanban-docker` entry that runs a prebuilt image with no
+`.mcp.json.example` also ships a `pandan-docker` entry that runs a prebuilt image with no
 Python, no `uv`, and no checkout:
 
 ```json
 {
   "mcpServers": {
-    "kanban": {
+    "pandan": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
-        "-e", "KANBAN_API_URL",
-        "-e", "KANBAN_TOKEN",
-        "-e", "KANBAN_BOARD_ID",
+        "-e", "PANDAN_API_URL",
+        "-e", "PANDAN_TOKEN",
+        "-e", "PANDAN_BOARD_ID",
         "ghcr.io/leejianrong/simple-kanban-mcp:latest"
       ],
       "env": {
-        "KANBAN_API_URL": "https://simple-kanban-jian.fly.dev",
-        "KANBAN_TOKEN": "kanban_pat_…",
-        "KANBAN_BOARD_ID": "1"
+        "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
+        "PANDAN_TOKEN": "pandan_pat_…",
+        "PANDAN_BOARD_ID": "1"
       }
     }
   }
@@ -129,7 +140,7 @@ argument list.
 
 ## 4. Verify it works
 
-Restart Claude Code so it picks up `.mcp.json`, approve the `kanban` server when prompted, then
+Restart Claude Code so it picks up `.mcp.json`, approve the `pandan` server when prompted, then
 ask the agent to run two tools:
 
 1. **`warmup`** — pings the unauthenticated health endpoint and wakes a scaled-to-zero Fly + Neon
@@ -146,6 +157,11 @@ board means that board isn't yours.
 
 These use the real MCP tool names (see the full table in [`mcp/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/mcp/README.md)).
 Card columns are `todo`, `in_progress`, and `done`.
+
+> Your agent sees each tool **namespaced by the `mcpServers` key** you chose above, so with the
+> recommended `pandan` key `list_cards` is really `mcp__pandan__list_cards`. Before the V40 rebrand
+> ([ADR 0018](../adr/0018-pandan-rebrand.md)) that prefix was `mcp__kanban__`; if you have a skill,
+> prompt or `settings.json` allowlist naming the old prefix, update it.
 
 **Pick up a card and start work.**
 
@@ -182,7 +198,7 @@ create_card(title="GitHub login button", column="todo", epic_id=<epic id>)
 ## 6. CLI path (for CI and non-MCP agents)
 
 If your automation isn't an MCP client — a CI job, a shell script, an agent that shells out —
-use the `kan` CLI. It's the same thin adapter over `/api/v1`, exposed as subcommands. Full
+use the `pandan` CLI. It's the same thin adapter over `/api/v1`, exposed as subcommands. Full
 reference: [`pandan-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/pandan-cli/README.md).
 
 **Prebuilt binary (no Python needed).** Download the asset for your platform from the
@@ -190,13 +206,13 @@ reference: [`pandan-cli/README.md`](https://github.com/leejianrong/simple-kanban
 `releases/latest/download/…` URL always resolves to the newest one:
 
 ```bash
-curl -L -o kan https://github.com/leejianrong/simple-kanban/releases/latest/download/kan-linux-x86_64
-chmod +x kan && mv kan ~/.local/bin/      # or: sudo mv kan /usr/local/bin/
+curl -L -o pandan https://github.com/leejianrong/simple-kanban/releases/latest/download/pandan-linux-x86_64
+chmod +x pandan && mv pandan ~/.local/bin/      # or: sudo mv pandan /usr/local/bin/
 ```
 
-Only `kan-linux-x86_64` and `kan-macos-arm64` ship (no Intel-mac binary — that leg was dropped,
+Only `pandan-linux-x86_64` and `pandan-macos-arm64` ship (no Intel-mac binary — that leg was dropped,
 KAN-225); the linux binary needs glibc ≥ 2.28 (Ubuntu 20.04+, Debian 11+, RHEL/Rocky/Alma 8+).
-**Intel-Mac users** run the `kan-macos-arm64` binary under Rosetta 2, install from source with
+**Intel-Mac users** run the `pandan-macos-arm64` binary under Rosetta 2, install from source with
 `uv` (below), or use the MCP container image. See
 [`pandan-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/pandan-cli/README.md) for the full asset list and the macOS
 Gatekeeper note.
@@ -208,23 +224,23 @@ uv tool install "git+https://github.com/leejianrong/simple-kanban.git#subdirecto
 ```
 
 `uv` clones the repo and resolves the sibling `pandan-client` path dependency from the same
-checkout, so `kan` lands on your `PATH` with no manual clone.
+checkout, so `pandan` lands on your `PATH` with no manual clone.
 
 It reads the same env vars as the MCP server:
 
 ```bash
-export KANBAN_API_URL=https://simple-kanban-jian.fly.dev
-export KANBAN_TOKEN=kanban_pat_…
-export KANBAN_BOARD_ID=1        # optional default board
+export PANDAN_API_URL=https://simple-kanban-jian.fly.dev
+export PANDAN_TOKEN=pandan_pat_…
+export PANDAN_BOARD_ID=1        # optional default board
 ```
 
-**A CI pre-step.** `kan warmup` pings the health endpoint and needs no token, so it's the ideal
+**A CI pre-step.** `pandan warmup` pings the health endpoint and needs no token, so it's the ideal
 first step to wake the deploy before a batch of authenticated calls. It exits `0` once the API is
 awake and `1` while it's still waking, so loop on it:
 
 ```bash
-until kan warmup; do sleep 2; done   # block until the API is awake
-kan list --column todo               # now the real work
+until pandan warmup; do sleep 2; done   # block until the API is awake
+pandan list --column todo               # now the real work
 ```
 
 The CLI uses distinct exit codes for scripting — `3` for `401`, `4` for `403`, `5` for `404` —
@@ -263,4 +279,4 @@ future milestone.
 
 So for more than one person or team right now, the honest answer is: each person uses their own
 boards, or each team self-hosts its own instance. Point your agents at a board you own, and set
-`KANBAN_BOARD_ID` so they stay on it.
+`PANDAN_BOARD_ID` so they stay on it.

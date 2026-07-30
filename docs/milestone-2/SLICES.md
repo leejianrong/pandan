@@ -108,7 +108,7 @@ V1 is foundational + immediately visible.
   Code wiring (local + prod). CI gains a sixth job (mcp lint + tests); pre-push hook mirrors it.
 - **Tests:** unit — each client method issues the expected request against a mocked httpx transport
   (method/path/params/body), sends the bearer header when a token is set, and maps non-2xx → a
-  `KanbanApiError` carrying the API's `detail`; a smoke asserting the server advertises exactly the
+  `PandanApiError` carrying the API's `detail`; a smoke asserting the server advertises exactly the
   seven tools with descriptions + schemas. Verified end-to-end over a real stdio MCP session against
   a live backend (create epic → create linked story → move → list), including the 401-without-token
   and 201-with-token paths against an auth-enabled backend.

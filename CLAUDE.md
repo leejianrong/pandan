@@ -12,17 +12,36 @@ PR auto-sync + agent-CLI ergonomics, M5 agent↔human handoff + awareness UI + f
 abuse hardening + projects + cycles + design system + notifications.
 
 **Milestone 7** ("Name & Sharpen the Tools", [docs/milestone-7/](docs/milestone-7/SLICES.md)) is
-**planned, not started**: the **`simple-kanban` → `pandan` rebrand** ([ADR 0018](docs/adr/0018-pandan-rebrand.md),
-which also names the `kaya` notes sibling) followed by [AXI](https://axi.md/) conformance for the CLI
-and a right-sizing of the 48-tool MCP surface. It changes no API, schema or migration. **Until V40
-lands, everything below still uses the `simple-kanban` / `kan` / `KANBAN_*` names** — treat a
-`pandan` reference in the M7 docs as future tense.
+**in progress**. Its first slice, **V40 — the `simple-kanban` → `pandan` rebrand**
+([ADR 0018](docs/adr/0018-pandan-rebrand.md), which also names the `kaya` notes sibling), has landed:
+the product is **pandan**, the CLI is **`pandan`** (with a `pdn` alias), env config is **`PANDAN_*`**,
+and newly minted PATs carry **`pandan_pat_`**. Next up is [AXI](https://axi.md/) conformance for the
+CLI and a right-sizing of the 48-tool MCP surface. The rebrand changed no API, schema or migration.
+
+Three things the rebrand deliberately did **not** rename, so don't "finish" it:
+- **The `KAN-` / `EPIC-` ticket prefixes** — immutable per-table Postgres sequences (ADR 0006/0009);
+  renaming would split the board's own history. `KAN` is retconned as simply "kanban".
+- **The deployed identity.** The app still lives at
+  [simple-kanban-jian.fly.dev](https://simple-kanban-jian.fly.dev) under the Fly app
+  `simple-kanban-jian`, with the same GitHub OAuth App and `AUTH_SECRET`. The Fly→Fly cutover was
+  **deferred** (KAN-424, blocked on the k8s migration KAN-439) rather than paid twice; the in-place
+  renames that *will* happen — GitHub repo, OAuth App display name, ghcr image path — are KAN-437.
+  The repo URL, the ghcr path (`…/simple-kanban-mcp`) and the docs-site URL therefore still read
+  `simple-kanban`, on purpose.
+- **Session/wire/storage identifiers** — the `kanbanauth` cookie, the `X-Kanban-Event` outbound
+  webhook header, the `kanban.*` logger names, the `kanban.theme` / `kanban.activeBoardId`
+  localStorage keys, and the `kanban:kanban@…/kanban` local Postgres credentials. Each would log
+  users out, break a consumer, or reset local state for no gain.
+
+The pre-rebrand **`KANBAN_API_URL` / `KANBAN_TOKEN` / `KANBAN_BOARD_ID` still work as a deprecated
+fallback** (read second, with a one-line notice on stderr), and a `kanban_pat_…` PAT still
+authenticates indefinitely. Both are dead weight carried on purpose, scheduled for removal.
 
 **This file is not the roadmap, and per-feature status written here goes stale — trust the code over
 these docs, and when they disagree, fix the docs in the same PR.** Two places are kept current by
 construction; look there for what's done and in flight:
-- **The Kanban board itself.** The project dogfoods its own product: the *Simple Kanban Roadmap*
-  board on the deployed instance is the authoritative task list. Drive it with the `kan` CLI
+- **The board itself.** The project dogfoods its own product: the *Pandan Roadmap*
+  board on the deployed instance is the authoritative task list. Drive it with the `pandan` CLI
   ([pandan-cli/](pandan-cli/)) or the MCP server ([mcp/](mcp/)).
 - **`docs/milestone-*/SLICES.md`** — the per-slice plan + status for each milestone, and the
   [ADRs](docs/adr/) for the *why* behind each decision (see §How the docs relate).
@@ -94,15 +113,15 @@ npm run e2e       # Playwright smoke (auto-starts backend+Vite; needs docker com
 uv sync                                             # install (mcp SDK + the shared pandan-client)
 uv run ruff check .                                 # lint (matches CI mcp job)
 uv run pytest -q                                    # unit (mocked httpx) + tool-list smoke; no DB
-KANBAN_API_URL=http://localhost:8000 KANBAN_TOKEN=kanban_pat_… uv run python -m pandan_mcp   # run the stdio server by hand
+PANDAN_API_URL=http://localhost:8000 PANDAN_TOKEN=pandan_pat_… uv run python -m pandan_mcp   # run the stdio server by hand
 ```
 > A thin adapter over the shared **`pandan-client`** package (`pandan_client/client.py`, imports
-> `KanbanClient`; KAN-21 moved the `httpx` wrapper out of the MCP server's own `api.py` into a
+> `PandanClient`; KAN-21 moved the `httpx` wrapper out of the MCP server's own `api.py` into a
 > sibling package the MCP server depends on by path so both stay in sync) — one tool per `/api/v1`
 > endpoint, giving **full CRUD parity across boards, cards, and epics** (list / get / create /
 > update / delete + card `move`) plus `list_boards`/`create_board` discovery; no DB of its own.
-> Config via `KANBAN_API_URL` + `KANBAN_TOKEN` (a **required** per-user PAT since `/api/v1` is
-> auth-required) + optional `KANBAN_BOARD_ID` (the default board for calls that omit `board_id`;
+> Config via `PANDAN_API_URL` + `PANDAN_TOKEN` (a **required** per-user PAT since `/api/v1` is
+> auth-required) + optional `PANDAN_BOARD_ID` (the default board for calls that omit `board_id`;
 > unset → list spans all your boards / create lands on the earliest, so set it in `.mcp.json` to
 > avoid targeting the wrong board; V10, ADR 0015). Wire into Claude Code by copying
 > `.mcp.json.example` → `.mcp.json`; see [mcp/README.md](mcp/README.md). CI runs it as the `mcp` job.
@@ -226,11 +245,29 @@ so long-running migrations are never cut short):
 
 **Agent auth is a per-user PAT (V9, ADR 0014; V10, ADR 0015).** `/api/v1` is **auth-required** for
 every request. Agents (the MCP server, `curl`) authenticate with a self-serve per-user **PAT**
-(`kanban_pat_…`, hashed HMAC-SHA256; created/revoked at `/api/v1/tokens` + the Tokens UI) set as
-`KANBAN_TOKEN`; it resolves to its owning user and is **owner-gated** exactly like a human. The
+(`pandan_pat_…`, hashed HMAC-SHA256; created/revoked at `/api/v1/tokens` + the Tokens UI) set as
+`PANDAN_TOKEN`; it resolves to its owning user and is **owner-gated** exactly like a human. The
 SPA/human clients authenticate with the **cookie session** and send no token. **`API_TOKENS` no
 longer exists** — V4's shared-token list (ADR 0010) was superseded by PATs (V9) and its transitional
 SERVICE bypass was removed in V10 (ADR 0015). (Ops: the `API_TOKENS` Fly secret can be dropped.)
+
+**Client config env vars (V40, KAN-423, ADR 0018)** — for the CLI ([pandan-cli/pandan_cli/config.py](pandan-cli/pandan_cli/config.py))
+and the MCP server ([mcp/pandan_mcp/config.py](mcp/pandan_mcp/config.py)), *not* the backend:
+`PANDAN_API_URL` / `PANDAN_TOKEN` / `PANDAN_BOARD_ID`. The pre-rebrand `KANBAN_*` spellings are a
+**deprecated fallback**: each key is read under its `PANDAN_*` name first and only then the `KANBAN_*`
+one, emitting a one-line notice on **stderr** (never stdout — the CLI's stdout is machine-readable and
+the MCP server's is the JSON-RPC channel). Precedence is **per value**, so a half-migrated environment
+resolves correctly. The CLI additionally migrates `~/.config/kan/config.toml` →
+`~/.config/pandan/config.toml` on first use (leaving the old file in place), still reads a legacy
+`[kan]` table, and still honours a `kanban` server key in `.mcp.json`. All of this is dead weight
+carried on purpose and is deleted in a later milestone.
+
+**PAT prefix (V40).** `TOKEN_PREFIX` in [backend/app/tokens.py](backend/app/tokens.py) is now
+`pandan_pat_`, with `LEGACY_TOKEN_PREFIXES = ("kanban_pat_",)`. The resolver's fast-path guard
+([backend/app/authz.py](backend/app/authz.py), `_resolve_pat`) tests the union — **that guard is
+load-bearing**: it is the one place a prefix change could invalidate already-issued tokens, and an
+earlier draft of ADR 0018 wrongly claimed it didn't exist. Verification itself is still an HMAC hash
+lookup over the whole raw token, so a `kanban_pat_…` PAT authenticates indefinitely.
 
 `AUTH_SECRET` doubles as the **pepper** for PAT hashing (HMAC-SHA256), so rotating it invalidates all
 existing PATs (and cookie sessions) — expected.
@@ -430,11 +467,12 @@ spec for intended behavior:
   bypass), realising D3's one authorization layer and further evolving 0007/0010 (0013), self-serve
   agent personal access tokens — per-user hashed PATs resolving to their owning user, superseding
   0010's shared `API_TOKENS` as the agent mechanism (0014), MCP board-scoping (per-call `board_id` +
-  `list_boards`/`create_board` discovery + `KANBAN_BOARD_ID`) and **retiring `API_TOKENS`** — removing
+  `list_boards`/`create_board` discovery + `PANDAN_BOARD_ID`) and **retiring `API_TOKENS`** — removing
   the transitional SERVICE bypass so every principal is a real user, fully superseding 0010 (0015),
   GitHub PR→board auto-sync via a signed webhook (`WEBHOOK_SECRET`, per-board opt-in) (0016),
   observability — DB-readiness health + structured request logging + opt-in Sentry (0017), and the
   **`simple-kanban` → `pandan` rebrand** with `kaya` as the notes sibling (suite: `kayatoast`) —
   what gets renamed (CLI `kan`→`pandan`+`pdn`, MCP tool namespace, `PANDAN_*` env with a deprecated
   `KANBAN_*` fallback, PAT mint prefix) and what deliberately does **not** (the immutable `KAN-`/
-  `EPIC-` ticket prefixes) (0018).
+  `EPIC-` ticket prefixes, the deployed Fly/OAuth identity — deferred, and session/wire/storage
+  identifiers) (0018).

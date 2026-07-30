@@ -1,6 +1,6 @@
-# Simple Kanban — MCP server
+# Pandan — MCP server
 
-An [MCP](https://modelcontextprotocol.io) server that exposes the Simple Kanban
+An [MCP](https://modelcontextprotocol.io) server that exposes the Pandan
 REST API (`/api/v1`) as tools an agent (e.g. Claude Code) can call. It is a thin
 `httpx` wrapper — every tool maps to one endpoint — so the API stays the single
 source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
@@ -50,19 +50,19 @@ source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 own, then target any of them per call:
 
 - The board-scoped tools take an optional **`board_id`**. Omit it and the server
-  uses **`KANBAN_BOARD_ID`** if set, else the API's own fallback (`list_*` = all
+  uses **`PANDAN_BOARD_ID`** if set, else the API's own fallback (`list_*` = all
   your boards; `create_*` = your earliest board).
 - Card-id-addressed tools (`get_card`/`update_card`/`move_card`/`delete_card`) need
   no `board_id` — the server authorizes via the card's own board.
 - Access is bounded to boards **you** own: a `board_id` you don't own returns `403`
   ("that board isn't yours — call `list_boards`"). A bad/expired token returns
-  `401` ("set `KANBAN_TOKEN` to a valid PAT").
+  `401` ("set `PANDAN_TOKEN` to a valid PAT").
 
 **Authentication — a personal access token is required.** Since M3 V8 (ADR 0013)
 the whole `/api/v1` surface is auth-required, and V10 (ADR 0015) removed the old
 shared-`API_TOKENS` bypass. Create a **PAT** in the SPA (top-bar **Tokens** →
-*New token*), copy the `kanban_pat_…` secret shown once, and set it as
-`KANBAN_TOKEN`. It authenticates **as your user** and is **owner-gated** — the
+*New token*), copy the `pandan_pat_…` secret shown once, and set it as
+`PANDAN_TOKEN`. It authenticates **as your user** and is **owner-gated** — the
 agent can only touch boards you own. A tokenless (or bad-token) server rejects the
 MCP with `401`.
 
@@ -70,9 +70,16 @@ MCP with `401`.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `KANBAN_API_URL` | `http://localhost:8000` | API origin (the `/api/v1` prefix is added for you) |
-| `KANBAN_TOKEN` | *(unset)* | **Required.** A per-user **PAT** (`kanban_pat_…`, created in the Tokens UI, V9/ADR 0014). Empty → `401` |
-| `KANBAN_BOARD_ID` | *(unset)* | Optional default board id for board-scoped tools when a call omits `board_id`. Unset → the API's fallback (list = all your boards; create = earliest) |
+| `PANDAN_API_URL` | `http://localhost:8000` | API origin (the `/api/v1` prefix is added for you) |
+| `PANDAN_TOKEN` | *(unset)* | **Required.** A per-user **PAT** (`pandan_pat_…`, created in the Tokens UI, V9/ADR 0014). Empty → `401` |
+| `PANDAN_BOARD_ID` | *(unset)* | Optional default board id for board-scoped tools when a call omits `board_id`. Unset → the API's fallback (list = all your boards; create = earliest) |
+
+> **Deprecated fallback (V40, [ADR 0018](../docs/adr/0018-pandan-rebrand.md)).** The pre-rebrand
+> `KANBAN_API_URL` / `KANBAN_TOKEN` / `KANBAN_BOARD_ID` still work: each key is read under its
+> `PANDAN_*` name **first** and only falls back to the `KANBAN_*` spelling, emitting a one-line notice
+> on **stderr** (never stdout — that's the JSON-RPC channel). Precedence is per *value*, so a
+> half-migrated `.mcp.json` resolves correctly. They will be removed in a later milestone.
+> A PAT minted before the rename (`kanban_pat_…`) also keeps authenticating indefinitely.
 
 ## Run it
 
@@ -88,7 +95,7 @@ Uses [`uv`](https://docs.astral.sh/uv/) like the backend (Python 3.12+):
 ```bash
 cd mcp
 uv sync                                   # install deps
-KANBAN_API_URL=http://localhost:8000 uv run python -m pandan_mcp   # stdio server
+PANDAN_API_URL=http://localhost:8000 uv run python -m pandan_mcp   # stdio server
 ```
 
 To smoke-test the tools without a client, run the test suite:
@@ -113,14 +120,14 @@ needs stdin open) and pass config via `-e`:
 
 ```bash
 docker run -i --rm \
-  -e KANBAN_API_URL=https://simple-kanban-jian.fly.dev \
-  -e KANBAN_TOKEN=kanban_pat_… \
-  -e KANBAN_BOARD_ID=1 \
+  -e PANDAN_API_URL=https://simple-kanban-jian.fly.dev \
+  -e PANDAN_TOKEN=pandan_pat_… \
+  -e PANDAN_BOARD_ID=1 \
   ghcr.io/leejianrong/simple-kanban-mcp:latest
 ```
 
 > To reach a backend running on your **host** (not in Docker), use
-> `KANBAN_API_URL=http://host.docker.internal:8000` rather than `localhost`.
+> `PANDAN_API_URL=http://host.docker.internal:8000` rather than `localhost`.
 
 **Build it yourself.** The image bundles the sibling `pandan-client` path dep, so
 the build **context must be the repo root** with `-f mcp/Dockerfile` — building
@@ -133,24 +140,30 @@ docker build -f mcp/Dockerfile -t simple-kanban-mcp .   # run from the REPO ROOT
 ## Wire it into Claude Code
 
 Copy [`.mcp.json.example`](../.mcp.json.example) to `.mcp.json` at the repo root
-and adjust the env. It ships **two** server entries — `kanban` (runs from source
-with `uv`) and `kanban-docker` (runs the prebuilt ghcr.io image, KAN-47, no
+and adjust the env. It ships **two** server entries — `pandan` (runs from source
+with `uv`) and `pandan-docker` (runs the prebuilt ghcr.io image, KAN-47, no
 Python/uv/checkout). Both work today; keep the one you want and delete the other.
 Claude Code discovers project-scoped servers there and will ask you to approve it. In
-every case set `KANBAN_TOKEN` to a `kanban_pat_…` you created in the SPA Tokens tab.
+every case set `PANDAN_TOKEN` to a `pandan_pat_…` you created in the SPA Tokens tab.
+
+> **The `mcpServers` key is what tool names are namespaced with.** Calling this server
+> `pandan` makes its tools `mcp__pandan__list_cards`, `mcp__pandan__create_card`, … —
+> before the V40 rebrand they were `mcp__kanban__*`. If you rename the key, anything
+> that references a tool *by name* — a skill, a prompt, a `settings.json` allowlist —
+> has to match. (The tool names themselves are unchanged; only the prefix moved.)
 
 **Local dev** (backend on :8000):
 
 ```json
 {
   "mcpServers": {
-    "kanban": {
+    "pandan": {
       "command": "uv",
       "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
-        "KANBAN_API_URL": "http://localhost:8000",
-        "KANBAN_TOKEN": "kanban_pat_…",
-        "KANBAN_BOARD_ID": "1"
+        "PANDAN_API_URL": "http://localhost:8000",
+        "PANDAN_TOKEN": "pandan_pat_…",
+        "PANDAN_BOARD_ID": "1"
       }
     }
   }
@@ -162,13 +175,13 @@ every case set `KANBAN_TOKEN` to a `kanban_pat_…` you created in the SPA Token
 ```json
 {
   "mcpServers": {
-    "kanban": {
+    "pandan": {
       "command": "uv",
       "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
-        "KANBAN_API_URL": "https://simple-kanban-jian.fly.dev",
-        "KANBAN_TOKEN": "kanban_pat_…",
-        "KANBAN_BOARD_ID": "1"
+        "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
+        "PANDAN_TOKEN": "pandan_pat_…",
+        "PANDAN_BOARD_ID": "1"
       }
     }
   }
@@ -180,19 +193,19 @@ every case set `KANBAN_TOKEN` to a `kanban_pat_…` you created in the SPA Token
 ```json
 {
   "mcpServers": {
-    "kanban": {
+    "pandan": {
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
-        "-e", "KANBAN_API_URL",
-        "-e", "KANBAN_TOKEN",
-        "-e", "KANBAN_BOARD_ID",
+        "-e", "PANDAN_API_URL",
+        "-e", "PANDAN_TOKEN",
+        "-e", "PANDAN_BOARD_ID",
         "ghcr.io/leejianrong/simple-kanban-mcp:latest"
       ],
       "env": {
-        "KANBAN_API_URL": "https://simple-kanban-jian.fly.dev",
-        "KANBAN_TOKEN": "kanban_pat_…",
-        "KANBAN_BOARD_ID": "1"
+        "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
+        "PANDAN_TOKEN": "pandan_pat_…",
+        "PANDAN_BOARD_ID": "1"
       }
     }
   }
@@ -203,7 +216,7 @@ The `-e NAME` flags (no `=value`) forward the values from the `env` block into t
 container, keeping the token out of the argument list. Pin `:0.2.2` instead of
 `:latest` for a reproducible pull.
 
-`KANBAN_BOARD_ID` pins the default board for calls that omit `board_id`; the
+`PANDAN_BOARD_ID` pins the default board for calls that omit `board_id`; the
 snippets above (and [`.mcp.json.example`](../.mcp.json.example)) preset it to `1`,
 the seeded default board — **change it to your own board id** (from `list_boards`)
 so the agent doesn't target the wrong board, or leave it empty to fall back to the

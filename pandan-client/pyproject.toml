@@ -1,7 +1,7 @@
 [project]
 name = "pandan-client"
-version = "0.2.0"
-description = "Shared httpx client for the Simple Kanban REST API (/api/v1)"
+version = "0.4.0"
+description = "Shared httpx client for the Pandan REST API (/api/v1)"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28",

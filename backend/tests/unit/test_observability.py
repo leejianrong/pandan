@@ -55,11 +55,11 @@ def test_formatter_allowlists_fields_so_stray_attrs_never_leak():
     """Only the known request fields are serialised — an attribute that isn't on
     the allow-list (e.g. a stray token) never reaches the log line."""
     line = JsonLogFormatter().format(
-        _record(path="/api/v1/cards", authorization="Bearer kanban_pat_secret")
+        _record(path="/api/v1/cards", authorization="Bearer pandan_pat_secret")
     )
     payload = json.loads(line)
     assert "authorization" not in payload
-    assert "kanban_pat_secret" not in line
+    assert "pandan_pat_secret" not in line
 
 
 def test_formatter_omits_absent_optional_fields():

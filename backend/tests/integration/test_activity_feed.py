@@ -172,6 +172,6 @@ def test_bad_token_gets_401(client):
     with TestClient(app) as anon:
         r = anon.get(
             _activity_url(board_id),
-            headers={"Authorization": "Bearer kanban_pat_totally-bogus"},
+            headers={"Authorization": "Bearer pandan_pat_totally-bogus"},
         )
     assert r.status_code == 401, r.text

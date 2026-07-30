@@ -120,7 +120,7 @@ wheels = [
 
 [[package]]
 name = "pandan-cli"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -151,7 +151,7 @@ dev = [
 
 [[package]]
 name = "pandan-client"
-version = "0.2.0"
+version = "0.4.0"
 source = { editable = "../pandan-client" }
 dependencies = [
     { name = "httpx" },

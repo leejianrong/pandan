@@ -133,7 +133,7 @@ def install_security_headers(app: FastAPI) -> None:
         return response
 
 
-app = FastAPI(title="Simple Kanban API", version="0.1.0")
+app = FastAPI(title="Pandan API", version="0.1.0")
 
 # Middleware registration order matters: Starlette runs the *last-registered*
 # middleware outermost. We want security headers outermost (they must decorate every
