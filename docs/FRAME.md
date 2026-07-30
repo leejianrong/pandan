@@ -1,4 +1,4 @@
-# FRAME — Simple Kanban (MVP)
+# FRAME — Pandan (MVP)
 
 Succinct product definition captured at the start of shaping (Shape Up). Sources: REQS.md (raw),
 docs/PRD.md + CONTEXT.md (scaffolding).

@@ -1,17 +1,17 @@
-"""``kan`` — card / board / epic CRUD over the Simple Kanban API (KAN-22, KAN-23).
+"""``pandan`` — card / board / epic CRUD over the Pandan API (KAN-22, KAN-23).
 
 Framework choice: **stdlib ``argparse``** with subparsers. No new dependency —
 consistent with the repo's thin ethos (the MCP server likewise leans on the SDK +
 httpx and nothing else). ``typer``/``click`` would buy nicer help/colour but add a
 dependency for a handful of subcommands; not worth it here.
 
-Card verbs are top-level (``kan list``/``create``/…); boards and epics are nested
-groups (``kan board list``, ``kan epic create``) so their verbs don't collide with
+Card verbs are top-level (``pandan list``/``create``/…); boards and epics are nested
+groups (``pandan board list``, ``pandan epic create``) so their verbs don't collide with
 the card verbs — parity with the board/epic surface of ``/api/v1`` (KAN-23).
 
-The CLI is a thin adapter over the shared ``KanbanClient``: parse args → env
+The CLI is a thin adapter over the shared ``PandanClient``: parse args → env
 config → one client call → print. ``--json`` prints the client's raw dict (for
-``kan list --json | jq …``); otherwise a concise ``ticket  column  title  pts=N``
+``pandan list --json | jq …``); otherwise a concise ``ticket  column  title  pts=N``
 line (``pts=-`` when unestimated, reading the API's ``story_points``).
 
 Exit codes (for scripting):
@@ -31,7 +31,7 @@ import sys
 from collections.abc import Sequence
 from typing import Any
 
-from pandan_client import KanbanApiError, KanbanClient
+from pandan_client import PandanApiError, PandanClient
 
 from . import __version__
 from .config import (
@@ -467,7 +467,7 @@ def _link_block(result: dict[str, Any]) -> str:
 
 
 def _resolve_board(arg_board: int | None, config: Config) -> int | None:
-    """The per-call ``--board`` wins, else ``KANBAN_BOARD_ID``, else None (let the
+    """The per-call ``--board`` wins, else ``PANDAN_BOARD_ID``, else None (let the
     API apply its own fallback). Mirrors the MCP server's ``_board`` helper."""
     return arg_board if arg_board is not None else config.board_id
 
@@ -508,7 +508,7 @@ def _parse_id_or_ticket(raw: str) -> tuple[int | None, str | None]:
     return None, f"{m.group(1).upper()}-{m.group(2)}"
 
 
-def _resolve_card_id(client: KanbanClient, raw: str | int) -> int:
+def _resolve_card_id(client: PandanClient, raw: str | int) -> int:
     """Resolve a card id-or-ticket to its numeric DB id (KAN-285). A bare integer is
     returned as-is (no request); a ``KAN-<n>`` ticket is looked up via the query API
     (paging its keyset cursor) and matched on ``ticket_number``."""
@@ -532,7 +532,7 @@ def _resolve_card_id(client: KanbanClient, raw: str | int) -> int:
             raise ConfigError(f"no card found with ticket {ticket}")
 
 
-def _resolve_epic_id(client: KanbanClient, raw: str | int) -> int:
+def _resolve_epic_id(client: PandanClient, raw: str | int) -> int:
     """Resolve an epic id-or-ticket to its numeric DB id (KAN-285). A bare integer is
     returned as-is; an ``EPIC-<n>`` ticket is looked up via ``list_epics`` and
     matched on ``ticket_number``."""
@@ -547,7 +547,7 @@ def _resolve_epic_id(client: KanbanClient, raw: str | int) -> int:
     raise ConfigError(f"no epic found with ticket {ticket}")
 
 
-def _resolve_epic_opt(client: KanbanClient, raw: str | int | None) -> int | None:
+def _resolve_epic_opt(client: PandanClient, raw: str | int | None) -> int | None:
     """Resolve an optional ``--epic`` value (``None`` stays ``None``)."""
     return None if raw is None else _resolve_epic_id(client, raw)
 
@@ -556,7 +556,7 @@ def _resolve_epic_opt(client: KanbanClient, raw: str | int | None) -> int | None
 # Each returns the client's result dict; printing + exit codes are handled centrally.
 
 
-def _cmd_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_cards(
         board_id=_resolve_board(args.board, config),
         column=args.column,
@@ -574,11 +574,11 @@ def _cmd_list(client: KanbanClient, config: Config, args: argparse.Namespace) ->
     )
 
 
-def _cmd_get(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.get_card(_resolve_card_id(client, args.card_id))
 
 
-def _cmd_create(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_card(
         args.title,
         board_id=_resolve_board(args.board, config),
@@ -594,7 +594,7 @@ def _cmd_create(client: KanbanClient, config: Config, args: argparse.Namespace) 
     )
 
 
-def _cmd_update(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.update_card(
         _resolve_card_id(client, args.card_id),
         title=args.title,
@@ -609,13 +609,13 @@ def _cmd_update(client: KanbanClient, config: Config, args: argparse.Namespace) 
     )
 
 
-def _cmd_move(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_move(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.move_card(
         _resolve_card_id(client, args.card_id), args.column, position=args.position
     )
 
 
-def _cmd_delete(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
         raise ConfigError(
             f"refusing to delete card {args.card_id} without confirmation; pass --yes"
@@ -623,13 +623,13 @@ def _cmd_delete(client: KanbanClient, config: Config, args: argparse.Namespace) 
     return client.delete_card(_resolve_card_id(client, args.card_id))
 
 
-def _cmd_next(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_next(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Peek at (or, with ``--claim``, atomically dispatch) the next ready card on a
     board (M5 V12, KAN-245). Both need a board — the dispatch endpoints are
     path-scoped with no API-side fallback."""
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set KANBAN_BOARD_ID")
+        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
     if args.claim:
         return client.dispatch(
             board, assignee=args.assignee, label=args.label, priority=args.priority
@@ -637,33 +637,33 @@ def _cmd_next(client: KanbanClient, config: Config, args: argparse.Namespace) ->
     return client.next_ready(board, label=args.label, priority=args.priority)
 
 
-def _cmd_needs_human(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_needs_human(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.flag_needs_human(
         _resolve_card_id(client, args.card_id), attention_note=args.note
     )
 
 
-def _cmd_resolve(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_resolve(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.resolve_card(_resolve_card_id(client, args.card_id))
 
 
-def _cmd_metrics(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_metrics(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Report derived flow metrics for a board (M5 V17, KAN-250). The metrics
     endpoint is path-scoped with no API-side fallback, so a board is required
-    (``--board`` or KANBAN_BOARD_ID)."""
+    (``--board`` or PANDAN_BOARD_ID)."""
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set KANBAN_BOARD_ID")
+        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
     return client.board_metrics(board, since=args.since, window=args.window)
 
 
-def _cmd_activity(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_activity(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Read a board's activity feed (KAN-18), newest-first (M5 V16, KAN-261). The
     activity endpoint is path-scoped with no API-side fallback, so a board is
-    required (``--board`` or KANBAN_BOARD_ID)."""
+    required (``--board`` or PANDAN_BOARD_ID)."""
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set KANBAN_BOARD_ID")
+        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
     return client.list_activity(
         board,
         limit=args.limit,
@@ -678,18 +678,18 @@ def _cmd_activity(client: KanbanClient, config: Config, args: argparse.Namespace
 # addressed to you as a board owner. Poll/pull only (ADR 0007).
 
 
-def _cmd_notify_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_notify_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_notifications(unread=args.unread or None)
 
 
-def _cmd_notify_read(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_notify_read(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.mark_notification_read(args.notification_id)
 
 
 # --- ops handlers -----------------------------------------------------------
 
 
-def _cmd_warmup(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_warmup(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     # The shared client's warmup() pings the public /api/health, rides a cold
     # start via the shared retry/timeout, and never throws — it returns a status
     # dict the caller maps to an exit code (see run()).
@@ -700,23 +700,23 @@ def _cmd_warmup(client: KanbanClient, config: Config, args: argparse.Namespace) 
 # Boards are owner-scoped, not board-scoped: no --board targeting here.
 
 
-def _cmd_board_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_board_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_boards()
 
 
-def _cmd_board_create(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_board_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_board(args.name)
 
 
 # --- epic handlers ----------------------------------------------------------
-# Epics are board-scoped, so list/create honour --board / KANBAN_BOARD_ID.
+# Epics are board-scoped, so list/create honour --board / PANDAN_BOARD_ID.
 
 
-def _cmd_epic_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_epic_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_epics(board_id=_resolve_board(args.board, config))
 
 
-def _cmd_epic_create(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_epic_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_epic(
         args.name,
         board_id=_resolve_board(args.board, config),
@@ -726,7 +726,7 @@ def _cmd_epic_create(client: KanbanClient, config: Config, args: argparse.Namesp
     )
 
 
-def _cmd_epic_update(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_epic_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.update_epic(
         _resolve_epic_id(client, args.epic_id),
         name=args.name,
@@ -736,7 +736,7 @@ def _cmd_epic_update(client: KanbanClient, config: Config, args: argparse.Namesp
     )
 
 
-def _cmd_epic_delete(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_epic_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
         raise ConfigError(
             f"refusing to delete epic {args.epic_id} without confirmation; pass --yes"
@@ -745,28 +745,28 @@ def _cmd_epic_delete(client: KanbanClient, config: Config, args: argparse.Namesp
 
 
 # --- label handlers ---------------------------------------------------------
-# Labels are board-scoped: list/create honour --board / KANBAN_BOARD_ID; delete
+# Labels are board-scoped: list/create honour --board / PANDAN_BOARD_ID; delete
 # is addressed by the label's own id (authorized via its board).
 
 
-def _cmd_label_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_label_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set KANBAN_BOARD_ID")
+        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
     return client.list_labels(board)
 
 
-def _cmd_label_create(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_label_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set KANBAN_BOARD_ID")
+        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
     # KAN-288: color accepts either the positional or the --color flag (flag wins),
     # falling back to a neutral default so it can be omitted entirely.
     color = args.color_opt or args.color_pos or DEFAULT_LABEL_COLOR
     return client.create_label(board, args.name, color)
 
 
-def _cmd_label_delete(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_label_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
         raise ConfigError(
             f"refusing to delete label {args.label_id} without confirmation; pass --yes"
@@ -775,12 +775,12 @@ def _cmd_label_delete(client: KanbanClient, config: Config, args: argparse.Names
 
 
 # --- view handlers ----------------------------------------------------------
-# Saved views are board-scoped: list/create/delete honour --board / KANBAN_BOARD_ID.
+# Saved views are board-scoped: list/create/delete honour --board / PANDAN_BOARD_ID.
 # ``view create`` reuses the same filter/sort flags as ``list`` to assemble the
 # stored query (the filter+sort grammar), so a view is "the current list, saved".
 
 
-def _build_view_query(client: KanbanClient, args: argparse.Namespace) -> dict[str, Any]:
+def _build_view_query(client: PandanClient, args: argparse.Namespace) -> dict[str, Any]:
     """Assemble a saved view's stored query (the filter+sort grammar) from the
     list-style flags — only the ones the caller set. Field names match the GET
     /cards params exactly, so the stored query replays verbatim. ``--epic`` accepts
@@ -810,21 +810,21 @@ def _build_view_query(client: KanbanClient, args: argparse.Namespace) -> dict[st
 def _require_view_board(args: argparse.Namespace, config: Config) -> int:
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set KANBAN_BOARD_ID")
+        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
     return board
 
 
-def _cmd_view_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_view_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_views(_require_view_board(args, config))
 
 
-def _cmd_view_create(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_view_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_view(
         _require_view_board(args, config), args.name, _build_view_query(client, args)
     )
 
 
-def _cmd_view_delete(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_view_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
         raise ConfigError(
             f"refusing to delete view {args.view_id} without confirmation; pass --yes"
@@ -833,15 +833,15 @@ def _cmd_view_delete(client: KanbanClient, config: Config, args: argparse.Namesp
 
 
 # --- cycle handlers (V33 / KAN-297) -----------------------------------------
-# Cycles are board-scoped: list/create/delete honour --board / KANBAN_BOARD_ID.
-# Assigning a card to a cycle is a field edit — `kan update <card> --cycle <id>`.
+# Cycles are board-scoped: list/create/delete honour --board / PANDAN_BOARD_ID.
+# Assigning a card to a cycle is a field edit — `pandan update <card> --cycle <id>`.
 
 
-def _cmd_cycle_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_cycle_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_cycles(_require_view_board(args, config))
 
 
-def _cmd_cycle_create(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_cycle_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_cycle(
         _require_view_board(args, config),
         args.name,
@@ -850,7 +850,7 @@ def _cmd_cycle_create(client: KanbanClient, config: Config, args: argparse.Names
     )
 
 
-def _cmd_cycle_delete(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_cycle_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
         raise ConfigError(
             f"refusing to delete cycle {args.cycle_id} without confirmation; pass --yes"
@@ -858,7 +858,7 @@ def _cmd_cycle_delete(client: KanbanClient, config: Config, args: argparse.Names
     return client.delete_cycle(_require_view_board(args, config), args.cycle_id)
 
 
-def _cmd_cycle_metrics(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_cycle_metrics(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Derived burndown / velocity metrics for a cycle (V34, KAN-298)."""
     return client.cycle_metrics(_require_view_board(args, config), args.cycle_id)
 
@@ -877,25 +877,25 @@ def _load_json_arg(value: str) -> Any:
         raise ConfigError(f"invalid JSON: {exc}") from exc
 
 
-def _cmd_batch_update(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_batch_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     updates = _load_json_arg(args.updates)
     if not isinstance(updates, list):
         raise ConfigError("batch-update expects a JSON array of {id, ...fields} objects")
     return client.update_cards(updates)
 
 
-def _cmd_template_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_template_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_templates(_require_view_board(args, config))
 
 
-def _cmd_template_create(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_template_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     cards = _load_json_arg(args.cards)
     if not isinstance(cards, list):
         raise ConfigError("template create expects a JSON array of card objects for --cards")
     return client.create_template(_require_view_board(args, config), args.name, cards)
 
 
-def _cmd_template_delete(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_template_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
         raise ConfigError(
             f"refusing to delete template {args.template_id} without confirmation; pass --yes"
@@ -903,14 +903,14 @@ def _cmd_template_delete(client: KanbanClient, config: Config, args: argparse.Na
     return client.delete_template(_require_view_board(args, config), args.template_id)
 
 
-def _cmd_template_apply(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_template_apply(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.apply_template(_require_view_board(args, config), args.template_id)
 
 
 # --- dependency / link / comment handlers (KAN-270) -------------------------
 # Card-to-card dependencies, work-links, and notes. Thin adapters over the shared
 # client — the API endpoints + client methods already existed; KAN-270 only adds
-# the `kan` verbs. All are card-scoped (addressed by card id), so no --board here.
+# the `pandan` verbs. All are card-scoped (addressed by card id), so no --board here.
 #
 # add_dependency/add_link (and their removes) return the whole refreshed card, but
 # the verb is *about* the edge / link it changed — so we project just that facet
@@ -930,43 +930,43 @@ def _link_facet(card: dict[str, Any], card_id: int) -> dict[str, Any]:
     return {"card_id": card_id, "links": card.get("links", [])}
 
 
-def _cmd_dep_add(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_dep_add(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     card_id = _resolve_card_id(client, args.card_id)
     blocker_id = _resolve_card_id(client, args.blocked_by)
     return _dep_facet(client.add_dependency(card_id, blocker_id), card_id)
 
 
-def _cmd_dep_rm(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_dep_rm(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     card_id = _resolve_card_id(client, args.card_id)
     blocker_id = _resolve_card_id(client, args.blocked_by)
     return _dep_facet(client.remove_dependency(card_id, blocker_id), card_id)
 
 
-def _cmd_dep_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_dep_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_dependencies(_resolve_card_id(client, args.card_id))
 
 
-def _cmd_link_add(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_link_add(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     card_id = _resolve_card_id(client, args.card_id)
     return _link_facet(client.add_link(card_id, args.label, args.url), card_id)
 
 
-def _cmd_link_rm(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_link_rm(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     card_id = _resolve_card_id(client, args.card_id)
     return _link_facet(client.remove_link(card_id, args.link_id), card_id)
 
 
-def _cmd_comment_add(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_comment_add(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.add_comment(_resolve_card_id(client, args.card_id), args.body)
 
 
-def _cmd_comment_list(client: KanbanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_comment_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_comments(_resolve_card_id(client, args.card_id))
 
 
 # --- config handlers (local: no client, no network) -------------------------
 # These operate on local config only, so ``run()`` dispatches them via
-# ``local_func`` before building a KanbanClient (and before any token is required).
+# ``local_func`` before building a PandanClient (and before any token is required).
 
 
 def _redact_token(token: str) -> str:
@@ -985,7 +985,7 @@ def _cmd_config_path(args: argparse.Namespace) -> int:
 
 def _cmd_config_show(args: argparse.Namespace) -> int:
     """Print the *effective* config after the env → file → .mcp.json chain, with
-    the token redacted. Handy for 'why is kan hitting the wrong board?'."""
+    the token redacted. Handy for 'why is pandan hitting the wrong board?'."""
     resolved = resolve_values()
     mcp = find_mcp_json()
     out = {
@@ -1016,13 +1016,13 @@ def _cmd_config_set(args: argparse.Namespace) -> int:
     if getattr(args, "token_stdin", False):
         token = sys.stdin.readline().strip()
         if not token:
-            print("kan: no token read from stdin", file=sys.stderr)
+            print("pandan: no token read from stdin", file=sys.stderr)
             return EXIT_ERROR
     elif args.token is not None:
         token = args.token
     if args.api_url is None and args.board_id is None and token is None:
         print(
-            "kan: nothing to set (pass --api-url / --board-id / --token[-stdin])",
+            "pandan: nothing to set (pass --api-url / --board-id / --token[-stdin])",
             file=sys.stderr,
         )
         return EXIT_ERROR
@@ -1040,9 +1040,9 @@ def _cmd_login(args: argparse.Namespace) -> int:
     else:
         import getpass
 
-        token = getpass.getpass("Paste your Kanban PAT (kanban_pat_…): ").strip()
+        token = getpass.getpass("Paste your Pandan PAT (pandan_pat_…): ").strip()
     if not token:
-        print("kan: no token provided", file=sys.stderr)
+        print("pandan: no token provided", file=sys.stderr)
         return EXIT_ERROR
     path = write_config_file(api_url=args.api_url, token=token, board_id=args.board_id)
     print(f"saved token to {path} (mode 0600)")
@@ -1054,40 +1054,40 @@ def _cmd_login(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="kan",
-        description="Manage Simple Kanban cards, boards, and epics from the command line.",
+        prog="pandan",
+        description="Manage Pandan cards, boards, and epics from the command line.",
         epilog=(
             "Configuration keys (api_url / token / board_id), resolved per value in\n"
             "this order — first non-empty wins:\n"
-            "  1. env vars   KANBAN_API_URL / KANBAN_TOKEN / KANBAN_BOARD_ID\n"
-            "  2. config file  ~/.config/kan/config.toml  (see `kan login` / `kan config`)\n"
-            "  3. .mcp.json    nearest up the tree, .mcpServers.kanban.env.*\n"
+            "  1. env vars   PANDAN_API_URL / PANDAN_TOKEN / PANDAN_BOARD_ID\n"
+            "  2. config file  ~/.config/pandan/config.toml  (see `pandan login`)\n"
+            "  3. .mcp.json    nearest up the tree, .mcpServers.pandan.env.*\n"
             "So the PAT can stay in a file and never touch the command line. Run\n"
-            "`kan login` once to save it; `kan config show` prints the effective config.\n"
+            "`pandan login` once to save it; `pandan config show` prints the effective config.\n"
             "\n"
             "Exit codes: 0 ok, 1 error, 2 usage, 3 unauthorized, 4 forbidden, 5 not found."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    # `kan --version` / `-v`: pure argparse action=version — prints to stdout and
+    # `pandan --version` / `-v`: pure argparse action=version — prints to stdout and
     # exits 0 before the required subcommand is enforced. No importlib.metadata
     # lookup, so it works in the frozen PyInstaller onefile binary too.
     parser.add_argument(
         "-v",
         "--version",
         action="version",
-        version=f"kan {__version__}",
+        version=f"pandan {__version__}",
         help="print the CLI version and exit",
     )
     # A shared parent so --json works before OR after the subcommand
-    # (e.g. `kan --json list` and `kan list --json` both parse).
+    # (e.g. `pandan --json list` and `pandan list --json` both parse).
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
         # SUPPRESS so an absent subcommand-level --json does not clobber a global
-        # `kan --json <cmd>` already parsed by the main parser below.
+        # `pandan --json <cmd>` already parsed by the main parser below.
         default=argparse.SUPPRESS,
         help="print the raw JSON from the API (for piping, e.g. | jq)",
     )
@@ -1113,7 +1113,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_warmup.set_defaults(func=_cmd_warmup, require_token=False, is_warmup=True)
 
     p_list = sub.add_parser("list", parents=[common], help="list / query cards")
-    p_list.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_list.add_argument("--column", choices=COLUMNS, help="filter by column")
     p_list.add_argument(
         "--epic", type=_id_or_ticket_arg, metavar="EPIC",
@@ -1165,7 +1165,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_create = sub.add_parser("create", parents=[common], help="create a card")
     p_create.add_argument("title")
-    p_create.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_create.add_argument("--description")
     p_create.add_argument("--column", choices=COLUMNS, help="starting column (default: todo)")
     p_create.add_argument(
@@ -1240,7 +1240,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="show the next ready card (--claim to atomically dispatch it)",
     )
-    p_next.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_next.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_next.add_argument(
         "--claim", action="store_true", help="atomically claim it (move to in_progress + assign)"
     )
@@ -1277,7 +1277,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="derived flow metrics for a board (throughput / cycle time / aging / by-assignee)",
     )
-    p_metrics.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_metrics.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_metrics.add_argument(
         "--since", metavar="ISO", help="lower bound of the period (ISO-8601 timestamp)"
     )
@@ -1294,7 +1294,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="a board's activity feed, newest-first (filter by --actor / --action)",
     )
-    p_activity.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_activity.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_activity.add_argument(
         "--actor", metavar="LABEL",
         help="only rows by this actor (exact match on email / agent handle)",
@@ -1354,12 +1354,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_epic_list = epic_sub.add_parser("list", parents=[common], help="list / query epics")
-    p_epic_list.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_epic_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_epic_list.set_defaults(func=_cmd_epic_list, noun="epic")
 
     p_epic_create = epic_sub.add_parser("create", parents=[common], help="create an epic")
     p_epic_create.add_argument("name")
-    p_epic_create.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_epic_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_epic_create.add_argument("--description")
     p_epic_create.add_argument(
         "--target-date", dest="target_date", metavar="ISO",
@@ -1397,7 +1397,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_label_list = label_sub.add_parser("list", parents=[common], help="list a board's labels")
-    p_label_list.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_label_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_label_list.set_defaults(func=_cmd_label_list, noun="label")
 
     p_label_create = label_sub.add_parser("create", parents=[common], help="create a label")
@@ -1414,7 +1414,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--color", dest="color_opt", metavar="COLOR",
         help="a color string, e.g. #0ea5e9 (alternative to the positional)",
     )
-    p_label_create.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_label_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_label_create.set_defaults(func=_cmd_label_create, noun="label")
 
     p_label_delete = label_sub.add_parser("delete", parents=[common], help="delete a label")
@@ -1431,14 +1431,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_view_list = view_sub.add_parser("list", parents=[common], help="list a board's saved views")
-    p_view_list.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_view_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_view_list.set_defaults(func=_cmd_view_list, noun="view")
 
     p_view_create = view_sub.add_parser(
         "create", parents=[common], help="save the given filters/sort as a named view"
     )
     p_view_create.add_argument("name")
-    p_view_create.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_view_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     # The same filter/sort grammar as `list` — assembled into the stored query.
     p_view_create.add_argument("--column", choices=COLUMNS, help="filter by column")
     p_view_create.add_argument(
@@ -1464,25 +1464,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_view_delete = view_sub.add_parser("delete", parents=[common], help="delete a saved view")
     p_view_delete.add_argument("view_id", type=int)
-    p_view_delete.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_view_delete.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_view_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     p_view_delete.set_defaults(func=_cmd_view_delete, noun="view")
 
     # --- cycle subcommands (V33 / KAN-297): board iterations ----------------
     # Board-scoped, named iterations. Assign a card to one with
-    # `kan update <card> --cycle <id>`; filter with `kan list --cycle <id>`.
+    # `pandan update <card> --cycle <id>`; filter with `pandan list --cycle <id>`.
     p_cycle = sub.add_parser("cycle", help="manage cycles / iterations (list / create / delete)")
     cycle_sub = p_cycle.add_subparsers(
         dest="cycle_command", metavar="<subcommand>", required=True
     )
 
     p_cycle_list = cycle_sub.add_parser("list", parents=[common], help="list a board's cycles")
-    p_cycle_list.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_cycle_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_cycle_list.set_defaults(func=_cmd_cycle_list, noun="cycle")
 
     p_cycle_create = cycle_sub.add_parser("create", parents=[common], help="create a cycle")
     p_cycle_create.add_argument("name")
-    p_cycle_create.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_cycle_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_cycle_create.add_argument(
         "--starts-on", dest="starts_on", metavar="ISO",
         help="iteration start (ISO-8601 timestamp)",
@@ -1495,7 +1495,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_cycle_delete = cycle_sub.add_parser("delete", parents=[common], help="delete a cycle")
     p_cycle_delete.add_argument("cycle_id", type=int)
-    p_cycle_delete.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_cycle_delete.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_cycle_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     p_cycle_delete.set_defaults(func=_cmd_cycle_delete, noun="cycle")
 
@@ -1505,7 +1505,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="burndown / velocity for a cycle (committed vs completed + per-day burndown)",
     )
     p_cycle_metrics.add_argument("cycle_id", type=int)
-    p_cycle_metrics.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_cycle_metrics.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_cycle_metrics.set_defaults(func=_cmd_cycle_metrics, noun="cycle")
 
     # --- batch update (M5 V19 / KAN-252): atomic multi-card PATCH ------------
@@ -1535,7 +1535,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_template_list = template_sub.add_parser(
         "list", parents=[common], help="list a board's card templates"
     )
-    p_template_list.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_template_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_template_list.set_defaults(func=_cmd_template_list, noun="template")
 
     p_template_create = template_sub.add_parser(
@@ -1548,14 +1548,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="JSON",
         help="a JSON array of card objects (title required), or '-' to read stdin",
     )
-    p_template_create.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_template_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_template_create.set_defaults(func=_cmd_template_create, noun="template")
 
     p_template_delete = template_sub.add_parser(
         "delete", parents=[common], help="delete a card template"
     )
     p_template_delete.add_argument("template_id", type=int)
-    p_template_delete.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_template_delete.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_template_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     p_template_delete.set_defaults(func=_cmd_template_delete, noun="template")
 
@@ -1563,11 +1563,11 @@ def build_parser() -> argparse.ArgumentParser:
         "apply", parents=[common], help="instantiate a template's cards on the board"
     )
     p_template_apply.add_argument("template_id", type=int)
-    p_template_apply.add_argument("--board", type=int, help="board id (default: KANBAN_BOARD_ID)")
+    p_template_apply.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_template_apply.set_defaults(func=_cmd_template_apply, noun="template")
 
     # --- login / config (local: no token, no network) ------------------------
-    # ``login`` saves a PAT to ~/.config/kan/config.toml without it touching argv:
+    # ``login`` saves a PAT to ~/.config/pandan/config.toml without it touching argv:
     # a hidden prompt on a TTY, else one line from stdin.
     p_login = sub.add_parser(
         "login",
@@ -1579,7 +1579,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_login.add_argument(
         "--token-stdin",
         action="store_true",
-        help="read the token from stdin instead of prompting (e.g. `… | kan login --token-stdin`)",
+        help="read the token from stdin instead of prompting (`… | pandan login --token-stdin`)",
     )
     p_login.set_defaults(local_func=_cmd_login)
 
@@ -1728,7 +1728,7 @@ def _normalize_sort_argv(argv: list[str]) -> list[str]:
     ``-`` (descending, e.g. ``-priority,position``) isn't mistaken for a flag
     (KAN-286). argparse can't consume an option value beginning with ``-`` in the
     space form — only the ``=`` form worked — so the documented
-    ``kan list --sort -priority,position`` failed with "expected one argument".
+    ``pandan list --sort -priority,position`` failed with "expected one argument".
 
     We only rewrite when the next token starts with a **single** ``-`` (a
     descending sort key); a real long flag (``--json``) or a missing value is left
@@ -1765,27 +1765,27 @@ def run(argv: Sequence[str] | None = None) -> int:
         try:
             return local_func(args)
         except ConfigError as exc:
-            print(f"kan: {exc}", file=sys.stderr)
+            print(f"pandan: {exc}", file=sys.stderr)
             return EXIT_ERROR
 
     try:
         # warmup hits the public /api/health, so it doesn't need a token.
         config = load_config(require_token=getattr(args, "require_token", True))
     except ConfigError as exc:
-        print(f"kan: {exc}", file=sys.stderr)
+        print(f"pandan: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
     try:
-        with KanbanClient(config.api_url, config.token) as client:
+        with PandanClient(config.api_url, config.token) as client:
             result = args.func(client, config, args)
     except ConfigError as exc:  # e.g. delete without --yes
-        print(f"kan: {exc}", file=sys.stderr)
+        print(f"pandan: {exc}", file=sys.stderr)
         return EXIT_ERROR
-    except KanbanApiError as exc:
-        print(f"kan: {exc}", file=sys.stderr)
+    except PandanApiError as exc:
+        print(f"pandan: {exc}", file=sys.stderr)
         return _STATUS_EXIT.get(exc.status_code, EXIT_ERROR)
     except Exception as exc:  # network/timeout/unexpected — keep it clean for scripts
-        print(f"kan: {exc}", file=sys.stderr)
+        print(f"pandan: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
     # ``noun`` defaults to "card" (card verbs are top-level and set no noun);

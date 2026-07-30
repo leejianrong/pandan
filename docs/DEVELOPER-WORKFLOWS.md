@@ -1,6 +1,6 @@
 # Developer Workflows — a portable playbook
 
-This document describes the developer-workflow machinery used in **simple-kanban** and how to
+This document describes the developer-workflow machinery used in **pandan** and how to
 port it into another project (especially one also built with Claude Code agentic coding). It is
 written to be lifted: each section says *what the mechanism is*, *why it exists here*, and *what
 to copy / adapt* for a new repo.

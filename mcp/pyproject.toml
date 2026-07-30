@@ -1,7 +1,7 @@
 [project]
 name = "pandan-mcp"
-version = "0.2.0"
-description = "MCP server exposing the Simple Kanban API (/api/v1) as agent tools"
+version = "0.4.0"
+description = "MCP server exposing the Pandan API (/api/v1) as agent tools"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.2",
@@ -22,7 +22,7 @@ dev = [
 ]
 
 [project.scripts]
-kanban-mcp = "pandan_mcp.server:main"
+pandan-mcp = "pandan_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]

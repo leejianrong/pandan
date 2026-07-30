@@ -17,7 +17,7 @@ test("create a token (revealed once), then revoke it", async ({ page }) => {
   // The secret is revealed exactly once, and it's a real PAT.
   const secret = page.locator(".secret");
   await expect(secret).toBeVisible();
-  await expect(secret).toContainText("kanban_pat_");
+  await expect(secret).toContainText("pandan_pat_");
 
   // It shows up in the token list.
   const row = page.locator(".token-row", { has: page.getByText(name, { exact: true }) });

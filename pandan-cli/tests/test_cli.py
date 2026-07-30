@@ -1,9 +1,9 @@
-"""Unit tests for the ``kan`` CLI.
+"""Unit tests for the ``pandan`` CLI.
 
-The CLI is a thin adapter, so we mock the shared ``KanbanClient`` (patched into
+The CLI is a thin adapter, so we mock the shared ``PandanClient`` (patched into
 ``pandan_cli.cli``) and assert: each subcommand calls the right client method with
 the right args, board-id default resolution, ``--json`` vs human output, and exit
-codes (success, config errors, and a mapped ``KanbanApiError``). A couple of tests
+codes (success, config errors, and a mapped ``PandanApiError``). A couple of tests
 drive the real client over an ``httpx.MockTransport`` to prove the HTTP wiring.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import json
 
 import httpx
 import pytest
-from pandan_client import KanbanApiError
+from pandan_client import PandanApiError
 
 from pandan_cli import cli, config
 
@@ -210,24 +210,33 @@ class FakeClient:
 def isolate_config(monkeypatch, tmp_path):
     """Keep every test hermetic w.r.t. config *discovery*. The suite runs inside the
     repo tree, which has a real ``.mcp.json`` (and a developer may have a real
-    ``~/.config/kan/config.toml``); without this, ``load_config`` would silently
+    ``~/.config/pandan/config.toml``); without this, ``load_config`` would silently
     resolve a token from those and defeat the 'no token → error' tests. Point
     ``XDG_CONFIG_HOME`` at an empty tmp dir and disable ``.mcp.json`` discovery by
-    default; tests exercising those sources re-enable them explicitly."""
+    default; tests exercising those sources re-enable them explicitly.
+
+    Also clears **both** env spellings of every key — the deprecated ``KANBAN_*``
+    fallback (V40, KAN-423) means a developer's own shell could otherwise supply a
+    token and defeat the same tests — and resets the one-shot deprecation-notice
+    memo so notice assertions don't depend on test order."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setattr("pandan_cli.config.find_mcp_json", lambda *a, **k: None)
+    for names in config._ENV_NAMES.values():
+        for name in names:
+            monkeypatch.delenv(name, raising=False)
+    config._warned.clear()
 
 
 @pytest.fixture
 def env(monkeypatch):
     """A valid environment (token set, no default board)."""
-    monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_test")
-    monkeypatch.delenv("KANBAN_BOARD_ID", raising=False)
-    monkeypatch.delenv("KANBAN_API_URL", raising=False)
+    monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_test")
+    monkeypatch.delenv("PANDAN_BOARD_ID", raising=False)
+    monkeypatch.delenv("PANDAN_API_URL", raising=False)
 
 
 def patch_client(monkeypatch, fake: FakeClient) -> FakeClient:
-    monkeypatch.setattr(cli, "KanbanClient", lambda *a, **k: fake)
+    monkeypatch.setattr(cli, "PandanClient", lambda *a, **k: fake)
     return fake
 
 
@@ -241,7 +250,11 @@ def test_version_flag_prints_version_and_exits_zero(flag, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.run([flag])
     assert exc.value.code == 0
-    assert "0.3.0" in capsys.readouterr().out
+    # Asserted against the package's own ``__version__`` rather than a literal, so a
+    # version bump doesn't need a test edit (it did for 0.3.0 → 0.4.0 at the rebrand).
+    from pandan_cli import __version__
+
+    assert capsys.readouterr().out.strip() == f"pandan {__version__}"
 
 
 # --- each command calls the right client method with the right args ---------
@@ -542,7 +555,7 @@ def test_metrics_maps_board_and_window(monkeypatch, env):
 
 def test_metrics_requires_a_board(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result=METRICS))
-    assert cli.run(["metrics"]) == 1  # no --board, no KANBAN_BOARD_ID → refused
+    assert cli.run(["metrics"]) == 1  # no --board, no PANDAN_BOARD_ID → refused
     assert "board is required" in capsys.readouterr().err
 
 
@@ -590,7 +603,7 @@ def test_activity_maps_board_and_filters(monkeypatch, env):
 
 def test_activity_requires_a_board(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"activity": []}))
-    assert cli.run(["activity"]) == 1  # no --board, no KANBAN_BOARD_ID → refused
+    assert cli.run(["activity"]) == 1  # no --board, no PANDAN_BOARD_ID → refused
     assert "board is required" in capsys.readouterr().err
 
 
@@ -778,14 +791,14 @@ def test_move_defaults_position_to_none(monkeypatch, env):
 
 
 def test_list_uses_board_env_default(monkeypatch, env):
-    monkeypatch.setenv("KANBAN_BOARD_ID", "7")
+    monkeypatch.setenv("PANDAN_BOARD_ID", "7")
     fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
     cli.run(["list"])
     assert fake.calls[0][1]["board_id"] == 7
 
 
 def test_flag_overrides_board_env_default(monkeypatch, env):
-    monkeypatch.setenv("KANBAN_BOARD_ID", "7")
+    monkeypatch.setenv("PANDAN_BOARD_ID", "7")
     fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
     cli.run(["list", "--board", "3"])
     assert fake.calls[0][1]["board_id"] == 3
@@ -886,7 +899,7 @@ def test_single_card_with_labels_renders_card_line_not_no_labels(monkeypatch, en
 
 
 def test_label_list_renders_labels(monkeypatch, env, capsys):
-    """`kan label list` on a real ``{"labels": [...]}`` response renders one line
+    """`pandan label list` on a real ``{"labels": [...]}`` response renders one line
     per label (id, name, color) — the legitimate consumer of the labels branch."""
     labels = {"labels": [
         {"id": 1, "name": "bug", "color": "#f00"},
@@ -910,10 +923,10 @@ def test_label_list_empty_shows_no_labels(monkeypatch, env, capsys):
 
 
 def test_missing_token_is_config_error(monkeypatch, capsys):
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     code = cli.run(["list"])
     assert code == cli.EXIT_ERROR
-    assert "KANBAN_TOKEN" in capsys.readouterr().err
+    assert "PANDAN_TOKEN" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -926,16 +939,16 @@ def test_missing_token_is_config_error(monkeypatch, capsys):
     ],
 )
 def test_api_error_maps_to_exit_code(monkeypatch, env, capsys, status, expected):
-    patch_client(monkeypatch, FakeClient(error=KanbanApiError(status, "boom")))
+    patch_client(monkeypatch, FakeClient(error=PandanApiError(status, "boom")))
     code = cli.run(["get", "1"])
     assert code == expected
-    assert "kan:" in capsys.readouterr().err
+    assert "pandan:" in capsys.readouterr().err
 
 
 def test_unexpected_error_is_general(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(error=httpx.ConnectError("down")))
     assert cli.run(["get", "1"]) == cli.EXIT_ERROR
-    assert "kan:" in capsys.readouterr().err
+    assert "pandan:" in capsys.readouterr().err
 
 
 def test_usage_error_exits_two(env):
@@ -988,7 +1001,7 @@ def test_epic_list_maps_board_filter(monkeypatch, env):
 
 
 def test_epic_list_uses_board_env_default(monkeypatch, env):
-    monkeypatch.setenv("KANBAN_BOARD_ID", "7")
+    monkeypatch.setenv("PANDAN_BOARD_ID", "7")
     fake = patch_client(monkeypatch, FakeClient(result={"epics": []}))
     cli.run(["epic", "list"])
     assert fake.calls[0][1]["board_id"] == 7
@@ -1089,11 +1102,11 @@ def test_warmup_not_ok_exits_nonzero(monkeypatch, env, status):
 
 
 def test_warmup_needs_no_token(monkeypatch, capsys):
-    # No KANBAN_TOKEN set — warmup hits the public /api/health, so it must not
+    # No PANDAN_TOKEN set — warmup hits the public /api/health, so it must not
     # error out on a missing token like the other (auth-required) commands do.
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
-    monkeypatch.delenv("KANBAN_BOARD_ID", raising=False)
-    monkeypatch.delenv("KANBAN_API_URL", raising=False)
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    monkeypatch.delenv("PANDAN_BOARD_ID", raising=False)
+    monkeypatch.delenv("PANDAN_API_URL", raising=False)
     patch_client(monkeypatch, FakeClient(result={"status": "ok", "health": {}}))
     assert cli.run(["warmup"]) == cli.EXIT_OK
 
@@ -1130,12 +1143,12 @@ def test_real_client_hits_move_endpoint(monkeypatch, env):
         seen["auth"] = request.headers.get("Authorization")
         return httpx.Response(200, json=CARD)
 
-    from pandan_client import KanbanClient
+    from pandan_client import PandanClient
 
     monkeypatch.setattr(
         cli,
-        "KanbanClient",
-        lambda url, token, **k: KanbanClient(
+        "PandanClient",
+        lambda url, token, **k: PandanClient(
             url, token, transport=httpx.MockTransport(handler)
         ),
     )
@@ -1143,15 +1156,15 @@ def test_real_client_hits_move_endpoint(monkeypatch, env):
     assert seen["method"] == "POST"
     assert seen["path"] == "/api/v1/cards/7/move"
     assert seen["content"] == {"column": "done", "position": 1}
-    assert seen["auth"] == "Bearer kanban_pat_test"
+    assert seen["auth"] == "Bearer pandan_pat_test"
 
 
 def test_real_client_warmup_hits_unversioned_health(monkeypatch):
     # No token in the env: warmup must still reach the unversioned /api/health
     # (not /api/v1/...) and send no Authorization header.
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
-    monkeypatch.delenv("KANBAN_BOARD_ID", raising=False)
-    monkeypatch.delenv("KANBAN_API_URL", raising=False)
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    monkeypatch.delenv("PANDAN_BOARD_ID", raising=False)
+    monkeypatch.delenv("PANDAN_API_URL", raising=False)
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1160,12 +1173,12 @@ def test_real_client_warmup_hits_unversioned_health(monkeypatch):
         seen["auth"] = request.headers.get("Authorization")
         return httpx.Response(200, json={"status": "ok"})
 
-    from pandan_client import KanbanClient
+    from pandan_client import PandanClient
 
     monkeypatch.setattr(
         cli,
-        "KanbanClient",
-        lambda url, token, **k: KanbanClient(
+        "PandanClient",
+        lambda url, token, **k: PandanClient(
             url, token, transport=httpx.MockTransport(handler)
         ),
     )
@@ -1323,72 +1336,72 @@ def test_comment_list_empty_human_output(monkeypatch, env, capsys):
 
 
 # --- config resolution chain (KAN-199) --------------------------------------
-# Precedence per value: env > ~/.config/kan/config.toml > nearest .mcp.json.
+# Precedence per value: env > ~/.config/pandan/config.toml > nearest .mcp.json.
 # The point is that a PAT can live in a file and never touch the command line.
 # (``isolate_config`` autouse fixture keeps the repo's real .mcp.json out of view;
 # these tests opt individual sources back in.)
 
 
-def _write_mcp_json(monkeypatch, tmp_path, env: dict) -> None:
-    """Drop a .mcp.json carrying ``env`` and point discovery at it."""
+def _write_mcp_json(monkeypatch, tmp_path, env: dict, server: str = "pandan") -> None:
+    """Drop a .mcp.json carrying ``env`` under ``server`` and point discovery at it."""
     path = tmp_path / ".mcp.json"
-    path.write_text(json.dumps({"mcpServers": {"kanban": {"env": env}}}), encoding="utf-8")
+    path.write_text(json.dumps({"mcpServers": {server: {"env": env}}}), encoding="utf-8")
     monkeypatch.setattr("pandan_cli.config.find_mcp_json", lambda *a, **k: path)
 
 
 def test_token_from_config_file_when_env_unset(monkeypatch):
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
-    config.write_config_file(token="kanban_pat_fromfile", board_id="9")
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    config.write_config_file(token="pandan_pat_fromfile", board_id="9")
     cfg = config.load_config()
-    assert cfg.token == "kanban_pat_fromfile"
+    assert cfg.token == "pandan_pat_fromfile"
     assert cfg.board_id == 9
 
 
 def test_token_from_mcp_json_when_env_and_file_unset(monkeypatch, tmp_path):
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     _write_mcp_json(
         monkeypatch,
         tmp_path,
         {
-            "KANBAN_TOKEN": "kanban_pat_frommcp",
-            "KANBAN_API_URL": "https://mcp.example",
-            "KANBAN_BOARD_ID": 42,  # a JSON number — must be coerced to int 42
+            "PANDAN_TOKEN": "pandan_pat_frommcp",
+            "PANDAN_API_URL": "https://mcp.example",
+            "PANDAN_BOARD_ID": 42,  # a JSON number — must be coerced to int 42
         },
     )
     cfg = config.load_config()
-    assert cfg.token == "kanban_pat_frommcp"
+    assert cfg.token == "pandan_pat_frommcp"
     assert cfg.api_url == "https://mcp.example"
     assert cfg.board_id == 42
 
 
 def test_env_overrides_config_file_and_mcp_json(monkeypatch, tmp_path):
-    _write_mcp_json(monkeypatch, tmp_path, {"KANBAN_TOKEN": "kanban_pat_mcp", "KANBAN_BOARD_ID": 1})
-    config.write_config_file(token="kanban_pat_file", board_id="2")
-    monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_env")
-    monkeypatch.setenv("KANBAN_BOARD_ID", "3")
+    _write_mcp_json(monkeypatch, tmp_path, {"PANDAN_TOKEN": "pandan_pat_mcp", "PANDAN_BOARD_ID": 1})
+    config.write_config_file(token="pandan_pat_file", board_id="2")
+    monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_env")
+    monkeypatch.setenv("PANDAN_BOARD_ID", "3")
     cfg = config.load_config()
-    assert cfg.token == "kanban_pat_env"
+    assert cfg.token == "pandan_pat_env"
     assert cfg.board_id == 3
 
 
 def test_config_file_overrides_mcp_json(monkeypatch, tmp_path):
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
-    monkeypatch.delenv("KANBAN_BOARD_ID", raising=False)
-    _write_mcp_json(monkeypatch, tmp_path, {"KANBAN_TOKEN": "kanban_pat_mcp", "KANBAN_BOARD_ID": 1})
-    config.write_config_file(token="kanban_pat_file", board_id="2")
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    monkeypatch.delenv("PANDAN_BOARD_ID", raising=False)
+    _write_mcp_json(monkeypatch, tmp_path, {"PANDAN_TOKEN": "pandan_pat_mcp", "PANDAN_BOARD_ID": 1})
+    config.write_config_file(token="pandan_pat_file", board_id="2")
     cfg = config.load_config()
-    assert cfg.token == "kanban_pat_file"
+    assert cfg.token == "pandan_pat_file"
     assert cfg.board_id == 2
 
 
 def test_missing_token_everywhere_raises(monkeypatch):
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     with pytest.raises(config.ConfigError):
         config.load_config()
 
 
 def test_warmup_allows_missing_token_everywhere(monkeypatch):
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     cfg = config.load_config(require_token=False)  # warmup path
     assert cfg.token == ""
 
@@ -1396,7 +1409,7 @@ def test_warmup_allows_missing_token_everywhere(monkeypatch):
 def test_malformed_sources_are_ignored(monkeypatch, tmp_path):
     """A broken config file / .mcp.json must not crash — it's just skipped, so the
     normal 'token required' error still surfaces rather than a traceback."""
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     config.config_file_path().parent.mkdir(parents=True, exist_ok=True)
     config.config_file_path().write_text("this is not = valid toml [", encoding="utf-8")
     bad = tmp_path / ".mcp.json"
@@ -1410,12 +1423,12 @@ def test_write_config_file_is_owner_only_and_merges(monkeypatch):
     p1 = config.write_config_file(api_url="https://a.example", board_id="5")
     assert (p1.stat().st_mode & 0o777) == 0o600
     # A later write of just the token must preserve api_url + board_id.
-    config.write_config_file(token="kanban_pat_x")
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
+    config.write_config_file(token="pandan_pat_x")
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     cfg = config.load_config()
     assert cfg.api_url == "https://a.example"
     assert cfg.board_id == 5
-    assert cfg.token == "kanban_pat_x"
+    assert cfg.token == "pandan_pat_x"
 
 
 def test_find_mcp_json_walks_up(monkeypatch, tmp_path):
@@ -1426,20 +1439,20 @@ def test_find_mcp_json_walks_up(monkeypatch, tmp_path):
 
 
 def test_config_show_redacts_token(monkeypatch, tmp_path, capsys):
-    _write_mcp_json(monkeypatch, tmp_path, {"KANBAN_TOKEN": "kanban_pat_supersecret1234"})
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
+    _write_mcp_json(monkeypatch, tmp_path, {"PANDAN_TOKEN": "pandan_pat_supersecret1234"})
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     assert cli.run(["config", "show"]) == cli.EXIT_OK
     out = capsys.readouterr().out
-    assert "kanban_pat_supersecret1234" not in out  # never print the raw token
+    assert "pandan_pat_supersecret1234" not in out  # never print the raw token
     assert "1234" in out  # but the last 4 identify it
 
 
 def test_config_set_token_stdin_never_needs_argv(monkeypatch, capsys):
-    monkeypatch.setattr("sys.stdin", io.StringIO("kanban_pat_viastdin\n"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("pandan_pat_viastdin\n"))
     assert cli.run(["config", "set", "--token-stdin", "--board-id", "8"]) == cli.EXIT_OK
-    monkeypatch.delenv("KANBAN_TOKEN", raising=False)
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     cfg = config.load_config()
-    assert cfg.token == "kanban_pat_viastdin"
+    assert cfg.token == "pandan_pat_viastdin"
     assert cfg.board_id == 8
 
 
@@ -1469,7 +1482,7 @@ def test_next_claim_dispatches(monkeypatch, env):
 def test_next_requires_a_board(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result={"card": CARD}))
     code = cli.run(["next"])
-    # No --board and no KANBAN_BOARD_ID → config error, no client call.
+    # No --board and no PANDAN_BOARD_ID → config error, no client call.
     assert code == cli.EXIT_ERROR
     assert fake.calls == []
 
@@ -1698,7 +1711,7 @@ def test_dep_add_resolves_both_card_and_blocker_tickets(monkeypatch, env):
 
 
 # --- KAN-286: `--sort` with a leading-dash value in the space form -----------
-# `kan list --sort -priority,position` used to fail ("expected one argument")
+# `pandan list --sort -priority,position` used to fail ("expected one argument")
 # because argparse read the leading '-' as a flag; only `--sort=...` worked. The
 # argv normalizer rewrites `--sort -spec` → `--sort=-spec` so the documented space
 # form works, without breaking the equals form.
@@ -1824,3 +1837,142 @@ def test_label_create_default_color_when_omitted(monkeypatch, env):
     assert fake.calls == [
         ("create_label", {"board_id": 2, "name": "bug", "color": cli.DEFAULT_LABEL_COLOR})
     ]
+
+
+# --- rebrand: PANDAN_* wins, KANBAN_* is a deprecated fallback (V40, KAN-423) --
+# Precedence is per *value*, so a half-migrated environment resolves correctly
+# instead of one stale var poisoning the whole config. The notice goes to stderr
+# because stdout is machine-readable (--json is piped into jq).
+
+
+def test_pandan_env_wins_over_kanban_env(monkeypatch, capsys):
+    monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_new")
+    monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_old")
+    monkeypatch.setenv("PANDAN_API_URL", "https://new.example")
+    monkeypatch.setenv("KANBAN_API_URL", "https://old.example")
+    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
+    monkeypatch.setenv("KANBAN_BOARD_ID", "9")
+
+    cfg = config.load_config()
+
+    assert cfg.token == "pandan_pat_new"
+    assert cfg.api_url == "https://new.example"
+    assert cfg.board_id == 5
+    # Nothing resolved from a deprecated name, so nothing is warned about.
+    assert capsys.readouterr().err == ""
+
+
+def test_kanban_env_alone_still_resolves_and_warns(monkeypatch, capsys):
+    monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_old")
+    monkeypatch.setenv("KANBAN_API_URL", "https://old.example")
+    monkeypatch.setenv("KANBAN_BOARD_ID", "9")
+
+    cfg = config.load_config()
+
+    assert cfg.token == "kanban_pat_old"
+    assert cfg.api_url == "https://old.example"
+    assert cfg.board_id == 9
+    err = capsys.readouterr().err
+    for name in ("KANBAN_TOKEN", "KANBAN_API_URL", "KANBAN_BOARD_ID"):
+        assert name in err
+        assert name.replace("KANBAN_", "PANDAN_") in err
+    assert "deprecated" in err
+
+
+def test_deprecation_notice_is_emitted_once_per_process(monkeypatch, capsys):
+    monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_old")
+    config.load_config()
+    first = capsys.readouterr().err
+    config.load_config()
+    assert first.count("KANBAN_TOKEN") == 1
+    assert capsys.readouterr().err == ""  # second resolve stays quiet
+
+
+def test_mixed_env_resolves_per_value(monkeypatch):
+    """A half-migrated env: new token, old board id. Both must land."""
+    monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_new")
+    monkeypatch.setenv("KANBAN_BOARD_ID", "9")
+    cfg = config.load_config()
+    assert cfg.token == "pandan_pat_new"
+    assert cfg.board_id == 9
+
+
+def test_no_token_from_either_spelling_is_a_config_error(monkeypatch, capsys):
+    assert cli.run(["list"]) == cli.EXIT_ERROR
+    err = capsys.readouterr().err
+    assert "PANDAN_TOKEN is required" in err
+    assert "pandan_pat_" in err
+
+
+def test_mcp_json_pandan_server_key_is_read(monkeypatch, tmp_path):
+    _write_mcp_json(monkeypatch, tmp_path, {"PANDAN_TOKEN": "pandan_pat_mcp"})
+    assert config.load_config().token == "pandan_pat_mcp"
+
+
+def test_mcp_json_falls_back_to_legacy_server_key_and_env_names(monkeypatch, tmp_path):
+    """A live pre-rebrand .mcp.json — `kanban` server key, `KANBAN_*` env — still works."""
+    _write_mcp_json(
+        monkeypatch,
+        tmp_path,
+        {"KANBAN_TOKEN": "kanban_pat_mcp", "KANBAN_BOARD_ID": 3},
+        server="kanban",
+    )
+    cfg = config.load_config()
+    assert cfg.token == "kanban_pat_mcp"
+    assert cfg.board_id == 3
+
+
+def test_mcp_json_prefers_pandan_server_over_kanban(monkeypatch, tmp_path):
+    path = tmp_path / ".mcp.json"
+    path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "kanban": {"env": {"KANBAN_TOKEN": "kanban_pat_old"}},
+                    "pandan": {"env": {"PANDAN_TOKEN": "pandan_pat_new"}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("pandan_cli.config.find_mcp_json", lambda *a, **k: path)
+    assert config.load_config().token == "pandan_pat_new"
+
+
+# --- rebrand: config directory migration (V40, KAN-423) ----------------------
+
+
+def test_legacy_config_dir_is_migrated_on_read(capsys):
+    """``~/.config/kan/config.toml`` is copied to ``~/.config/pandan/`` on first use."""
+    legacy = config.legacy_config_file_path()
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        '[kan]\ntoken = "kanban_pat_legacydir"\nboard_id = 4\n', encoding="utf-8"
+    )
+
+    cfg = config.load_config()
+
+    assert cfg.token == "kanban_pat_legacydir"
+    assert cfg.board_id == 4
+    new = config.config_file_path()
+    assert new.is_file()
+    assert legacy.is_file()  # left in place, so an old binary keeps working
+    assert new.stat().st_mode & 0o777 == 0o600
+    assert str(new) in capsys.readouterr().err  # one-line notice, on stderr
+
+
+def test_existing_new_config_is_not_overwritten_by_the_legacy_one():
+    config.write_config_file(token="pandan_pat_current")
+    legacy = config.legacy_config_file_path()
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text('[kan]\ntoken = "kanban_pat_stale"\n', encoding="utf-8")
+
+    assert config.load_config().token == "pandan_pat_current"
+
+
+def test_write_config_file_renders_the_pandan_table():
+    path = config.write_config_file(token="pandan_pat_x", board_id="2")
+    body = path.read_text(encoding="utf-8")
+    assert body.startswith("[pandan]")
+    # And it round-trips through the reader.
+    assert config.load_config().token == "pandan_pat_x"

@@ -1,4 +1,4 @@
-# SHAPING — Simple Kanban (MVP)
+# SHAPING — Pandan (MVP)
 
 Shape Up shaping workbook. Sources: FRAME.md, docs/PRD.md, CONTEXT.md, docs/adr/*.
 Steps: Build R → Sketch S → Fit Check (R×S) → [Spikes] → Select → Detail.

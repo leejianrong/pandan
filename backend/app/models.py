@@ -8,7 +8,13 @@ belong to (ADR 0009). Key mechanisms:
   Postgres SEQUENCE via a server_default — ``'KAN-' || nextval('card_ticket_seq')``
   for cards, ``'EPIC-' || nextval('epic_ticket_seq')`` for epics — immutable, never
   reused, and independent (KAN-1 and EPIC-1 can coexist). Ticket sequences stay
-  **global** across boards (D4) — no per-board prefixes.
+  **global** across boards (D4) — no per-board prefixes. The ``KAN-``/``EPIC-``
+  prefixes survived the ``simple-kanban`` → ``pandan`` rebrand **on purpose**
+  (V40, KAN-423, ADR 0018 §"What is deliberately NOT renamed"): because the numbers
+  are immutable and never reused there is no correct way to renumber history, so
+  renaming the prefix would leave ``KAN-1…N`` beside ``PAN-N+1…`` on the board that
+  *is* this project's record. A legacy prefix beats a split one — ``KAN`` is simply
+  retconned as "kanban". Please don't "finish" the rename here.
 - ``column`` is a plain ``varchar`` guarded by a CHECK constraint (not a native PG
   enum) so new column values need no ``ALTER TYPE`` migration (ADR 0008).
 - Every card + epic belongs to exactly one board via a NOT NULL ``board_id`` FK
@@ -191,6 +197,7 @@ class Epic(Base):
         unique=True,
         nullable=False,
         # Assigned by the DB at INSERT; the sequence is created in the migration.
+        # ``EPIC-`` is deliberately NOT rebranded — see the module docstring.
         server_default=text("'EPIC-' || nextval('epic_ticket_seq')"),
     )
     # The board this epic belongs to (M3 V7). NOT NULL; cascade on board delete.
@@ -414,6 +421,7 @@ class Card(Base):
         unique=True,
         nullable=False,
         # Assigned by the DB at INSERT; the sequence is created in the migration.
+        # ``KAN-`` is deliberately NOT rebranded — see the module docstring.
         server_default=text("'KAN-' || nextval('card_ticket_seq')"),
     )
     # The board this story lives on (M3 V7). NOT NULL; cascade on board delete.

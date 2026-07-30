@@ -1,17 +1,17 @@
 name: Release CLI binary
 
-# Build the `kan` CLI as a single self-contained executable (PyInstaller
+# Build the `pandan` CLI as a single self-contained executable (PyInstaller
 # --onefile: freezes the interpreter + pandan_cli + the sibling pandan-client
 # path dep + httpx into one file) so users can run it with no Python/uv
 # installed (KAN-46). PyInstaller can't cross-compile, so we build natively on
 # each target OS in a matrix and attach the results to the GitHub Release.
 #
-# SHIPPED LEGS: only `kan-linux-x86_64` (glibc-2.28 container build, below) and
-# `kan-macos-arm64`. The Intel-mac (x86_64) leg was DROPPED (KAN-225):
+# SHIPPED LEGS: only `pandan-linux-x86_64` (glibc-2.28 container build, below) and
+# `pandan-macos-arm64`. The Intel-mac (x86_64) leg was DROPPED (KAN-225):
 # PyInstaller can't cross-compile so it must build on a native Intel runner, and
 # GitHub's free Intel macOS runners are scarce/being retired, so that leg sat
 # `queued` forever and the whole release run never reached a terminal state while
-# the other assets attached fine. Intel-Mac users run the `kan-macos-arm64`
+# the other assets attached fine. Intel-Mac users run the `pandan-macos-arm64`
 # binary under Rosetta 2, install from source via `uv`, or use the MCP container
 # image.
 #
@@ -51,13 +51,13 @@ jobs:
         include:
           - os: ubuntu-latest   # x86_64 Linux — built in a glibc-2.28 container
             container: quay.io/pypa/manylinux_2_28_x86_64
-            asset: kan-linux-x86_64
+            asset: pandan-linux-x86_64
           - os: macos-14        # Apple Silicon (arm64)
             container: ''
-            asset: kan-macos-arm64
+            asset: pandan-macos-arm64
       # Windows is intentionally omitted for now — the .exe packaging + smoke
       # step differ enough to defer; add a `windows-latest` row (asset
-      # `kan-windows-x86_64.exe`) when there's demand.
+      # `pandan-windows-x86_64.exe`) when there's demand.
     defaults:
       run:
         working-directory: pandan-cli
@@ -153,7 +153,7 @@ jobs:
       - name: Smoke-test the binary
         run: |
           ./dist/${{ matrix.asset }} --help
-          KANBAN_API_URL=https://simple-kanban-jian.fly.dev ./dist/${{ matrix.asset }} warmup
+          PANDAN_API_URL=https://simple-kanban-jian.fly.dev ./dist/${{ matrix.asset }} warmup
 
       - name: Attach binary to the Release
         uses: softprops/action-gh-release@v3

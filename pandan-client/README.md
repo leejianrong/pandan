@@ -1,15 +1,15 @@
 # pandan-client
 
-The shared, synchronous `httpx` wrapper over the Simple Kanban REST API
+The shared, synchronous `httpx` wrapper over the Pandan REST API
 (`/api/v1`). It is the **single source of truth** for talking to the API so the
 thin adapters that sit on top of it — the [MCP server](../mcp) and (later) a CLI
 — never drift (DRY; API-first, ADR 0005).
 
-- `KanbanClient(base_url, token=None, *, transport=None, timeout=...)` — one
+- `PandanClient(base_url, token=None, *, transport=None, timeout=...)` — one
   method per endpoint (boards / cards / epics CRUD + `move_card`). Config is
   passed in by the caller; this package reads **no environment**, so each adapter
   owns its own env parsing (`pandan_mcp.config`, etc.).
-- `KanbanApiError` — raised on any non-2xx response, carrying the API's own
+- `PandanApiError` — raised on any non-2xx response, carrying the API's own
   `detail` string plus a friendly hint for `401`/`403`.
 
 ## Consumed via a path dependency

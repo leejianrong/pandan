@@ -5,11 +5,16 @@ import asyncio
 import json
 
 import httpx
-from pandan_client import KanbanClient
+from pandan_client import PandanClient
 
 from pandan_mcp import server
 from pandan_mcp.server import mcp
 
+# Bare tool names — the Python function names, which the rebrand does NOT touch.
+# The agent-visible identifier is ``mcp__<server>__<tool>``, and the ``<server>``
+# part comes from the client's ``mcpServers`` key in ``.mcp.json`` (V40 changed it
+# ``kanban`` → ``pandan``, so tools are now ``mcp__pandan__*``). None of that is
+# visible from inside the server, so this set is unaffected by the rename.
 EXPECTED_TOOLS = {
     "list_boards",
     "create_board",
@@ -87,7 +92,7 @@ def test_create_card_schema_marks_title_required():
 
 def _stub_client(monkeypatch, default_board_id):
     """Point the server's lazily-built client at a MockTransport and set the
-    KANBAN_BOARD_ID default, capturing the outgoing request."""
+    PANDAN_BOARD_ID default, capturing the outgoing request."""
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -95,7 +100,7 @@ def _stub_client(monkeypatch, default_board_id):
         seen["content"] = request.content
         return httpx.Response(201, json={"id": 1})
 
-    client = KanbanClient("http://test", transport=httpx.MockTransport(handler))
+    client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
     monkeypatch.setattr(server, "_default_board_id", default_board_id)
     return seen
@@ -133,7 +138,7 @@ def _capture_client(monkeypatch, response):
         seen["content"] = request.content
         return response
 
-    client = KanbanClient("http://test", transport=httpx.MockTransport(handler))
+    client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
     monkeypatch.setattr(server, "_default_board_id", None)
     return seen
@@ -256,7 +261,7 @@ def test_list_cards_passes_sort_and_assignee(monkeypatch):
         seen["params"] = dict(request.url.params)
         return httpx.Response(200, json=[])
 
-    client = KanbanClient("http://test", transport=httpx.MockTransport(handler))
+    client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
     monkeypatch.setattr(server, "_default_board_id", None)
     server.list_cards(board_id=3, sort="-priority", assignee="agent-7")
@@ -321,7 +326,7 @@ def _capture_get(monkeypatch, response):
         seen["params"] = dict(request.url.params)
         return response
 
-    client = KanbanClient("http://test", transport=httpx.MockTransport(handler))
+    client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
     monkeypatch.setattr(server, "_default_board_id", None)
     return seen

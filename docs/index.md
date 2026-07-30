@@ -1,4 +1,4 @@
-# Simple Kanban
+# Pandan
 
 A small, API-first kanban board built as a [Shape Up](https://basecamp.com/shapeup) project —
 view, create, edit, delete, and drag-to-move stories across columns, behind a clean REST API with

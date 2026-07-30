@@ -1,4 +1,4 @@
-# Zensical configuration for the Simple Kanban documentation site.
+# Zensical configuration for the Pandan documentation site.
 #
 # Zensical (https://zensical.org) is the successor to Material for MkDocs from
 # the same team. It renders the docs/ markdown tree to a static site/ directory.
@@ -12,11 +12,11 @@
 # rebuilds it fresh on every run.
 
 [project]
-site_name = "Simple Kanban Docs"
-site_description = "Design docs, ADRs, and guides for the Simple Kanban project — a Shape Up, API-first kanban board with an agent-driven task-tracking layer."
+site_name = "Pandan Docs"
+site_description = "Design docs, ADRs, and guides for the Pandan project — a Shape Up, API-first kanban board with an agent-driven task-tracking layer."
 site_author = "Jian"
 site_url = "https://leejianrong.github.io/simple-kanban/"
-copyright = "Copyright &copy; 2026 Simple Kanban"
+copyright = "Copyright &copy; 2026 Pandan"
 
 docs_dir = "docs"
 site_dir = "site"
