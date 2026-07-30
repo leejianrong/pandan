@@ -1170,3 +1170,105 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
     the dialog to lock in "no double-render".
   - **The help overlay is OS-aware:** it labels the palette chord `⌘K` on macOS and `Ctrl-K` elsewhere
     (`/mac/i.test(navigator.platform)`), so Windows/Linux users see the right modifier.
+
+---
+
+## Milestone 7 — V40: the `simple-kanban` → `pandan` rebrand (KAN-423, PRs #197 + #200, v0.4.0)
+
+The first slice of M7, driven PM-style with one sub-agent in a worktree across two sequential PRs,
+then released as **v0.4.0** and re-verified using the *released* artifact rather than the source tree.
+Full decision record in [ADR 0018](adr/0018-pandan-rebrand.md).
+
+### Process learnings
+
+- **An ADR asserted a property the code never had, and "verified by inspection" made it sound like
+  evidence.** ADR 0018 claimed the PAT resolver had "no `startswith` guard anywhere", so flipping
+  `TOKEN_PREFIX` would be safe for existing tokens. The guard is at `backend/app/authz.py:85` and
+  would have `401`'d **every** already-issued `kanban_pat_…` token — the exact forced rotation the ADR
+  promised to avoid. The author had grepped the *literal* `kanban_pat` and `TOKEN_PREFIX` only within
+  `tokens.py`; a guard in another module referencing the constant was invisible to both greps.
+  **Rule adopted: a claim about code cites the `file:line` it inspected.** That mechanically forces a
+  repo-wide grep for the *symbol* instead of a scan of whichever file you happened to open. This is
+  the usual doc-drift failure mode inverted — not docs lagging code, but a doc asserting a code
+  property nobody ever checked.
+- **The sub-agent was briefed to STOP rather than patch if it found such a guard, and that paid off.**
+  It reported the contradiction instead of silently "fixing" the ADR's intent, which kept the decision
+  with the PM. Worth briefing explicitly on any slice where a doc makes a safety claim.
+- **Mutation-test a fix whose whole purpose is "don't break existing users."** The agent reverted the
+  repaired guard, confirmed the legacy-token test *failed*, then restored it. A passing test proves
+  nothing about a compatibility guarantee unless you've watched it fail.
+- **Split a rename by how each half is VERIFIED, not by size.** The slice note said "one PR"; the PM
+  overrode it. Structural (dirs, packaging, CI path filters, locks, image build) is provable *by CI*;
+  semantic (brand strings, env vars, prefixes) is only provable *by reading*. Mixed, the second half
+  drowns in ~700 lines of the first. Recorded as an amendment in ADR 0018.
+- **`dorny/paths-filter` is the highest-risk edit in any directory rename.** A stale filter makes CI
+  jobs report **skipped**, not failed — a broken package looks green. Demand positive evidence: for a
+  PR touching all three packages, the `CLI`/`client`/`MCP` jobs must each show the `Skip (…)` step
+  **skipped** and ruff+pytest **success**. "All checks green" alone does not distinguish the two.
+- **Ticket numbers are globally sequenced across ALL boards, not per board.** Filing four cards in a
+  row produced KAN-435, 437, 439, 442 — 436/438/440/441 went to other boards on the same instance.
+  Don't assume contiguity within a board, and don't guess an id when adding a dependency (`kan dep add`
+  rejects a cross-board blocker with `422: blocker must be on the same board`, which is how this was
+  discovered).
+
+### Rename-specific traps
+
+- **Longest-first replacement, or prefix overlap bites.** `kanban_client` contains `kanban_cli` as a
+  prefix, so a naive `kanban_cli→pandan_cli` sed happens to be correct *by coincidence*. The real
+  casualty was `simple-kanban-cli` → `simple-pandan-cli`, which slipped through twice (a dist name
+  caught in PR 1 review, then two `uv tool uninstall` strings in a README caught in PR 2). Replace
+  longest-first and re-read every `name =` afterwards.
+- **Decide up front what a rename must NOT touch, and comment it in the code.** V40's non-goals:
+  the `KAN-`/`EPIC-` ticket prefixes (immutable sequences — renaming splits the board's own history),
+  the `kanbanauth` cookie / `X-Kanban-Event` header / `kanban.*` loggers / `kanban.theme` localStorage
+  keys (each logs users out, breaks a consumer, or resets local state), the `kanban:kanban@…/kanban`
+  local Postgres creds (breaks every existing dev volume), and the **CI job display names** (branch
+  protection matches required checks against them — renaming makes required checks unresolvable, so
+  it's an ops step, never a PR).
+- **Leave dated records factually intact.** `docs/milestone-2…6/**`, UAT files, the blog, and
+  `REQS.md`/`FRAME.md`'s verbatim quotes of the original ask keep saying `simple-kanban`, because
+  rewriting them would make them lie about *when* the name changed — same reasoning as keeping `KAN-`.
+  *Path* references still get updated (a path must be accurate to be useful); *brand* references in a
+  dated record do not. This distinction is worth stating explicitly or a future sweep will "fix" them.
+- **A deprecated env fallback is cheap insurance during a rename.** `PANDAN_*` is read first, `KANBAN_*`
+  second with a one-line notice on **stderr** (never stdout — that's the machine-readable channel, and
+  for the MCP server it's the JSON-RPC transport). Precedence is *per value*, so a half-migrated
+  environment resolves correctly instead of failing confusingly.
+
+### Release + distribution learnings
+
+- **`[project.scripts]` aliases do not survive PyInstaller.** ADR 0018 promised `pandan` *and* a `pdn`
+  alias; `pyproject.toml` declares both. But `--onefile` produces exactly ONE executable, so anyone
+  using the documented primary install path (download the release asset onto `$PATH`) gets `pandan` and
+  no `pdn`. The alias only exists for `uv tool install`. Filed as **KAN-442**. General lesson: a
+  console-script alias is an *install-method-dependent* feature — verify it on the install path your
+  docs lead with, not the one your tests use.
+- **During a CLI rename, symlink the old name at the new binary instead of deleting or keeping it.**
+  `~/.local/bin/kan` was a stale 0.3.0 build; replacing it with a symlink to `pandan` preserves muscle
+  memory *and* eliminates the staleness, which deleting (breaks habits) and leaving it (the original
+  bug) both fail to do. `pandan`, `pdn` and `kan` now all report `pandan 0.4.0`.
+- **Verify a release by driving the board with the downloaded asset**, not the source tree. v0.4.0 was
+  confirmed by running `pandan warmup` / `board list` / `get KAN-423` / `label create --color` from
+  `~/.local/bin/pandan` — which also proved the two fixes that shipped *after* v0.3.0 and were never
+  released (KAN-285 ticket-refs-as-ids, KAN-288 `label --color`) are finally in a downloadable build.
+  Those two being unreleased for ten days is what caused two false bug reports; root cause carded as
+  **KAN-435**.
+- **The ghcr image path was deliberately left as `simple-kanban-mcp`.** Renaming it creates a *new*
+  package whose first push is **private** until a manual GitHub web-UI visibility flip, so it's folded
+  into **KAN-437** with the other in-place identity renames rather than blocking the release.
+
+### Incidental findings worth carding
+
+- **KAN-440** — `scripts/git-hooks/pre-push` has no `pandan-cli/` block, so CLI-only slices push with
+  no local signal even though CI has a dedicated `CLI` job. Matters immediately: nearly all of M7's
+  Wave 2 is CLI-only.
+- **A non-CI e2e run rewrites six tracked repo-root PNGs** (`dashboard.spec.ts` writes `../` copies
+  when `!CI`), so *any* local e2e run dirties the tree and reads as an accidental commit. Here it was
+  desirable — the baselines now show *Pandan* — but the coupling is a trap; writing to a gitignored
+  path and copying deliberately would be cleaner.
+- **`frontend/e2e/card-markdown.spec.ts` hardcodes a dead agent scratchpad path** from a previous
+  session, which exists on no other machine and will surface in every future leftover grep.
+- **`make worktree-e2e` fails on a missing Chromium** with 43 identical launch errors — a false red
+  that reads as a code failure until you read one line. `npx playwright install chromium` fixes it;
+  CLAUDE.md documents the one-time install for `npm run e2e` but not for the worktree target, which is
+  exactly where a fresh tree hits it.
