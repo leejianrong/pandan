@@ -4,11 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status & the source of truth
 
-The core board, **Milestone 2** (agent-driven task tracking: epics, `/api/v1`, query API, MCP
-server) and **Milestone 3** (accounts, multi-board ownership, auth) are all shipped and deployed
-(live at [simple-kanban-jian.fly.dev](https://simple-kanban-jian.fly.dev), full backend-pytest +
-Playwright-e2e suite, CI/CD to Fly.io). **Milestone 4** (board collaboration, trust & history,
-GitHub PR auto-sync, agent/CLI ergonomics) is in progress.
+The core board and **Milestones 2–6** are all shipped and deployed (live at
+[simple-kanban-jian.fly.dev](https://simple-kanban-jian.fly.dev), full backend-pytest +
+Playwright-e2e suite, CI/CD to Fly.io): M2 agent-driven task tracking (epics, `/api/v1`, query API,
+MCP server), M3 accounts + multi-board ownership + auth, M4 board collaboration/trust/history + GitHub
+PR auto-sync + agent-CLI ergonomics, M5 agent↔human handoff + awareness UI + fleet reporting, M6
+abuse hardening + projects + cycles + design system + notifications.
+
+**Milestone 7** ("Name & Sharpen the Tools", [docs/milestone-7/](docs/milestone-7/SLICES.md)) is
+**planned, not started**: the **`simple-kanban` → `pandan` rebrand** ([ADR 0018](docs/adr/0018-pandan-rebrand.md),
+which also names the `kaya` notes sibling) followed by [AXI](https://axi.md/) conformance for the CLI
+and a right-sizing of the 48-tool MCP surface. It changes no API, schema or migration. **Until V40
+lands, everything below still uses the `simple-kanban` / `kan` / `KANBAN_*` names** — treat a
+`pandan` reference in the M7 docs as future tense.
 
 **This file is not the roadmap, and per-feature status written here goes stale — trust the code over
 these docs, and when they disagree, fix the docs in the same PR.** Two places are kept current by
@@ -409,7 +417,7 @@ spec for intended behavior:
 `SHAPING.md` (selects Shape A) → `BREADBOARD.md` (UI places & wiring) → build in slices.
 
 - **[docs/CONTEXT.md](docs/CONTEXT.md)** — canonical glossary and domain model. Use these terms exactly.
-- **[docs/adr/](docs/adr/)** (0001–0016; all Accepted except 0010, superseded) — the *why* behind each decision: monorepo &
+- **[docs/adr/](docs/adr/)** (0001–0018; all Accepted except 0010, superseded) — the *why* behind each decision: monorepo &
   stack (0001), Postgres+Alembic from day one (0002), single-artifact serving (0003), Fly.io+Neon
   CI/CD (0004), API-first/MCP-ready (0005), data model (0006), no-auth/LWW/no-realtime (0007),
   sync-SQLAlchemy + psycopg v3 + varchar-CHECK column + Vite dev-proxy (0008), epic as a first-class
@@ -424,4 +432,9 @@ spec for intended behavior:
   0010's shared `API_TOKENS` as the agent mechanism (0014), MCP board-scoping (per-call `board_id` +
   `list_boards`/`create_board` discovery + `KANBAN_BOARD_ID`) and **retiring `API_TOKENS`** — removing
   the transitional SERVICE bypass so every principal is a real user, fully superseding 0010 (0015),
-  GitHub PR→board auto-sync via a signed webhook (`WEBHOOK_SECRET`, per-board opt-in) (0016).
+  GitHub PR→board auto-sync via a signed webhook (`WEBHOOK_SECRET`, per-board opt-in) (0016),
+  observability — DB-readiness health + structured request logging + opt-in Sentry (0017), and the
+  **`simple-kanban` → `pandan` rebrand** with `kaya` as the notes sibling (suite: `kayatoast`) —
+  what gets renamed (CLI `kan`→`pandan`+`pdn`, MCP tool namespace, `PANDAN_*` env with a deprecated
+  `KANBAN_*` fallback, PAT mint prefix) and what deliberately does **not** (the immutable `KAN-`/
+  `EPIC-` ticket prefixes) (0018).
