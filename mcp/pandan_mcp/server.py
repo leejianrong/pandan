@@ -14,15 +14,15 @@ boards, create = your earliest board). Card-id-addressed tools
 (``get_card``/``update_card``/``move_card``/``delete_card``) need no ``board_id``:
 the server authorizes via the card's own board.
 
-Run with ``python -m kanban_mcp`` (or the ``kanban-mcp`` script); Claude Code
+Run with ``python -m pandan_mcp`` (or the ``kanban-mcp`` script); Claude Code
 launches it over stdio per the .mcp.json snippet in the README.
 """
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from kanban_client import KanbanClient
 from mcp.server.fastmcp import FastMCP
+from pandan_client import KanbanClient
 
 from .config import load_config
 

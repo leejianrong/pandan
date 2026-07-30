@@ -1,4 +1,4 @@
-"""Console entry point for the ``kan`` CLI (also ``python -m kanban_cli``)."""
+"""Console entry point for the ``kan`` CLI (also ``python -m pandan_cli``)."""
 from __future__ import annotations
 
 import sys

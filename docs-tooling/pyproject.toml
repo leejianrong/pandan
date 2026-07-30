@@ -8,7 +8,7 @@
 # Build the site from the REPO ROOT (so zensical.toml's docs_dir="docs" resolves):
 #   uv run --project docs-tooling --frozen zensical build --strict --clean
 [project]
-name = "kanban-docs-tooling"
+name = "pandan-docs-tooling"
 version = "0"
 description = "Documentation site toolchain (Zensical) for Simple Kanban."
 requires-python = ">=3.12"

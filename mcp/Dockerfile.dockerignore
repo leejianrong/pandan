@@ -1,9 +1,9 @@
 # Build-context ignore for the MCP image (KAN-47). The build context is the REPO
 # ROOT (docker build -f mcp/Dockerfile .), but the Dockerfile only COPYs mcp/ and
-# its sibling kanban-client/ — so exclude everything else to keep the context tiny.
+# its sibling pandan-client/ — so exclude everything else to keep the context tiny.
 # BuildKit prefers this <dockerfile>.dockerignore over the root .dockerignore.
 *
-!kanban-client
+!pandan-client
 !mcp
 
 # Drop heavy/derived bits even inside the two dirs we keep.

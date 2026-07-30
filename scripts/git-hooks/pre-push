@@ -99,12 +99,12 @@ else
   echo "pre-push ▸ mcp: skipped (no mcp/ changes)"
 fi
 
-if touched "kanban-client/"; then
+if touched "pandan-client/"; then
   ran_any=1
-  echo "pre-push ▸ kanban-client: ruff + tests"
-  ( cd "$repo_root/kanban-client" && uv run ruff check . && uv run pytest -q )
+  echo "pre-push ▸ pandan-client: ruff + tests"
+  ( cd "$repo_root/pandan-client" && uv run ruff check . && uv run pytest -q )
 else
-  echo "pre-push ▸ kanban-client: skipped (no kanban-client/ changes)"
+  echo "pre-push ▸ pandan-client: skipped (no pandan-client/ changes)"
 fi
 
 if [ "$ran_any" -eq 0 ]; then

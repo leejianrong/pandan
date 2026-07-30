@@ -31,7 +31,7 @@ import sys
 from collections.abc import Sequence
 from typing import Any
 
-from kanban_client import KanbanApiError, KanbanClient
+from pandan_client import KanbanApiError, KanbanClient
 
 from . import __version__
 from .config import (

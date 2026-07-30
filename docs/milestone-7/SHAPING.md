@@ -47,7 +47,7 @@ the cutover is a create-migrate-destroy sequence with DNS in the middle. That ea
 
 ### AXI conformance — the honest audit
 
-Walked the CLI against all ten principles (2026-07-31). **Audited against `kanban-cli/` at `main`, not
+Walked the CLI against all ten principles (2026-07-31). **Audited against `pandan-cli/` at `main`, not
 against an installed binary** — see the methodology warning below, which is in this doc because the
 first pass got it wrong. The discipline principles were already satisfied — a credit to the M4/M5 CLI
 work — and the real gaps cluster in *what the output tells an agent to do next*:
@@ -85,8 +85,8 @@ distinguish them — and `release-cli.yml` only fires on a `v*` tag, so nothing 
 user-visible fix lands. That cost two false bug reports and, in this very milestone, one duplicate
 slice and one invalid card. It is tracked as **KAN-435** and is the highest-priority item in EPIC-67.
 
-> **Methodology, for anyone auditing this CLI again: run `uv run python -m kanban_cli …` from
-> `kanban-cli/`, never a `kan` on your `PATH`.** An installed binary may predate any fix, and until
+> **Methodology, for anyone auditing this CLI again: run `uv run python -m pandan_cli …` from
+> `pandan-cli/`, never a `kan` on your `PATH`.** An installed binary may predate any fix, and until
 > KAN-435 lands `--version` cannot tell you. Two of this audit's four "findings" were artefacts of
 > ignoring this.
 

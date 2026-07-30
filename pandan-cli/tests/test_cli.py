@@ -1,7 +1,7 @@
 """Unit tests for the ``kan`` CLI.
 
 The CLI is a thin adapter, so we mock the shared ``KanbanClient`` (patched into
-``kanban_cli.cli``) and assert: each subcommand calls the right client method with
+``pandan_cli.cli``) and assert: each subcommand calls the right client method with
 the right args, board-id default resolution, ``--json`` vs human output, and exit
 codes (success, config errors, and a mapped ``KanbanApiError``). A couple of tests
 drive the real client over an ``httpx.MockTransport`` to prove the HTTP wiring.
@@ -13,9 +13,9 @@ import json
 
 import httpx
 import pytest
-from kanban_client import KanbanApiError
+from pandan_client import KanbanApiError
 
-from kanban_cli import cli, config
+from pandan_cli import cli, config
 
 # The real find_mcp_json, captured before the autouse fixture patches it out — so
 # the test that exercises the upward walk itself can reach the genuine impl.
@@ -215,7 +215,7 @@ def isolate_config(monkeypatch, tmp_path):
     ``XDG_CONFIG_HOME`` at an empty tmp dir and disable ``.mcp.json`` discovery by
     default; tests exercising those sources re-enable them explicitly."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    monkeypatch.setattr("kanban_cli.config.find_mcp_json", lambda *a, **k: None)
+    monkeypatch.setattr("pandan_cli.config.find_mcp_json", lambda *a, **k: None)
 
 
 @pytest.fixture
@@ -1130,7 +1130,7 @@ def test_real_client_hits_move_endpoint(monkeypatch, env):
         seen["auth"] = request.headers.get("Authorization")
         return httpx.Response(200, json=CARD)
 
-    from kanban_client import KanbanClient
+    from pandan_client import KanbanClient
 
     monkeypatch.setattr(
         cli,
@@ -1160,7 +1160,7 @@ def test_real_client_warmup_hits_unversioned_health(monkeypatch):
         seen["auth"] = request.headers.get("Authorization")
         return httpx.Response(200, json={"status": "ok"})
 
-    from kanban_client import KanbanClient
+    from pandan_client import KanbanClient
 
     monkeypatch.setattr(
         cli,
@@ -1333,7 +1333,7 @@ def _write_mcp_json(monkeypatch, tmp_path, env: dict) -> None:
     """Drop a .mcp.json carrying ``env`` and point discovery at it."""
     path = tmp_path / ".mcp.json"
     path.write_text(json.dumps({"mcpServers": {"kanban": {"env": env}}}), encoding="utf-8")
-    monkeypatch.setattr("kanban_cli.config.find_mcp_json", lambda *a, **k: path)
+    monkeypatch.setattr("pandan_cli.config.find_mcp_json", lambda *a, **k: path)
 
 
 def test_token_from_config_file_when_env_unset(monkeypatch):
@@ -1401,7 +1401,7 @@ def test_malformed_sources_are_ignored(monkeypatch, tmp_path):
     config.config_file_path().write_text("this is not = valid toml [", encoding="utf-8")
     bad = tmp_path / ".mcp.json"
     bad.write_text("{not json", encoding="utf-8")
-    monkeypatch.setattr("kanban_cli.config.find_mcp_json", lambda *a, **k: bad)
+    monkeypatch.setattr("pandan_cli.config.find_mcp_json", lambda *a, **k: bad)
     with pytest.raises(config.ConfigError):
         config.load_config()
 

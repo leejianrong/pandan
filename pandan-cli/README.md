@@ -2,7 +2,7 @@
 
 A command-line client for the Simple Kanban REST API (`/api/v1`). Like the
 [MCP server](../mcp/README.md), it is a thin adapter over the shared
-[`kanban-client`](../kanban-client/) package — every subcommand maps to one API
+[`pandan-client`](../pandan-client/) package — every subcommand maps to one API
 call — so the API stays the single source of truth (API-first, ADR 0005).
 Milestone 2 follow-on; card commands **KAN-22**, board + epic commands
 **KAN-23**, packaging + this README + the CI job **KAN-24**.
@@ -147,8 +147,8 @@ binary** (no Python needed). Both work today — pick whichever fits.
 
 ### From source (uv)
 
-The CLI depends on the sibling `kanban-client` package by **path**
-(`../kanban-client`, see `[tool.uv.sources]` in `pyproject.toml`), which shapes
+The CLI depends on the sibling `pandan-client` package by **path**
+(`../pandan-client`, see `[tool.uv.sources]` in `pyproject.toml`), which shapes
 the realistic source-install options.
 
 **From a checkout (supported):**
@@ -156,27 +156,27 @@ the realistic source-install options.
 ```bash
 git clone https://github.com/leejianrong/simple-kanban.git
 cd simple-kanban
-uv tool install ./kanban-cli        # installs the `kan` command on your PATH
+uv tool install ./pandan-cli        # installs the `kan` command on your PATH
 ```
 
-`uv tool install` resolves the `../kanban-client` path source relative to the
+`uv tool install` resolves the `../pandan-client` path source relative to the
 checkout, so this works cleanly. Uninstall with `uv tool uninstall
-simple-kanban-cli`.
+simple-pandan-cli`.
 
 **From git directly (supported):**
 
 ```bash
-uv tool install "git+https://github.com/leejianrong/simple-kanban.git#subdirectory=kanban-cli"
+uv tool install "git+https://github.com/leejianrong/simple-kanban.git#subdirectory=pandan-cli"
 ```
 
-`uv` clones the repo and resolves the sibling `../kanban-client` path source from
+`uv` clones the repo and resolves the sibling `../pandan-client` path source from
 the **same** git checkout, so this installs `kan` without a manual clone
-(verified). Uninstall the same way (`uv tool uninstall simple-kanban-cli`).
+(verified). Uninstall the same way (`uv tool uninstall simple-pandan-cli`).
 
-**During development**, skip the install and run from `kanban-cli/`:
+**During development**, skip the install and run from `pandan-cli/`:
 
 ```bash
-cd kanban-cli
+cd pandan-cli
 uv sync                              # install deps (incl. the dev group)
 uv run kan --help                    # run without installing
 ```
@@ -184,8 +184,8 @@ uv run kan --help                    # run without installing
 ### Prebuilt standalone binary (KAN-46)
 
 Each version ships a single self-contained executable — no Python needed (built with
-PyInstaller `--onefile`, which freezes the interpreter + `kanban_cli` + the bundled
-`kanban-client` + `httpx` into one file). The latest release is **v0.2.2**. Grab the
+PyInstaller `--onefile`, which freezes the interpreter + `pandan_cli` + the bundled
+`pandan-client` + `httpx` into one file). The latest release is **v0.2.2**. Grab the
 asset for your OS/arch, mark it executable, and put it on your `PATH`.
 
 The `releases/latest/download/…` URL always resolves to the newest release's asset,
@@ -243,7 +243,7 @@ kan delete 12 --yes
 ## Develop / test
 
 Uses [`uv`](https://docs.astral.sh/uv/) like the rest of the repo (Python 3.12+).
-Run from `kanban-cli/`:
+Run from `pandan-cli/`:
 
 ```bash
 uv sync                # install deps (incl. dev group)
@@ -257,13 +257,13 @@ and `client` jobs.
 
 ### Build the standalone binary locally
 
-PyInstaller lives in the `build` dependency group. From `kanban-cli/`:
+PyInstaller lives in the `build` dependency group. From `pandan-cli/`:
 
 ```bash
 uv sync --group build
 uv run --group build pyinstaller --onefile \
   --name "kan-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)" \
-  --collect-submodules kanban_cli --collect-submodules kanban_client \
+  --collect-submodules pandan_cli --collect-submodules pandan_client \
   packaging/pyinstaller_entry.py
 ./dist/kan-*                        # the frozen executable
 ```
@@ -271,5 +271,5 @@ uv run --group build pyinstaller --onefile \
 PyInstaller can't cross-compile, so the release matrix builds one asset per OS on
 its native runner (`.github/workflows/release-cli.yml`, tag-triggered on `v*`).
 `packaging/pyinstaller_entry.py` is the freeze entry point — it imports the
-console entry (`kanban_cli.__main__:main`) *absolutely*, since PyInstaller freezes
+console entry (`pandan_cli.__main__:main`) *absolutely*, since PyInstaller freezes
 a script (not a module) and the package's own `__main__.py` uses a relative import.

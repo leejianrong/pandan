@@ -188,7 +188,7 @@ the MCP tool + `kan` verb, then any UI.
     seed-a-plan-in-one-call demo. Cross-board template id → **404**; READ to list/get, WRITE to
     create/delete/apply. Card templates only — board-level template (clone columns/settings) was
     **deferred** as scope creep for a nice-to-have tail slice.
-  - **Parity (R1.3):** new `kanban-client` methods (`update_cards`, `list/create/get/delete/
+  - **Parity (R1.3):** new `pandan-client` methods (`update_cards`, `list/create/get/delete/
     apply_template`), MCP tools (`update_cards`, `list/create/delete/apply_template`), and `kan` verbs
     (`batch-update <json>`, `template list/create/delete/apply`), all appended at the end of their
     lists. No UI (agent-facing capability).

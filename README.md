@@ -12,7 +12,7 @@ CLI, or an LLM agent can drive the board without any UI or backend rework — an
 > The core board (view / create / edit / delete / drag-to-move) runs end to end behind a full
 > REST API, with a pytest + Playwright test suite and CI/CD to Fly.io. On top of that:
 > GitHub login, multiple owned boards, epics, card dependencies / work-links / comments, a query
-> API with keyset pagination, an [MCP server](mcp/) and a [`kan` CLI](kanban-cli/) for agents, and
+> API with keyset pagination, an [MCP server](mcp/) and a [`kan` CLI](pandan-cli/) for agents, and
 > a recent UI pass (card/epic modals, theme toggle). See [Current status](#current-status).
 
 ## What it is
@@ -39,7 +39,7 @@ straight at it:
   (`docker pull ghcr.io/leejianrong/simple-kanban-mcp:latest`, no `docker login` needed). Wire it
   into Claude Code via `.mcp.json` (see [`.mcp.json.example`](.mcp.json.example)) and ask it to
   *"list my boards"*.
-- **[`kan` CLI](kanban-cli/)** — the same adapter as subcommands, for CI jobs and non-MCP
+- **[`kan` CLI](pandan-cli/)** — the same adapter as subcommands, for CI jobs and non-MCP
   automation, with a token-free `kan warmup` you can loop on as a pre-step. Install from source, or
   download a prebuilt binary (`kan-linux-x86_64`, `kan-macos-arm64`) from the
   [latest release](https://github.com/leejianrong/simple-kanban/releases/latest).
@@ -62,7 +62,7 @@ and example agent workflows.
 | Hosting | Fly.io (app) + Neon (Postgres), CI/CD via GitHub Actions |
 | Drag & drop | `svelte-dnd-action` |
 | Auth | GitHub OAuth + revocable cookie sessions (fastapi-users, async engine); per-user hashed PATs for agents |
-| Agent clients | MCP server (`mcp/`, official `mcp` SDK) + `kan` CLI (`kanban-cli/`), both over the shared `kanban-client` |
+| Agent clients | MCP server (`mcp/`, official `mcp` SDK) + `kan` CLI (`pandan-cli/`), both over the shared `pandan-client` |
 
 See [`docs/adr/`](docs/adr/) for the reasoning behind each of these choices.
 
@@ -115,8 +115,8 @@ build, Playwright e2e, and the MCP and CLI test suites as independent jobs on ev
 backend/       FastAPI app (app/), Alembic migrations (alembic/), tests/ (unit + integration), pyproject.toml
 frontend/      Svelte 5 SPA (src/), Vite config, e2e/ (Playwright)
 mcp/           MCP server — one tool per /api/v1 endpoint (official mcp SDK, stdio)
-kanban-cli/    `kan` command-line client
-kanban-client/ Shared httpx wrapper both mcp/ and kanban-cli/ depend on
+pandan-cli/    `kan` command-line client
+pandan-client/ Shared httpx wrapper both mcp/ and pandan-cli/ depend on
 docs/          Shape Up planning: FRAME → PRD/CONTEXT → SHAPING → BREADBOARD + ADRs + guides/
 .github/workflows/   CI (lint, unit, integration, frontend build, e2e, mcp, cli) + deploy to Fly.io
 Dockerfile           Multi-stage image — builds the SPA, then serves it from FastAPI

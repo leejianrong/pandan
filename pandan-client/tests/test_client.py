@@ -9,8 +9,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from kanban_client import KanbanApiError, KanbanClient
-from kanban_client.client import (
+from pandan_client import KanbanApiError, KanbanClient
+from pandan_client.client import (
     DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_TIMEOUT,
 )

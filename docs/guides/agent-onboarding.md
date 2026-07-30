@@ -70,7 +70,7 @@ the server straight from `mcp/`, so there's nothing to download or build:
   "mcpServers": {
     "kanban": {
       "command": "uv",
-      "args": ["run", "--directory", "./mcp", "python", "-m", "kanban_mcp"],
+      "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
         "KANBAN_API_URL": "https://simple-kanban-jian.fly.dev",
         "KANBAN_TOKEN": "kanban_pat_…",
@@ -183,7 +183,7 @@ create_card(title="GitHub login button", column="todo", epic_id=<epic id>)
 
 If your automation isn't an MCP client — a CI job, a shell script, an agent that shells out —
 use the `kan` CLI. It's the same thin adapter over `/api/v1`, exposed as subcommands. Full
-reference: [`kanban-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/kanban-cli/README.md).
+reference: [`pandan-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/pandan-cli/README.md).
 
 **Prebuilt binary (no Python needed).** Download the asset for your platform from the
 [latest GitHub Release](https://github.com/leejianrong/simple-kanban/releases/latest) — the
@@ -198,16 +198,16 @@ Only `kan-linux-x86_64` and `kan-macos-arm64` ship (no Intel-mac binary — that
 KAN-225); the linux binary needs glibc ≥ 2.28 (Ubuntu 20.04+, Debian 11+, RHEL/Rocky/Alma 8+).
 **Intel-Mac users** run the `kan-macos-arm64` binary under Rosetta 2, install from source with
 `uv` (below), or use the MCP container image. See
-[`kanban-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/kanban-cli/README.md) for the full asset list and the macOS
+[`pandan-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/pandan-cli/README.md) for the full asset list and the macOS
 Gatekeeper note.
 
 **Install from git (needs Python + `uv`):**
 
 ```bash
-uv tool install "git+https://github.com/leejianrong/simple-kanban.git#subdirectory=kanban-cli"
+uv tool install "git+https://github.com/leejianrong/simple-kanban.git#subdirectory=pandan-cli"
 ```
 
-`uv` clones the repo and resolves the sibling `kanban-client` path dependency from the same
+`uv` clones the repo and resolves the sibling `pandan-client` path dependency from the same
 checkout, so `kan` lands on your `PATH` with no manual clone.
 
 It reads the same env vars as the MCP server:
