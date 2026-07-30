@@ -38,11 +38,15 @@ flowchart LR
   `BREADBOARD` of UI places before any code is built.
 - **[Architecture decisions](adr/0001-tech-stack-and-monorepo.md)** — numbered ADRs capturing each
   load-bearing choice, its alternatives, and the trade-off, from the tech stack (0001) through
-  board authorization (0013) and MCP board-scoping (0015).
+  board authorization (0013), MCP board-scoping (0015), observability (0017), and the `pandan`
+  rebrand (0018).
 - **Milestones** — the core board plus [Milestone 2](milestone-2/SLICES.md) (agent task tracking:
-  epics, API versioning, a query API, token auth, and an MCP server) and
+  epics, API versioning, a query API, token auth, and an MCP server),
   [Milestone 3](milestone-3/SLICES.md) (accounts, multi-board with ownership, board authorization,
-  and self-serve agent tokens), each planned with its own frame → shaping → breadboard → slices.
+  and self-serve agent tokens), [Milestone 5](milestone-5/SLICES.md) (agent/human handoff, awareness
+  UI, fleet reporting), [Milestone 6](milestone-6/SLICES.md) (abuse hardening, projects, cycles,
+  design system, notifications) and [Milestone 7](milestone-7/SLICES.md) (the `pandan` rebrand +
+  agent-ergonomic CLI), each planned with its own frame → shaping → breadboard → slices.
 - **[Guides](guides/agent-onboarding.md)** — practical setup: onboarding an agent, wiring GitHub
   PR auto-sync, and running the end-to-end tests behind auth.
 
