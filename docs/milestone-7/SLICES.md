@@ -8,7 +8,9 @@ Vertical increments of the [M7 shape](SHAPING.md). Each ends in **observable beh
 its own PR behind CI, matching the M1–M6 cadence.
 
 Numbering continues the **global V-series** (M2 = V1–V5, M3 = V6–V10, M5 = V11–V19, M6 = V26–V39;
-M4 was tracked directly as EPIC-3…EPIC-17). **M7 is V40–V49.**
+M4 was tracked directly as EPIC-3…EPIC-17). **M7 is V40–V50** — V50 was added after the initial plan
+(see the correction note below) and **builds first within Wave 2** despite its number, the same way
+M6's V35/V36 built out of numeric order inside EPIC-49.
 
 M7 changes no API, no schema and runs no migration (R4.1) — it lives in the CLI, MCP, docs and deploy
 layers. So the usual "API first, then MCP + CLI parity" rule reads differently here: the **CLI is the
@@ -25,7 +27,8 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 |-------|------|:----:|:----:|------|----------------|
 | **V40 · Rebrand sweep** | code, CLI, MCP, skills, docs | N1 | 1 | KAN-423 | `pandan list` works; the UI, README and board all say *pandan*; a `KANBAN_*`-configured client still works with a deprecation notice |
 | **V41 · Rebrand deploy identity** | Fly app, ghcr, OAuth, CI | N2 | 1 | KAN-424 | The app serves from the new origin over its own cert; GitHub login works there; the old Fly app is gone |
-| **V42 · Identifier round-trip** | accept `KAN-`/`EPIC-` + `--fields` | A1 | 2 | KAN-425 | `pandan get KAN-304` returns the card it just listed; `--fields` widens the row |
+| **V50 · CLI release discipline** | version-bump-on-fix + discriminating `--version` | A0 | 2 | KAN-435 | `pandan --version` says which build this is; a stale binary is detectable, not silent |
+| **V42 · `--fields` + round-trip tests** | projection flag; pin the shipped ref handling | A1 | 2 | KAN-425 | `--fields` widens the row; a per-verb test feeds each printed identifier back |
 | **V43 · Error contract** | structured errors, exit codes | A2 | 2 | KAN-426 | A bad flag, a bad value and a missing token each print a parseable error on **stdout** with the documented exit code |
 | **V44 · Aggregates** | summary on every list verb | A3 | 2 | KAN-427 | `pandan list` ends with `42 cards · 12 todo · 5 in_progress · 25 done`; no second call needed for a count |
 | **V45 · Truncation** | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
@@ -34,17 +37,28 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 | **V48 · Ambient context** | session hook + packaged skill | A7 | 2 | KAN-431 | A fresh agent session already knows the open cards without calling anything |
 | **V49 · MCP right-sizing** *(tail)* | measure, decide, ADR, execute | A8 | 3 | KAN-432 | The MCP schema token cost is measured and published; the chosen surface is an ADR and is live |
 
-> **Status:** 🔜 **not started (0/10).** Board cards **KAN-423…KAN-432** under the three `M7:` epics
+> **Correction (2026-07-31, after the plan was first written).** The AXI audit's headline finding —
+> "the CLI prints identifiers it will not accept" — was an artefact of a **stale installed binary**.
+> In source it was fixed by **KAN-285** on 2026-07-21, and the external user's `label create --color`
+> report was likewise already fixed by **KAN-288**. The version was never bumped after either fix, so
+> `--version` reported `0.3.0` both before and after and nothing revealed the staleness. Consequences
+> folded into this plan: **V42 de-scoped** to `--fields` + regression tests (its round-trip half is
+> shipped), **KAN-433 closed invalid**, and a new root-cause slice **V50 / KAN-435** added and
+> prioritised **first** in Wave 2. Audit against `uv run python -m kanban_cli` from `kanban-cli/`,
+> never a `kan` on `PATH` — see the [shaping](SHAPING.md)'s methodology note.
+
+> **Status:** 🔜 **not started (0/11).** Board cards **KAN-423…KAN-432** + **KAN-435** under the three `M7:` epics
 > **EPIC-66** (Pandan Rebrand), **EPIC-67** (Agent-Ergonomic CLI), **EPIC-68** (MCP Right-Sizing).
 > The rebrand decision is [ADR 0018](../adr/0018-pandan-rebrand.md). The sister-app kickoff
 > (**KAN-304**, human-owned) is blocked on V40 landing.
 >
-> **Also under EPIC-67, not slices:** two externally-reported discrepancies (`kan` 0.3.0, a user on
-> another project, verified 2026-07-31) that belong to the same tooling-ergonomics theme —
-> **KAN-433** (the skill documents `label create --color C`; the CLI takes colour as a *required
-> positional*) and **KAN-434** (`list --json` returns `{cards: […]}`, an intentional envelope that is
-> nowhere documented). Both are doc-side fixes; KAN-434 explicitly must **not** flatten the envelope,
-> because V44 adds a `summary` field beside `cards`.
+> **Also under EPIC-67, not a slice:** **KAN-434** — `list --json` returns `{cards: […]}` rather than a
+> bare array, an intentional API-passthrough envelope that is **nowhere documented** (`SKILL.md` says
+> only "pipe into `jq`"; `--help` says "the raw JSON from the API"). Externally reported and **still
+> valid**. It must **not** be flattened, because V44 adds a `summary` field beside `cards`; the fix is
+> to document the envelope per verb with a correct `.cards[]` example. Its sibling report,
+> **KAN-433** (`label create --color`), was **closed invalid** — already fixed by KAN-288; see the
+> correction note above.
 
 ---
 
@@ -114,31 +128,54 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 
 ## Wave 2 — Sharpen the tools
 
-### V42 · Identifier round-trip: accept `KAN-`/`EPIC-` refs + `--fields` (A1) — KAN-425
-- **Build:** two things, both about the identifier contract.
-  - **Round-trip (the defect):** every verb that takes a card or epic id accepts the **ticket
-    reference** the tools print — `KAN-304`, `epic-66`, case-insensitive, `#`-tolerant — as well as the
-    bare integer. Add one shared resolver in the CLI (and in `pandan_client` if the MCP path needs it)
-    that maps a ref to an id, resolving via the existing query API rather than guessing. Covers
-    `get`/`update`/`move`/`delete`/`dep`/`link`/`comment`/`needs-human`/`resolve` and the epic verbs.
-    An unresolvable ref is a structured "not found" (V43's contract), not an argparse `invalid int`.
-  - **`--fields` (AXI 2):** keep the 4-field default row, add `--fields a,b,c` to widen it on any list
-    verb, with a documented field vocabulary and a clear error naming the unknown field.
-- **Tests:** CLI unit + integration — a **round-trip test per id-taking verb**: list, take the printed
-  identifier verbatim, feed it back, assert success (this is the regression guard that the defect can't
-  return). Ref parsing: lower/upper case, `#KAN-1`, a bare int, a non-existent ref, an epic ref given
-  to a card verb (clean error). `--fields` selects, rejects unknown names, and leaves the default
-  untouched.
-- **Acceptance:** `pandan get KAN-304` demo; suite green. CLI-only — no deploy.
+### V50 · CLI release discipline: version-bump-on-fix + a discriminating `--version` (A0) — KAN-435
+- **Build:** the root cause behind two false bug reports (see the correction note above). Timeline:
+  version `0.3.0` set 2026-07-21 01:48 (`6289e92`) → the standalone binary built 02:01 **from** it →
+  KAN-285 (`a10eaee`) and KAN-288 (`0a7af29`) landed the same day at 23:36/23:39 → **no bump since**.
+  So `--version` cannot distinguish a pre-fix build from current source, and `release-cli.yml` fires
+  only on a `v*` tag, so nothing forces a bump when a user-visible fix lands.
+  1. **Bump-on-fix:** a user-visible CLI change bumps the version in the **same PR**. Enforce as far
+     as is cheap — a PR-checklist line plus a pre-push/CI check that a diff touching
+     `kanban_cli/`'s behaviour also touches the version.
+  2. **Discriminating `--version`:** embed the build's `git describe`/short sha at package time so
+     `--version` prints e.g. `pandan 0.4.0 (a10eaee)` for a release and marks a source run as such.
+     This is the part that makes staleness *detectable* rather than merely *avoidable*.
+  3. **Cut a release** so a binary carrying KAN-285/KAN-288 actually exists downstream.
+  4. **Document "is my `pandan` stale?"** in the CLI README, and apply the same reasoning to the MCP
+     image (`publish-mcp-image.yml`).
+- **Tests:** unit — `--version` renders both the release and source-run forms; the version-bump guard
+  fires on a behavioural diff and stays quiet on a docs-only one. Manual — build the binary and confirm
+  the embedded sha matches `HEAD`.
+- **Acceptance:** the two-forms demo + a tagged release; suite green. CLI/CI-only — no deploy.
+- **Notes:** **builds first in Wave 2**, before the other AXI slices. Every guarantee they add is
+  unverifiable in the field while "which build am I running?" has no answer.
+
+### V42 · `--fields` projection + identifier round-trip regression tests (A1) — KAN-425
+- **Build:** de-scoped from the original plan (see the correction note). The **round-trip half is
+  already shipped** — `_id_or_ticket_arg` + `_parse_id_or_ticket` accept `KAN-`/`EPIC-` refs
+  case-insensitively wherever an id is taken (KAN-285), and an unknown ref already exits `1` with
+  `no card found with ticket KAN-99999`. What's left:
+  - **`--fields` (AXI 2), genuinely absent:** keep the 4-field default row, add `--fields a,b,c` to
+    widen it on any list verb, with a documented vocabulary and a clear error naming the unknown field.
+    Do not confuse this with the `Fields:` line in `list --help`, which is `--sort`'s vocabulary.
+  - **Regression tests for the shipped behaviour**, which currently has none — the reason a
+    ten-day-old fix could be mistaken for a live defect.
+- **Tests:** a **round-trip test per id-taking verb** (`get`/`update`/`move`/`delete`/`dep`/`link`/
+  `comment`/`needs-human`/`resolve` + the epic verbs): list, take the printed identifier verbatim, feed
+  it back, assert success. Ref parsing: mixed case, `#KAN-1`, a bare int, an unresolvable ref (exit 1,
+  not exit 2), an epic ref handed to a card verb. `--fields` selects, rejects unknown names, and leaves
+  the default row untouched.
+- **Acceptance:** the `--fields` demo + the round-trip suite; green. CLI-only — no deploy.
 
 ### V43 · Structured errors on stdout + documented exit codes (A2) — KAN-426
-- **Build:** AXI 6. Replace argparse's stderr-and-usage behaviour with an explicit error contract:
-  a parseable single-line (or TOON/JSON, matching `--format`) error on **stdout** carrying a stable
-  machine code, a human message and the offending argument. Exit codes, documented in `--help` and the
-  CLI README: **0** success, **1** error (auth, not-found, conflict, API/transport failure), **2**
-  unknown or invalid flag/argument. Guarantee **no verb prompts** when stdin isn't a tty — `login`'s
-  `getpass` becomes tty-gated and fails structured otherwise. Keep the human-readable usage text
-  available via `--help`.
+- **Build:** AXI 6, narrower than first assumed — the audit found the **exit codes are already
+  correct** (`0` success, `1` runtime error, `2` argparse error; `get KAN-99999` already exits `1` with
+  `no card found with ticket KAN-99999`). So this slice is about *stream and shape*, plus pinning what
+  already works: emit a parseable error on **stdout** (single-line, or TOON/JSON matching `--format`)
+  carrying a stable **machine code**, the human message and the offending argument; **document** the
+  0/1/2 contract in `--help` and the CLI README and pin it with tests; guarantee **no verb prompts**
+  when stdin isn't a tty — `login`'s `getpass` becomes tty-gated and fails structured otherwise. Keep
+  the usage text on `--help`.
 - **Tests:** CLI unit — one case per failure class asserting **stream, shape and exit code**: unknown
   flag (2), invalid enum value (2), missing token (1), 404 (1), 401 (1), transport error (1), success
   (0). `login` with a non-tty stdin errors structured instead of hanging.
@@ -158,14 +195,19 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 - **Acceptance:** the summary-line demo; suite green. CLI-only — no deploy.
 
 ### V45 · Content truncation with size hints + `--full` (A4) — KAN-428
-- **Build:** AXI 3. Long text fields (card `description`, comment `body`) truncate to a default
-  character limit with an explicit, accurate hint —
-  `(truncated, 2847 chars total — use --full to see complete body)` — and `--full` opts out. Applies to
-  `get`, `comment list`, and anywhere else a body is rendered. Configurable limit via the config file /
-  an env var; unaffected under `--json` (structured consumers asked for the data).
-- **Tests:** CLI unit — under-limit text is byte-identical to today; over-limit truncates at the limit
-  with a **true** total in the hint; `--full` restores the whole body; multi-byte characters don't split
-  mid-character; `--json` is untouched.
+- **Build:** AXI 3 — and note the audit correction: the gap is **not** that human `get` dumps a long
+  description. Human `get` prints a **one-line** card summary with **no description at all**, while
+  `comment list` and every `--json` payload emit **full bodies untruncated**. So this slice does two
+  complementary things:
+  - **Add** a truncated description to human `get` (the under-disclosure) with an explicit, accurate
+    hint — `(truncated, 2847 chars total — use --full to see complete body)` — and `--full` to opt out.
+  - **Truncate** the currently-unbounded surfaces: `comment list` bodies, and long text inside
+    `--json`/`--format toon` payloads (where a `get` on a card with a long description is today the
+    single most expensive call an agent can make). Structured output keeps an escape hatch via `--full`.
+  Limit configurable via the config file / an env var.
+- **Tests:** CLI unit — under-limit text is byte-identical; over-limit truncates at the limit with a
+  **true** total in the hint; `--full` restores the whole body everywhere it applies; multi-byte
+  characters don't split mid-character; a card with no description renders unchanged.
 - **Acceptance:** the truncation demo; suite green. CLI-only — no deploy.
 
 ### V46 · Content-first bare invocation + `help[]` next-step hints (A5) — KAN-429

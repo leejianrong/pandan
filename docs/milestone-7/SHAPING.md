@@ -47,28 +47,48 @@ the cutover is a create-migrate-destroy sequence with DNS in the middle. That ea
 
 ### AXI conformance — the honest audit
 
-Walked the live CLI against all ten principles (2026-07-31, `kan` at the shipped version). The
-discipline principles were already satisfied — that's a credit to the M4/M5 CLI work, not luck — and
-the gaps cluster in *what the output tells an agent to do next*:
+Walked the CLI against all ten principles (2026-07-31). **Audited against `kanban-cli/` at `main`, not
+against an installed binary** — see the methodology warning below, which is in this doc because the
+first pass got it wrong. The discipline principles were already satisfied — a credit to the M4/M5 CLI
+work — and the real gaps cluster in *what the output tells an agent to do next*:
 
-| # | AXI principle | State before M7 |
+| # | AXI principle | State before M7 (verified against source) |
 |---|---|---|
-| 1 | Token-efficient output | ~ list output is already tab-separated with no repeated keys; `--json` for piping. No TOON. |
-| 2 | Minimal default schemas | ✅ 4 fields per list row (`ticket  column  title  pts=N`). No `--fields` to widen. |
-| 3 | Content truncation | ❌ `get` prints the full description; no limit, no size hint, no `--full`. |
+| 1 | Token-efficient output | ~ list output is already tab-separated with no repeated keys; `--json` for piping. No `--format`, no TOON. |
+| 2 | Minimal default schemas | ~ ✅ 4 fields per list row (`ticket  column  title  pts=N`); ❌ no `--fields` to widen (the `Fields:` text in `list --help` is `--sort`'s vocabulary, not a projection flag). |
+| 3 | Content truncation | ❌ but *not* where first assumed: human `get` prints a **one-line** card summary with **no description at all** (an under-disclosure), while `comment list` and every `--json` payload emit **full bodies untruncated**. No limit, no size hint, no `--full`. |
 | 4 | Pre-computed aggregates | ❌ no list verb prints a total or summary; a count needs a second round trip. |
-| 5 | Definitive empty states | ✅ `(no cards)` — already explicit. |
-| 6 | Structured errors & exit codes | ❌ argparse errors, unstructured, on **stderr**. Exit `2` is right for bad flags but also used for bad values. `login` prompts. |
+| 5 | Definitive empty states | ✅ `(no cards)` — explicit. |
+| 6 | Structured errors & exit codes | ~ exit codes are **already disciplined** (`1` for a runtime error, `2` for an argparse error — better than assumed); ❌ messages go to **stderr**, not stdout, and are prose with no machine-readable code. `login` prompts unconditionally. |
 | 7 | Ambient context | ~ a distributable skill exists; nothing installs board state into a session before the agent acts. |
 | 8 | Content first | ❌ bare `kan` prints usage + `error: the following arguments are required` and exits 2. |
 | 9 | Contextual disclosure | ❌ no next-step hints on any result. |
 | 10 | Consistent `--help` | ✅ every subcommand. |
 
-**The one real defect, independent of AXI:** the CLI prints identifiers it will not accept.
-`kan list` emits `KAN-304`; `kan get KAN-304` fails with `invalid int value: 'KAN-304'` and exit 2;
-only `kan get 304` works. An agent reading the output has to know that the identifier it was just
-handed is not the identifier the tool takes. Output identifiers must be valid input identifiers —
-that's `A1`, and it would be worth fixing if AXI didn't exist.
+**Identifier round-trip was already fixed — and the way we got that wrong is the more useful finding.**
+The first pass of this audit reported a headline defect: *the CLI prints identifiers it will not
+accept* (`kan list` emits `KAN-304`, but `kan get KAN-304` fails with `invalid int value` while
+`kan get 304` works). It reproduced — against a **stale installed binary**. In source it has been
+fixed since **KAN-285** (commit `a10eaee`, 2026-07-21): `_id_or_ticket_arg` + `_parse_id_or_ticket`
+accept `KAN-`/`EPIC-` refs case-insensitively wherever an id is taken, and an unknown ref is already a
+clean `exit 1` with `no card found with ticket KAN-99999`.
+
+The same stale build produced a second false report, this time from **an external user**: that
+`label create` takes colour positionally rather than as `--color` as the skill documents. Also fixed
+in source (**KAN-288**, commit `0a7af29`) — the skill was right and the binary was old.
+
+**Why it happened, and why it's a slice and not a footnote.** `pyproject` set version `0.3.0` on
+2026-07-21 01:48; the binary was built at 02:01 **from** that version; KAN-285 and KAN-288 landed the
+same day at 23:36 and 23:39; and the version **has not been bumped since**. So `kan --version` reports
+`0.3.0` for both a build that lacks those fixes and current source that has them, with nothing to
+distinguish them — and `release-cli.yml` only fires on a `v*` tag, so nothing forces a bump when a
+user-visible fix lands. That cost two false bug reports and, in this very milestone, one duplicate
+slice and one invalid card. It is tracked as **KAN-435** and is the highest-priority item in EPIC-67.
+
+> **Methodology, for anyone auditing this CLI again: run `uv run python -m kanban_cli …` from
+> `kanban-cli/`, never a `kan` on your `PATH`.** An installed binary may predate any fix, and until
+> KAN-435 lands `--version` cannot tell you. Two of this audit's four "findings" were artefacts of
+> ignoring this.
 
 **Where we deviate from AXI, deliberately.** Principle 1 says to adopt TOON in place of JSON for
 ~40% savings. Our default list output is **already** tab-separated rows with no per-record keys,
@@ -101,8 +121,8 @@ legitimate reason to keep breadth). The decision needs a measurement and an ADR,
 | R1.5 | Deploy identity moved: Fly app, ghcr image path, GitHub OAuth App(s), CI + keep-alive | Must-have |
 | R1.6 | **Ticket prefixes `KAN-` / `EPIC-` are NOT renamed** — ticket numbers are immutable by construction (ADR 0006/0009); a prefix change would split the board's own history | Must-have (non-goal) |
 | **R2** | **AXI conformance for the CLI** | |
-| R2.1 | **Identifier round-trip**: any identifier the tools print is accepted wherever an id is taken | Must-have |
-| R2.2 | **Structured errors on stdout** + documented exit codes (0/1/2) + never prompt non-interactively (AXI 6) | Must-have |
+| R2.1 | **Identifier round-trip** stays working — already implemented (KAN-285); M7 adds the **per-verb regression test** that currently doesn't exist | Must-have |
+| R2.2 | **Structured errors on stdout** + a machine-readable code + never prompt non-interactively (AXI 6). Exit codes 0/1/2 are already correct — document and pin them | Must-have |
 | R2.3 | **Pre-computed aggregates** on every list verb (AXI 4) | Must-have |
 | R2.4 | **Content truncation** with an explicit size hint + `--full` (AXI 3) | Must-have |
 | R2.5 | **`--fields`** to widen the minimal default schema on demand (AXI 2) | Must-have |
@@ -111,6 +131,7 @@ legitimate reason to keep breadth). The decision needs a measurement and an ADR,
 | R2.8 | **TOON output for nested payloads** (`--format toon`); TSV stays the list default (AXI 1, scoped) | Nice-to-have |
 | R2.9 | **Ambient context** — a session-hook installer + the packaged skill (AXI 7) | Nice-to-have |
 | R2.10 | Existing conformance (AXI 5 empty states, AXI 10 per-subcommand `--help`) is **regression-guarded by tests**, not re-implemented | Must-have |
+| R2.11 | **Release discipline**: a user-visible CLI change bumps the version in the same PR, and `--version` **discriminates** a released build from a source run — so "which `kan` am I running?" is answerable | Must-have |
 | **R3** | **MCP right-sizing** | |
 | R3.1 | Measure the schema token cost of the 48-tool surface and of each alternative | Must-have |
 | R3.2 | Record the chosen surface as an ADR and execute it | Nice-to-have |
@@ -151,7 +172,15 @@ legitimate reason to keep breadth). The decision needs a measurement and an ADR,
   replaces JSON for *nested* payloads only. Rubric conformance is not a reason to make an efficient
   path less efficient.
 - **AXI 5 and 10 are already satisfied — we add tests, not code.** Recording this so a future reader
-  doesn't "implement" them.
+  doesn't "implement" them. Same for the identifier round-trip (KAN-285) and the `1`/`2` exit-code
+  split: shipped, unguarded, so M7 pins them with tests.
+- **Audit the source, never an installed binary.** The first pass of the AXI audit produced two
+  findings that were artefacts of a stale `~/.local/bin/kan`. Both had been fixed in `main` for ten
+  days. The lesson is promoted to a requirement (R2.11) rather than a footnote, because an unbumped
+  version is what made the staleness undetectable.
+- **Release discipline is an ergonomics feature, not chores.** An agent (or a user) that cannot tell
+  which build it is running cannot trust any other guarantee in this list — a documented output
+  contract is worthless if the binary predates it. Hence KAN-435 leads EPIC-67.
 - **MCP right-sizing is measured before it's decided.** The 48-tool surface may be correct as a
   documented fallback for shell-less agents; the slice's job is to price it and write the ADR, not to
   presume deletion.
@@ -181,7 +210,8 @@ Parts are vertical slices (mechanism + its surface), traced to the R's they sati
 |------|-----------|:----:|
 | **N1** | **Rebrand sweep.** Packages, UI, docs, board name, CLI console script (`pandan` + `pdn`), MCP server name, `PANDAN_*` config with `KANBAN_*` fallback, PAT mint prefix, skills. (R1.1–R1.4, R1.6) | 1 |
 | **N2** | **Deploy identity.** New Fly app + secrets + cert/DNS cutover + destroy old; new OAuth App(s); ghcr image path; CI + keep-alive retarget. (R1.5) | 1 |
-| **A1** | **Identifier round-trip + `--fields`.** Accept `KAN-`/`EPIC-` refs anywhere an id is taken; widen the default schema on demand. (R2.1, R2.5) | 2 |
+| **A0** | **Release discipline.** Version-bump-on-fix + a discriminating `--version` (embed the build's git describe/sha), so a stale build is detectable. (R2.11) | 2 |
+| **A1** | **`--fields` + round-trip regression tests.** Widen the minimal schema on demand; pin the shipped `KAN-`/`EPIC-` ref handling with a per-verb test. (R2.1, R2.5) | 2 |
 | **A2** | **Error contract.** Structured errors on stdout, documented exit codes, non-interactive guarantee. (R2.2) | 2 |
 | **A3** | **Aggregates.** A summary line (or JSON summary field) on every list verb. (R2.3) | 2 |
 | **A4** | **Truncation.** Size-hinted truncation of long text + `--full`. (R2.4) | 2 |
@@ -200,7 +230,7 @@ Parts are vertical slices (mechanism + its surface), traced to the R's they sati
 | R1.4 | Skills renamed | Must | ✅ N1 |
 | R1.5 | Deploy identity moved | Must | ✅ N2 |
 | R1.6 | Ticket prefixes unchanged | Must | ✅ N1 (explicit non-goal) |
-| R2.1 | Identifier round-trip | Must | ✅ A1 |
+| R2.1 | Identifier round-trip (shipped; pin it) | Must | ✅ A1 |
 | R2.2 | Structured errors + exit codes | Must | ✅ A2 |
 | R2.3 | Pre-computed aggregates | Must | ✅ A3 |
 | R2.4 | Truncation + `--full` | Must | ✅ A4 |
@@ -210,6 +240,7 @@ Parts are vertical slices (mechanism + its surface), traced to the R's they sati
 | R2.8 | TOON for nested payloads | Nice | ✅ A6 |
 | R2.9 | Ambient context | Nice | ✅ A7 |
 | R2.10 | AXI 5/10 regression-guarded | Must | ✅ A1–A5 (tests ride each slice) |
+| R2.11 | Release discipline + discriminating `--version` | Must | ✅ A0 |
 | R3.1 | Measure MCP schema cost | Must | ✅ A8 |
 | R3.2 | ADR + execute chosen surface | Nice | ✅ A8 |
 | R4.1 | No API/schema/migration change | Must | ✅ (all parts) |
