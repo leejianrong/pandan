@@ -5,10 +5,10 @@ import asyncio
 import json
 
 import httpx
-from kanban_client import KanbanClient
+from pandan_client import KanbanClient
 
-from kanban_mcp import server
-from kanban_mcp.server import mcp
+from pandan_mcp import server
+from pandan_mcp.server import mcp
 
 EXPECTED_TOOLS = {
     "list_boards",

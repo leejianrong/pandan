@@ -7,7 +7,7 @@
   "mcpServers": {
     "kanban": {
       "command": "uv",
-      "args": ["run", "--directory", "./mcp", "python", "-m", "kanban_mcp"],
+      "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
         "KANBAN_API_URL": "http://localhost:8000",
         "KANBAN_TOKEN": "",

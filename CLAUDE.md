@@ -23,7 +23,7 @@ these docs, and when they disagree, fix the docs in the same PR.** Two places ar
 construction; look there for what's done and in flight:
 - **The Kanban board itself.** The project dogfoods its own product: the *Simple Kanban Roadmap*
   board on the deployed instance is the authoritative task list. Drive it with the `kan` CLI
-  ([kanban-cli/](kanban-cli/)) or the MCP server ([mcp/](mcp/)).
+  ([pandan-cli/](pandan-cli/)) or the MCP server ([mcp/](mcp/)).
 - **`docs/milestone-*/SLICES.md`** — the per-slice plan + status for each milestone, and the
   [ADRs](docs/adr/) for the *why* behind each decision (see §How the docs relate).
 
@@ -91,13 +91,13 @@ npm run e2e       # Playwright smoke (auto-starts backend+Vite; needs docker com
 
 **MCP server** (from `mcp/`) — the agent entry point (V5, board-scoped in V10), its own `uv` package:
 ```bash
-uv sync                                             # install (mcp SDK + the shared kanban-client)
+uv sync                                             # install (mcp SDK + the shared pandan-client)
 uv run ruff check .                                 # lint (matches CI mcp job)
 uv run pytest -q                                    # unit (mocked httpx) + tool-list smoke; no DB
-KANBAN_API_URL=http://localhost:8000 KANBAN_TOKEN=kanban_pat_… uv run python -m kanban_mcp   # run the stdio server by hand
+KANBAN_API_URL=http://localhost:8000 KANBAN_TOKEN=kanban_pat_… uv run python -m pandan_mcp   # run the stdio server by hand
 ```
-> A thin adapter over the shared **`kanban-client`** package (`kanban_client/client.py`, imports
-> `KanbanClient`; KAN-21 moved the `httpx` wrapper out of the old `mcp/kanban_mcp/api.py` into a
+> A thin adapter over the shared **`pandan-client`** package (`pandan_client/client.py`, imports
+> `KanbanClient`; KAN-21 moved the `httpx` wrapper out of the MCP server's own `api.py` into a
 > sibling package the MCP server depends on by path so both stay in sync) — one tool per `/api/v1`
 > endpoint, giving **full CRUD parity across boards, cards, and epics** (list / get / create /
 > update / delete + card `move`) plus `list_boards`/`create_board` discovery; no DB of its own.

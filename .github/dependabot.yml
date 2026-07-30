@@ -33,7 +33,7 @@ updates:
           - "patch"
 
   - package-ecosystem: "uv"
-    directory: "/kanban-client"
+    directory: "/pandan-client"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
@@ -44,7 +44,7 @@ updates:
           - "patch"
 
   - package-ecosystem: "uv"
-    directory: "/kanban-cli"
+    directory: "/pandan-cli"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5

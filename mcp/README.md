@@ -88,7 +88,7 @@ Uses [`uv`](https://docs.astral.sh/uv/) like the backend (Python 3.12+):
 ```bash
 cd mcp
 uv sync                                   # install deps
-KANBAN_API_URL=http://localhost:8000 uv run python -m kanban_mcp   # stdio server
+KANBAN_API_URL=http://localhost:8000 uv run python -m pandan_mcp   # stdio server
 ```
 
 To smoke-test the tools without a client, run the test suite:
@@ -122,9 +122,9 @@ docker run -i --rm \
 > To reach a backend running on your **host** (not in Docker), use
 > `KANBAN_API_URL=http://host.docker.internal:8000` rather than `localhost`.
 
-**Build it yourself.** The image bundles the sibling `kanban-client` path dep, so
+**Build it yourself.** The image bundles the sibling `pandan-client` path dep, so
 the build **context must be the repo root** with `-f mcp/Dockerfile` — building
-from inside `mcp/` can't see `../kanban-client` and will fail:
+from inside `mcp/` can't see `../pandan-client` and will fail:
 
 ```bash
 docker build -f mcp/Dockerfile -t simple-kanban-mcp .   # run from the REPO ROOT
@@ -146,7 +146,7 @@ every case set `KANBAN_TOKEN` to a `kanban_pat_…` you created in the SPA Token
   "mcpServers": {
     "kanban": {
       "command": "uv",
-      "args": ["run", "--directory", "./mcp", "python", "-m", "kanban_mcp"],
+      "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
         "KANBAN_API_URL": "http://localhost:8000",
         "KANBAN_TOKEN": "kanban_pat_…",
@@ -164,7 +164,7 @@ every case set `KANBAN_TOKEN` to a `kanban_pat_…` you created in the SPA Token
   "mcpServers": {
     "kanban": {
       "command": "uv",
-      "args": ["run", "--directory", "./mcp", "python", "-m", "kanban_mcp"],
+      "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
         "KANBAN_API_URL": "https://simple-kanban-jian.fly.dev",
         "KANBAN_TOKEN": "kanban_pat_…",

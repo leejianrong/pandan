@@ -2,7 +2,7 @@ name: Publish MCP image
 
 # Build the MCP server (mcp/) as an OCI image and push it to the GitHub
 # Container Registry (ghcr.io) so agents can `docker run` it with no local
-# Python/uv (KAN-47). The image bundles the sibling `kanban-client` path dep, so
+# Python/uv (KAN-47). The image bundles the sibling `pandan-client` path dep, so
 # the build CONTEXT is the REPO ROOT with `-f mcp/Dockerfile` (see mcp/Dockerfile).
 #
 # TRIGGER: version tags only (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
@@ -54,7 +54,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           # Build context is the repo root; the Dockerfile COPYs both mcp/ and
-          # the sibling kanban-client/, so it MUST NOT be the mcp/ subdir.
+          # the sibling pandan-client/, so it MUST NOT be the mcp/ subdir.
           context: .
           file: mcp/Dockerfile
           push: true

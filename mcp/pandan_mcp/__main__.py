@@ -1,4 +1,4 @@
-"""Enable ``python -m kanban_mcp`` to launch the stdio server."""
+"""Enable ``python -m pandan_mcp`` to launch the stdio server."""
 from __future__ import annotations
 
 from .server import main

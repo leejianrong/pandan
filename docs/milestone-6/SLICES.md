@@ -196,7 +196,7 @@ this epic** since the palette builds on U2's Bits UI Command primitive.
   **secret is write-only** — accepted on `PATCH /boards/{id}`, omitted from every board read. Bounds:
   short per-request `OUTBOUND_WEBHOOK_TIMEOUT` (3s), optional `OUTBOUND_WEBHOOK_RETRIES` (default 0),
   and a per-board `OUTBOUND_WEBHOOK_MIN_INTERVAL` (1s) throttle so a burst can't hammer the target
-  (in-process, resets on restart — same tradeoff as V27). Parity: MCP `update_board` + kanban-client
+  (in-process, resets on restart — same tradeoff as V27). Parity: MCP `update_board` + pandan-client
   `update_board` gained the three fields (the CLI has no `board update` command — a pre-existing gap,
   autosync flags aren't CLI-settable either; noted as a possible follow-up).
 

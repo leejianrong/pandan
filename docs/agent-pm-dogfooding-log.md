@@ -47,7 +47,7 @@ The short path to a working `kanban` MCP server in Claude Code:
      `docker run -i --rm -e KANBAN_API_URL -e KANBAN_TOKEN -e KANBAN_BOARD_ID
      ghcr.io/leejianrong/simple-kanban-mcp:latest`. (Requires a published release; if the image
      isn't available yet, use the source path below.)
-   - **From source with `uv`:** `uv run --directory ./mcp python -m kanban_mcp` from a checkout.
+   - **From source with `uv`:** `uv run --directory ./mcp python -m pandan_mcp` from a checkout.
 3. **Set env:** `KANBAN_API_URL` (`https://simple-kanban-jian.fly.dev` or a self-host origin),
    `KANBAN_TOKEN` (the PAT), and **`KANBAN_BOARD_ID`** (set it, or list/create tools span all your
    boards / land on the earliest). Restart Claude Code, then verify with the `warmup` then
@@ -244,8 +244,8 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   checkout parked on `main` and re-check `git branch --show-current` after each agent returns (both
   times it self-restored, but verify — don't assume).
 - **Shared-package pattern in this uv monorepo: path source, not a root workspace.** KAN-21 extracted
-  `kanban-client/` as a standalone uv package that `mcp` depends on via
-  `[tool.uv.sources] kanban-client = { path = "../kanban-client", editable = true }`. A repo-root uv
+  `pandan-client/` as a standalone uv package that `mcp` depends on via
+  `[tool.uv.sources] pandan-client = { path = "../pandan-client", editable = true }`. A repo-root uv
   *workspace* would be auto-discovered when running `uv` from `backend/` and force `backend` into the
   workspace, breaking its independent `--frozen` flow. Each package stays independently locked; the
   lockfile records a *relative* path so CI's fresh checkout stays portable. Any new shared package
@@ -272,11 +272,11 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   too. Observed: #45 (backend, KAN-29) Deploy `cancelled` when #46 merged right after, but #46's
   Deploy (`success`) shipped HEAD which included KAN-29 — prod-verified live. A `cancelled` Deploy
   superseded by a newer merge is a non-event; verify prod reflects HEAD rather than re-running it.
-- **`kanban-cli/`-only merges still trigger a real (harmless) Deploy.** The Deploy skip-filter treats
-  docs/.claude/.github/mcp/client as non-deployable but did NOT exclude `kanban-cli/`, so #46 (cli-only)
+- **`pandan-cli/`-only merges still trigger a real (harmless) Deploy.** The Deploy skip-filter treats
+  docs/.claude/.github/mcp/client as non-deployable but did NOT exclude `pandan-cli/`, so #46 (cli-only)
   ran a full ~46s Deploy though nothing in the Fly image changed. Harmless (no-op image), but an
   avoidable rollout window — worth extending the Deploy skip-filter to cli/mcp/client (none are in the
-  deployed artifact). Separate from CI's `changes` filter (which KAN-24 did extend to `kanban-cli/**`).
+  deployed artifact). Separate from CI's `changes` filter (which KAN-24 did extend to `pandan-cli/**`).
 - **Right-side of the "MCP restart" nuance, reconfirmed at scale.** KAN-29's new `blocked` FIELD showed
   up in `claim_card`/`list_cards` MCP output the same session, no restart (JSON passthrough). But
   KAN-31's new TOOLS (`add_dependency`/`remove_dependency`/`list_dependencies`) are NOT callable until
@@ -285,20 +285,20 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
 - **3-wide measured parallel works cleanly when disjointness is verified against the CODE first.**
   Extended the KAN-28+KAN-22 two-agent precedent to three concurrent Wave-1 agents (backend / mcp+client
   / cli) with zero conflicts, then serialized landing. The enabler was checking file sets in the source,
-  not the plan: KAN-23 (cli) does NOT touch `kanban-client/` even though KAN-31 does — the client's
+  not the plan: KAN-23 (cli) does NOT touch `pandan-client/` even though KAN-31 does — the client's
   board/epic methods already existed — so cli-vs-client were genuinely disjoint. Don't trust a
   "same-ish area" hunch; grep the actual imports/methods before declaring two cards parallel-safe.
 - **A monorepo path-source package installs cleanly over `git+…#subdirectory=`.** Contrary to the
-  assumption that the `../kanban-client` path dependency would break a git install,
-  `uv tool install "git+https://…/simple-kanban.git#subdirectory=kanban-cli"` resolves the sibling path
+  assumption that the `../pandan-client` path dependency would break a git install,
+  `uv tool install "git+https://…/simple-kanban.git#subdirectory=pandan-cli"` resolves the sibling path
   source from the same fetched clone. uv's monorepo resolution over git is more capable than expected —
   relevant to the distribution cards (KAN-46 binary / KAN-47 OCI image).
 - **CI is now the `changes` gate + 8 work jobs = 9 checks** (added `cli` in KAN-24). Only Lint/Unit/
   Integration/Frontend are branch-protection *required*; `cli`/`mcp`/`client`/`e2e` report green but
-  aren't individually required (per KAN-37). A gotcha this created: a `kanban-cli/`-only PR *before*
+  aren't individually required (per KAN-37). A gotcha this created: a `pandan-cli/`-only PR *before*
   KAN-24 (e.g. KAN-23's #46) wasn't mapped, so its heavy jobs pass-*skipped* — green CI there meant
   nothing; the sub-agent's local `ruff`+`pytest` was the real signal. KAN-24 closed that by mapping
-  `kanban-cli/**`, so its own #47 was the first PR where the `cli` job actually ran (8s, real work).
+  `pandan-cli/**`, so its own #47 was the first PR where the `cli` job actually ran (8s, real work).
 
 ## Session log (what's been run through this playbook)
 
@@ -306,19 +306,19 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   and KAN-11 (MCP read parity → PR #27, tools 14→16) both merged + `done`. Net: the MCP server now
   has full CRUD parity for cards, epics, and boards (16 tools) — the `delete_board` gap that
   triggered KAN-10 during dogfooding is closed.
-- **KAN-21 (Epic 6, kan CLI): shared `kanban_client` extracted** → PR #29, `done`. The httpx client
-  moved out of `mcp/` into a standalone `kanban-client/` uv package (path source, see gotcha above);
+- **KAN-21 (Epic 6, kan CLI): shared `pandan_client` extracted** → PR #29, `done`. The httpx client
+  moved out of `mcp/` into a standalone `pandan-client/` uv package (path source, see gotcha above);
   CI grew a 7th `client` job. Unblocks the CLI cards (KAN-22/23/24) and KAN-25.
 - **KAN-25 (Epic 7, cold-start): retry + generous timeout in the shared client** → PR #31, `done`.
   35s read / 5s connect timeout, 1s backoff, one retry — connect/handshake errors retried for all
   methods, `ReadTimeout` only for idempotent GET, never on 4xx/5xx (LWW → no double writes). Directly
   targets the cold-start failures logged above.
   - **Caveat: this does NOT fix cold starts for THIS session.** Claude Code loads the MCP server once
-    at session start, so its `kanban_client` is the pre-merge code until the user restarts the session
+    at session start, so its `pandan_client` is the pre-merge code until the user restarts the session
     (and re-`uv sync`s `mcp/`). The retry benefits *future* sessions + the future CLI. Keep warming by
     hand for the rest of this session. **KAN-27 (keep-alive cron) is the complementary server-side fix.**
 - **Known doc-drift to clean up (flagged by 2 sub-agents):** `CLAUDE.md`'s MCP section still says
-  "10 tools" (now 16) and references `mcp/kanban_mcp/api.py` (moved to `kanban-client/` in KAN-21).
+  "10 tools" (now 16) and references the MCP server's old `api.py` (moved to `pandan-client/` in KAN-21).
   Good PM hygiene: file it or fix it rather than let it rot.
 - **Backlog groomed from dogfooding.** The "board can't tell the whole story" friction (no
   dependency field; no PR-link/notes field; column = "an agent is on it" ≠ real work state) was turned
@@ -362,7 +362,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   - **`update_card` silently ignores `column`** — column changes go through `move_card` only. (Live
     proof of why KAN-38's `claim_card` exists.)
 - **KAN-28 + KAN-22 in PARALLEL (measured parallel):** two agents coded concurrently in worktrees
-  (backend deps model vs new `kanban-cli/` package — disjoint files, zero conflict), then **landed
+  (backend deps model vs new `pandan-cli/` package — disjoint files, zero conflict), then **landed
   serially**. Refinement to the "one at a time" rule: parallelize *implementation* freely when files
   don't overlap; **serialize the *landing*** (review + merge one PR at a time). **A card carrying a
   production migration lands ALONE and gets verified on prod** — after KAN-28 deployed, confirmed
@@ -398,11 +398,11 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   - **KAN-23** (#46, EPIC-6) — `kan board list/create` + `kan epic list/create/update/delete` as
     nested subcommand groups (client methods already existed; cli-only, disjoint from KAN-31).
   - **KAN-24** (#47, EPIC-6) — CLI README + `readme` pointer + `--help` polish + a CI `cli` job
-    mirroring `mcp`, and extended KAN-37's `changes` filter to map `kanban-cli/**`. CI now 9 checks.
+    mirroring `mcp`, and extended KAN-37's `changes` filter to map `pandan-cli/**`. CI now 9 checks.
 - **Two distribution cards filed** from a user design discussion (how to ship the CLI + MCP so end
   users need no toolchain): **KAN-46** (EPIC-6) — ship `kan` as a standalone PyInstaller `--onefile`
   binary via a per-OS CI release matrix → GitHub Releases (no Python needed); **KAN-47** (EPIC-5) —
-  publish the MCP server as an OCI image to **ghcr.io** (`docker run`, bundles `kanban-client` at build
+  publish the MCP server as an OCI image to **ghcr.io** (`docker run`, bundles `pandan-client` at build
   time). Rationale worth keeping: **GitHub Packages has NO native pip index** (it hosts npm / Container
   / Maven / Gradle / NuGet / RubyGems), so for our Python packages the GitHub-hosted options are a
   container image (ghcr.io) or loose files on Releases — not a `pip install`-by-name index. PyPI would
@@ -467,10 +467,10 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   vs frontend). All landed + prod-verified.
   - **KAN-46** (#54) — `kan` PyInstaller `--onefile` binary + tag-triggered `release-cli.yml` matrix.
     **KAN-47** (#55) — MCP server OCI image to ghcr.io (`mcp/Dockerfile` at REPO-ROOT context, bundling
-    `kanban-client`) + tag-triggered publish workflow. Both CI/packaging-only (no deploy). **Closed
+    `pandan-client`) + tag-triggered publish workflow. Both CI/packaging-only (no deploy). **Closed
     EPIC-6 (kan CLI).** Key gotchas the agent surfaced: PyInstaller must freeze a dedicated
     absolute-import entry file (`__main__.py`'s relative import breaks frozen); the mcp Docker build
-    context MUST be the repo root to COPY the sibling `kanban-client/`; publishing is tag-gated only
+    context MUST be the repo root to COPY the sibling `pandan-client/`; publishing is tag-gated only
     (no artifact on PR/merge) and the first ghcr push is PRIVATE until made public.
   - **NEW epic EPIC-16 "M4: UI/UX Polish"** (filed this session) + cards **KAN-65/66/67**, all done in
     ONE PR (#56): card detail modal (click-anywhere, edit-in-place, Status via move endpoint), epic
@@ -515,7 +515,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
     unversioned `/api/cards`) and added `docs/guides/agent-onboarding.md` (mint a PAT → wire MCP into
     Claude Code via the uv-from-source path → example agent workflows → CLI for CI → self-host →
     single-owner note). Docs-only; verified against source.
-  - **Docs-honesty catch worth reusing:** the sub-agent flagged that `mcp/README.md` + `kanban-cli/README.md`
+  - **Docs-honesty catch worth reusing:** the sub-agent flagged that `mcp/README.md` + `pandan-cli/README.md`
     already presented the ghcr image + a `curl …/releases/latest/download/…` binary as if they WORK
     TODAY (dead 404s until a release is cut). Since the release was deferred, I had it soften both to
     "available once a versioned release is published" in the SAME PR. Lesson: when writing onboarding
@@ -699,7 +699,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   - **The parallelism reality for this repo: cores are disjoint, adapters are not.** Two full-stack
     slices can always split their *substantive* work (e.g. `boards.py`+`ordering.py` vs
     `cards.py`+`models.py`), but they *always* collide on the thin shared adapters
-    (`kanban-cli/cli.py`, `mcp/server.py`, `kanban-client/client.py`), `schemas.py`, and the frontend
+    (`pandan-cli/cli.py`, `mcp/server.py`, `pandan-client/client.py`), `schemas.py`, and the frontend
     shell (`App.svelte`, `api.ts`). So "provably disjoint" is never literally true here — the working
     rule is: **land the first PR, then the second does a mechanical keep-both rebase** of the adapter
     files (V13-after-V12, V14-after-V17). Brief both agents to APPEND/localize adapter additions (new
@@ -740,7 +740,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   doesn't), so parallelism is migration-bound: the plan is Wave 1 parallel then KAN-260/251/252 solo,
   each starting only *after* the prior migration card merges (so it branches off a main that already
   has the prior migration → linear chain, never sibling heads). Wave 1 was the one clean disjoint
-  pair: KAN-261 is adapter-only (`kanban-client`/`mcp`/`cli`, no backend, no deploy) and KAN-239 is
+  pair: KAN-261 is adapter-only (`pandan-client`/`mcp`/`cli`, no backend, no deploy) and KAN-239 is
   backend-only (routers + migration), so zero shared files and only one migration in flight.
   - **The disjoint axis here is adapter-package vs backend, not just backend-vs-frontend.** KAN-261
     touched only the three thin client packages; KAN-239 only `backend/`. They never met — no rebase,
@@ -771,7 +771,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
     itself a clean backend+migration slice and did *not* patch one action into a map missing three
     (would be an incomplete fix). A small "Activity panel: complete the action icon/badge map
     (attention/resolved/purged)" frontend card is worth filing.
-  - **`kanban-cli/README.md` command table is stale** — documents only core CRUD, missing the M5
+  - **`pandan-cli/README.md` command table is stale** — documents only core CRUD, missing the M5
     verbs `next`/`needs-human`/`resolve`/`metrics`/`view` (KAN-261 added just its own `activity` row,
     in scope). Worth a docs card to backfill.
 - **M5 tail — Wave 2: KAN-260 (structured activity transitions, migration) solo: merged + `done`.**
@@ -858,7 +858,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   batch-create endpoint" → it's a client loop). Every agent caught it by grepping the code first and
   corrected the docs in-PR. The standing "trust the code over the card" brief is doing real work —
   keep briefing agents to verify the premise before implementing, and to fix the stale doc in the same
-  slice. Two frontend/docs follow-ups filed (Activity panel action-badge map; kanban-cli README verb
+  slice. Two frontend/docs follow-ups filed (Activity panel action-badge map; pandan-cli README verb
   table).
 - **Post-M5 cleanup batch — KAN-267/269/270 (‖) + KAN-268 & a discovered bug KAN-277 (‖): all merged
   + `done`; turned 2 GitHub issues into cards first.** A housekeeping round: pruned stale branches (59
@@ -871,7 +871,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
     the REST API instead: `gh api repos/OWNER/REPO/issues/N` to read an issue,
     `gh api -X PATCH …/pulls/N -F body=@file` to edit a PR body. (The dogfooding log already flagged
     the `gh pr edit` variant for KAN-14; it bites `gh issue view` too.)
-  - **The disjoint axis was frontend / backend-less-CLI: 3 of 4 cards lived in `kanban-cli/`.** Only
+  - **The disjoint axis was frontend / backend-less-CLI: 3 of 4 cards lived in `pandan-cli/`.** Only
     KAN-267 (frontend) was collision-free. KAN-269 (points) & KAN-270 (dep verbs) both edit `cli.py`;
     KAN-268 (README) & KAN-270 both edit `README.md`. Ran 267‖269‖270 in Wave 1, landed 269 first, and
     269/270 **git-auto-merged with no manual rebase** because each kept its edits localized (269 in the
@@ -944,7 +944,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   auto-merge on green, serialized landing.
   - **The disjoint axis was subsystem, and `main.py` is the hardening chokepoint.** Wave 1a =
     V27 rate-limiting (KAN-291: `main.py`+routers+new `ratelimit.py`) ‖ V30 DB resilience (KAN-294:
-    `db.py` only) ‖ CLI batch (KAN-285…288: `kanban-cli/` only) — three provably non-overlapping file
+    `db.py` only) ‖ CLI batch (KAN-285…288: `pandan-cli/` only) — three provably non-overlapping file
     sets. Every M6 *middleware* card touches `backend/app/main.py`, so those must serialize; V27 owned
     it this wave and V28/V29 were deferred to Wave 1b to rebase on V27's merged version.
   - **Two Deploy `workflow_run` events fire per PR merge — poll the right one.** A merge triggers the

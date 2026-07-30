@@ -101,7 +101,7 @@ V1 is foundational + immediately visible.
 
 - **Build:** `/mcp` package (own `pyproject.toml` + `uv.lock`) — official `mcp` SDK (FastMCP,
   stdio); seven tools `list_cards` / `get_card` / `create_card` / `create_epic` / `update_card` /
-  `move_card` / `delete_card`, each a thin `httpx` wrapper over `/api/v1` (`kanban_mcp/api.py` →
+  `move_card` / `delete_card`, each a thin `httpx` wrapper over `/api/v1` (`api.py` →
   `server.py`). Config via `KANBAN_API_URL` + optional `KANBAN_TOKEN` (`config.py`); the token is
   sent as `Authorization: Bearer` and is only needed when the target has `API_TOKENS` set. `list_cards`
   exposes the V3 query params. `.mcp.json.example` at the repo root + `mcp/README.md` document Claude

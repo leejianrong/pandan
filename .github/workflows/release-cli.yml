@@ -1,7 +1,7 @@
 name: Release CLI binary
 
 # Build the `kan` CLI as a single self-contained executable (PyInstaller
-# --onefile: freezes the interpreter + kanban_cli + the sibling kanban-client
+# --onefile: freezes the interpreter + pandan_cli + the sibling pandan-client
 # path dep + httpx into one file) so users can run it with no Python/uv
 # installed (KAN-46). PyInstaller can't cross-compile, so we build natively on
 # each target OS in a matrix and attach the results to the GitHub Release.
@@ -60,7 +60,7 @@ jobs:
       # `kan-windows-x86_64.exe`) when there's demand.
     defaults:
       run:
-        working-directory: kanban-cli
+        working-directory: pandan-cli
     steps:
       - uses: actions/checkout@v7
 
@@ -92,7 +92,7 @@ jobs:
           echo "UV_PYTHON_PREFERENCE=only-managed" >> "$GITHUB_ENV"
           uv python install 3.12
 
-      # Installs the CLI, its runtime deps (httpx, the ../kanban-client path
+      # Installs the CLI, its runtime deps (httpx, the ../pandan-client path
       # dep, resolved at build time), and the `build` group (PyInstaller).
       # --python 3.12 pins the interpreter version; on linux UV_PYTHON_PREFERENCE
       # forces uv's managed (shared-libpython) build.
@@ -103,8 +103,8 @@ jobs:
         run: >-
           uv run --frozen --group build pyinstaller --onefile
           --name "${{ matrix.asset }}"
-          --collect-submodules kanban_cli
-          --collect-submodules kanban_client
+          --collect-submodules pandan_cli
+          --collect-submodules pandan_client
           packaging/pyinstaller_entry.py
 
       # Regression guard (KAN-81, linux only): assert the built onefile requires
@@ -158,5 +158,5 @@ jobs:
       - name: Attach binary to the Release
         uses: softprops/action-gh-release@v3
         with:
-          files: kanban-cli/dist/${{ matrix.asset }}
+          files: pandan-cli/dist/${{ matrix.asset }}
           fail_on_unmatched_files: true

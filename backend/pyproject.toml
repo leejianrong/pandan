@@ -1,5 +1,5 @@
 [project]
-name = "simple-kanban-backend"
+name = "pandan-backend"
 version = "0.1.0"
 description = "Simple Kanban MVP backend — FastAPI + sync SQLAlchemy 2.0 + psycopg v3"
 requires-python = ">=3.12"

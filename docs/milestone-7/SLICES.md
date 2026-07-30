@@ -44,7 +44,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 > `--version` reported `0.3.0` both before and after and nothing revealed the staleness. Consequences
 > folded into this plan: **V42 de-scoped** to `--fields` + regression tests (its round-trip half is
 > shipped), **KAN-433 closed invalid**, and a new root-cause slice **V50 / KAN-435** added and
-> prioritised **first** in Wave 2. Audit against `uv run python -m kanban_cli` from `kanban-cli/`,
+> prioritised **first** in Wave 2. Audit against `uv run python -m pandan_cli` from `pandan-cli/`,
 > never a `kan` on `PATH` — see the [shaping](SHAPING.md)'s methodology note.
 
 > **Status:** 🔜 **not started (0/11).** Board cards **KAN-423…KAN-432** + **KAN-435** under the three `M7:` epics
@@ -66,8 +66,8 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 
 ### V40 · Rebrand sweep: code, CLI, MCP, skills, docs (N1) — KAN-423
 - **Build:** rename `simple-kanban` → **`pandan`** across the repo (~52 files carry the brand string).
-  - **Packages:** `simple-kanban-{backend,frontend,cli,mcp}` → `pandan-*`; the `kanban-cli/`,
-    `kanban-client/` and `mcp/kanban_mcp/` directories and import roots follow (`pandan_cli`,
+  - **Packages:** `simple-kanban-{backend,frontend,cli,mcp}` → `pandan-*`; the `pandan-cli/`,
+    `pandan-client/` and `mcp/pandan_mcp/` directories and import roots follow (`pandan_cli`,
     `pandan_client`, `pandan_mcp`).
   - **CLI:** console script `kan` → **`pandan`**, plus a **`pdn`** alias (a second
     `[project.scripts]` entry pointing at the same `main`). The PyInstaller entry + the standalone
@@ -100,7 +100,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 - **Acceptance:** the demo; suite green. App code + docs — **deploys** (no migration).
 - **Notes:** land as one PR. It is large but mechanical, and splitting it leaves the repo in a
   half-renamed state that's worse to review. Grep for the old strings as the last review step:
-  `grep -ri 'simple.kanban\|kanban_cli\|kanban_mcp\|KANBAN_' --exclude-dir={.venv,node_modules,.git}`
+  `grep -ri 'simple.kanban\|pandan_cli\|pandan_mcp\|KANBAN_' --exclude-dir={.venv,node_modules,.git}`
   should return only the intentional fallback + the "why we kept `KAN-`" comments.
 
 ### V41 · Rebrand deploy identity: Fly app, ghcr image, OAuth callbacks (N2) — KAN-424
@@ -136,7 +136,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
   only on a `v*` tag, so nothing forces a bump when a user-visible fix lands.
   1. **Bump-on-fix:** a user-visible CLI change bumps the version in the **same PR**. Enforce as far
      as is cheap — a PR-checklist line plus a pre-push/CI check that a diff touching
-     `kanban_cli/`'s behaviour also touches the version.
+     `pandan_cli/`'s behaviour also touches the version.
   2. **Discriminating `--version`:** embed the build's `git describe`/short sha at package time so
      `--version` prints e.g. `pandan 0.4.0 (a10eaee)` for a release and marks a source run as such.
      This is the part that makes staleness *detectable* rather than merely *avoidable*.
