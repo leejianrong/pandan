@@ -12,7 +12,9 @@ the card verbs — parity with the board/epic surface of ``/api/v1`` (KAN-23).
 The CLI is a thin adapter over the shared ``PandanClient``: parse args → env
 config → one client call → print. ``--json`` prints the client's raw dict (for
 ``pandan list --json | jq …``); otherwise a concise ``ticket  column  title  pts=N``
-line (``pts=-`` when unestimated, reading the API's ``story_points``).
+line (``pts=-`` when unestimated, reading the API's ``story_points``). List verbs
+take ``--fields a,b,c`` to widen that minimal default row on demand (V42, KAN-425);
+it shapes the **human** row only — ``--json`` stays a verbatim passthrough.
 
 Exit codes (for scripting):
     0  success
@@ -66,21 +68,37 @@ DEFAULT_LABEL_COLOR = "#64748b"
 # --- output helpers ---------------------------------------------------------
 
 
-def _emit(result: Any, *, as_json: bool, noun: str = "card") -> None:
+def _emit(
+    result: Any, *, as_json: bool, noun: str = "card", fields: list[str] | None = None
+) -> None:
     """Print a command result: raw JSON when ``--json``, else a human summary.
 
     ``noun`` (``card``/``epic``/``board``) only disambiguates the delete summary,
     whose result dict (``{"deleted": id}``) is otherwise shape-identical across
     entities; everything else is detected from the result's shape.
+
+    ``fields`` is the ``--fields`` projection (V42, KAN-425) and applies to the
+    **human** row only: ``--json`` is a deliberate verbatim passthrough of the
+    client result (the full payload is already there, and V44 adds a ``summary``
+    key beside ``cards``), so a projection there would reshape a documented
+    machine contract for no gain. See the README's "--json output shape" section.
     """
     if as_json:
         print(json.dumps(result, indent=2, default=str))
         return
-    print(_humanize(result, noun=noun))
+    print(_humanize(result, noun=noun, fields=fields))
 
 
-def _humanize(result: Any, *, noun: str = "card") -> str:
-    """Render a client result as concise human text (one entity per line)."""
+def _humanize(result: Any, *, noun: str = "card", fields: list[str] | None = None) -> str:
+    """Render a client result as concise human text (one entity per line).
+
+    With ``fields`` set, a list result's rows are projected onto exactly those
+    field names instead of the entity's default row; every other shape (and every
+    single-entity result) renders as usual."""
+    if fields:
+        projected = _project_rows(result, fields)
+        if projected is not None:
+            return projected
     if isinstance(result, dict) and "cards" in result:  # list_cards
         cards = result["cards"]
         if not cards:
@@ -461,6 +479,149 @@ def _link_block(result: dict[str, Any]) -> str:
     if not links:
         return f"{header}\n(no links)"
     return "\n".join([header, *(_link_line(la) for la in links)])
+
+
+# --- --fields projection (V42, KAN-425 — AXI 2) -----------------------------
+# The default human row is deliberately minimal (4 fields for a card), which is
+# right for the common case but means anything else needs `--json` + jq. `--fields
+# a,b,c` widens that row on any list verb without leaving the tab-separated form.
+#
+# The vocabulary is **the row's own `--json` keys** rather than a hand-maintained
+# table, so it can never drift from the API (the repo has three-places-in-sync
+# problems already — see CLAUDE.md on `column`). Two aliases exist for the names
+# the default row displays but the payload spells differently.
+
+FIELD_ALIASES = {
+    "ticket": "ticket_number",
+    "pts": "story_points",
+    "points": "story_points",
+}
+
+# The list envelopes the shared client returns (README §"The --json output shape").
+# Order mirrors the checks in ``_humanize``; a result carries exactly one of these.
+_LIST_ENVELOPES = (
+    "cards",
+    "boards",
+    "epics",
+    "labels",
+    "views",
+    "templates",
+    "cycles",
+    "notifications",
+    "activity",
+    "comments",
+)
+
+# Envelope key → the singular noun used in the unknown-field error message.
+_ROW_NOUN = {
+    "cards": "card",
+    "boards": "board",
+    "epics": "epic",
+    "labels": "label",
+    "views": "view",
+    "templates": "template",
+    "cycles": "cycle",
+    "notifications": "notification",
+    "activity": "activity",
+    "comments": "comment",
+}
+
+
+def _fields_arg(value: str) -> list[str]:
+    """argparse ``type`` for ``--fields``: a comma-separated field list, lower-cased
+    and de-blanked. An empty / all-blank value is a usage error (exit 2); an
+    *unknown* name is a runtime error raised at render time (exit 1), because the
+    valid names are the keys of the rows actually returned."""
+    names = [part.strip().lower() for part in value.split(",")]
+    names = [n for n in names if n]
+    if not names:
+        raise argparse.ArgumentTypeError(
+            "expected a comma-separated list of field names, e.g. --fields ticket,title,assignee"
+        )
+    return names
+
+
+def _resolve_field(name: str) -> str:
+    return FIELD_ALIASES.get(name, name)
+
+
+def _field_value(value: Any) -> str:
+    """Render one projected value as compact text: ``-`` for null, ``true``/``false``
+    for booleans, a comma-joined summary for a list (each item by its ``name`` /
+    ``ticket_number`` / ``id`` when it's an object), compact JSON for anything else
+    nested. Never multi-line — a projected row stays one line."""
+    if value is None:
+        return "-"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        if not value:
+            return "-"
+        return ",".join(_field_item(item) for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, default=str, sort_keys=True, separators=(",", ":"))
+    return str(value).replace("\t", " ").replace("\n", " ")
+
+
+def _field_item(item: Any) -> str:
+    """One element of a projected list: an object shows its most identifying key
+    (``name`` for labels, ``ticket_number`` for cards, else ``id``)."""
+    if isinstance(item, dict):
+        for key in ("name", "ticket_number", "id"):
+            if item.get(key) is not None:
+                return str(item[key])
+        return json.dumps(item, default=str, sort_keys=True, separators=(",", ":"))
+    return str(item)
+
+
+def _validate_fields(fields: list[str], rows: list[Any], noun: str) -> None:
+    """Reject an unknown field name, naming the offender and listing what's valid.
+
+    Valid names are the union of the keys the returned rows carry, plus the aliases
+    that resolve onto one of them."""
+    known: set[str] = set()
+    for row in rows:
+        if isinstance(row, dict):
+            known |= {str(k) for k in row}
+    available = sorted(known | {a for a, target in FIELD_ALIASES.items() if target in known})
+    for name in fields:
+        if _resolve_field(name) not in known:
+            raise ConfigError(
+                f"unknown --fields name {name!r} for {noun} rows; "
+                f"available: {', '.join(available)}"
+            )
+
+
+def _project_line(row: Any, fields: list[str]) -> str:
+    if not isinstance(row, dict):
+        return _field_value(row)
+    return "\t".join(_field_value(row.get(_resolve_field(name))) for name in fields)
+
+
+def _project_rows(result: Any, fields: list[str]) -> str | None:
+    """Render a list result's rows projected onto ``fields``, or ``None`` when the
+    result isn't a list envelope (then the caller falls back to the default render).
+
+    The definitive empty state (AXI 5) and the ``next_cursor`` hint are preserved
+    verbatim — a projection changes which columns print, nothing else."""
+    if not isinstance(result, dict):
+        return None
+    for key in _LIST_ENVELOPES:
+        if key not in result or not isinstance(result[key], list):
+            continue
+        # A single ``CardRead`` also *carries* a ``labels`` array (the KAN-277 trap):
+        # only a label LIST response has no ticket of its own.
+        if key == "labels" and "ticket_number" in result:
+            continue
+        rows = result[key]
+        if not rows:
+            return f"(no {key})"
+        _validate_fields(fields, rows, _ROW_NOUN.get(key, key))
+        lines = [_project_line(row, fields) for row in rows]
+        if result.get("next_cursor"):
+            lines.append(f"(more — next cursor: {result['next_cursor']})")
+        return "\n".join(lines)
+    return None
 
 
 # --- board resolution -------------------------------------------------------
@@ -1052,6 +1213,28 @@ def _cmd_login(args: argparse.Namespace) -> int:
 # --- argument parser --------------------------------------------------------
 
 
+def _add_fields_arg(parser: argparse.ArgumentParser, example: str) -> None:
+    """Attach ``--fields`` to a list verb (V42, KAN-425 — AXI 2).
+
+    Every list verb keeps its minimal default row; ``--fields`` replaces that row
+    with exactly the named fields, tab-separated. Names are the row's own ``--json``
+    keys (so `--fields` and `--json` share one vocabulary and can't drift from the
+    API), plus the aliases ``ticket`` → ``ticket_number`` and ``pts``/``points`` →
+    ``story_points``. Values print **bare** (``-`` for null): the default row's
+    ``pts=N`` labelling is a property of the default row, not of the field."""
+    parser.add_argument(
+        "--fields",
+        type=_fields_arg,
+        metavar="LIST",
+        help=(
+            "comma-separated fields to print instead of the default row, e.g. "
+            f"--fields {example}. Names are the keys shown by --json (plus the "
+            "aliases ticket/pts); values are printed bare and tab-separated. "
+            "Affects human output only, never --json"
+        ),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pandan",
@@ -1155,11 +1338,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "sort keys, comma-separated, '-' prefix = descending. Both the space "
             "and equals forms work, e.g. --sort -priority,position or "
-            "--sort=-priority,position. Fields: position/priority/due_date/"
-            "created_at/updated_at/story_points/assignee/title/column/id"
+            "--sort=-priority,position. Sort keys: position/priority/due_date/"
+            "created_at/updated_at/story_points/assignee/title/column/id "
+            "(these order the rows; to choose which COLUMNS print, use --fields)"
         ),
     )
     p_list.add_argument("--limit", type=int, help="max cards to return")
+    _add_fields_arg(p_list, "ticket,title,assignee,priority")
     p_list.set_defaults(func=_cmd_list)
 
     p_get = sub.add_parser("get", parents=[common], help="get a single card by id")
@@ -1313,6 +1498,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_activity.add_argument(
         "--cursor", help="pagination cursor from a previous page's next-cursor line"
     )
+    _add_fields_arg(p_activity, "ts,actor_label,action,summary")
     p_activity.set_defaults(func=_cmd_activity)
 
     # --- notify subcommands (nested group; parity with /api/v1/notifications) -
@@ -1330,6 +1516,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_notify_list.add_argument(
         "--unread", action="store_true", help="only unread notifications"
     )
+    _add_fields_arg(p_notify_list, "id,kind,body")
     p_notify_list.set_defaults(func=_cmd_notify_list, noun="notification")
 
     p_notify_read = notify_sub.add_parser(
@@ -1347,6 +1534,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_board_list = board_sub.add_parser("list", parents=[common], help="list your boards")
+    _add_fields_arg(p_board_list, "id,name,owner_id")
     p_board_list.set_defaults(func=_cmd_board_list, noun="board")
 
     p_board_create = board_sub.add_parser("create", parents=[common], help="create a board")
@@ -1361,6 +1549,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_epic_list = epic_sub.add_parser("list", parents=[common], help="list / query epics")
     p_epic_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    _add_fields_arg(p_epic_list, "ticket,name,lead,target_date")
     p_epic_list.set_defaults(func=_cmd_epic_list, noun="epic")
 
     p_epic_create = epic_sub.add_parser("create", parents=[common], help="create an epic")
@@ -1404,6 +1593,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_label_list = label_sub.add_parser("list", parents=[common], help="list a board's labels")
     p_label_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    _add_fields_arg(p_label_list, "id,name,color")
     p_label_list.set_defaults(func=_cmd_label_list, noun="label")
 
     p_label_create = label_sub.add_parser("create", parents=[common], help="create a label")
@@ -1438,6 +1628,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_view_list = view_sub.add_parser("list", parents=[common], help="list a board's saved views")
     p_view_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    _add_fields_arg(p_view_list, "id,name,query")
     p_view_list.set_defaults(func=_cmd_view_list, noun="view")
 
     p_view_create = view_sub.add_parser(
@@ -1484,6 +1675,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_cycle_list = cycle_sub.add_parser("list", parents=[common], help="list a board's cycles")
     p_cycle_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    _add_fields_arg(p_cycle_list, "id,name,starts_on,ends_on")
     p_cycle_list.set_defaults(func=_cmd_cycle_list, noun="cycle")
 
     p_cycle_create = cycle_sub.add_parser("create", parents=[common], help="create a cycle")
@@ -1542,6 +1734,7 @@ def build_parser() -> argparse.ArgumentParser:
         "list", parents=[common], help="list a board's card templates"
     )
     p_template_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    _add_fields_arg(p_template_list, "id,name,cards")
     p_template_list.set_defaults(func=_cmd_template_list, noun="template")
 
     p_template_create = template_sub.add_parser(
@@ -1721,6 +1914,7 @@ def build_parser() -> argparse.ArgumentParser:
         "card_id", type=_id_or_ticket_arg, metavar="CARD",
         help="a card id or KAN-<n> ticket",
     )
+    _add_fields_arg(p_comment_list, "id,created_at,body")
     p_comment_list.set_defaults(func=_cmd_comment_list)
 
     return parser
@@ -1796,7 +1990,19 @@ def run(argv: Sequence[str] | None = None) -> int:
 
     # ``noun`` defaults to "card" (card verbs are top-level and set no noun);
     # the board/epic subparsers set it so the delete summary reads correctly.
-    _emit(result, as_json=args.as_json, noun=getattr(args, "noun", "card"))
+    # ``--fields`` (list verbs only) can still fail on an unknown field name — the
+    # valid names are the keys of the rows we just fetched — so rendering is guarded
+    # the same way the call was.
+    try:
+        _emit(
+            result,
+            as_json=args.as_json,
+            noun=getattr(args, "noun", "card"),
+            fields=getattr(args, "fields", None),
+        )
+    except ConfigError as exc:
+        print(f"pandan: {exc}", file=sys.stderr)
+        return EXIT_ERROR
     # warmup never throws (a still-waking/failed server is a status, not an
     # exception), so it maps that status to a scripting-friendly exit code:
     # 0 when awake, 1 otherwise (retry the CI pre-step / investigate).

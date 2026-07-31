@@ -26,7 +26,7 @@ nested groups so their verbs don't collide with the card verbs (parity with the
 
 | Command | Endpoint |
 |---------|----------|
-| `pandan list [--board N] [--column C] [--epic ID] [--limit N] [--json]` | `GET /cards` (V3 query API) |
+| `pandan list [--board N] [--column C] [--epic ID] [--limit N] [--fields F,…] [--json]` | `GET /cards` (V3 query API) |
 | `pandan get <card_id> [--json]` | `GET /cards/{id}` |
 | `pandan activity [--board N] [--actor L] [--action V] [--limit N] [--cursor C] [--json]` | `GET /boards/{id}/activity` |
 | `pandan create <title> [--board N] [--description D] [--column C] [--points N] [--assignee A] [--epic ID] [--json]` | `POST /cards` |
@@ -92,7 +92,51 @@ Every command takes `--json` to print the API's raw response (for piping, e.g.
 `pandan list --json | jq`); without it you get a concise tab-separated summary
 (`ticket  column  title  pts=N` for cards — `pts=-` when unestimated, reading the
 API's `story_points`; `ticket  name` for epics, `id  name` for boards) suitable for
-`grep`/`cut`.
+`grep`/`cut`. Every **list** verb also takes `--fields` to widen that row on demand
+(below).
+
+### Widening the row: `--fields` (V42, KAN-425)
+
+The default row is deliberately minimal — 4 fields for a card — so the common case
+stays cheap to read. When you need a different column set, name it instead of
+reaching for `--json | jq`:
+
+```bash
+pandan list --fields ticket,title,assignee,priority
+# KAN-425   V42 · --fields projection …   agent:v42-v43-cli-contract   medium
+
+pandan list --column in_progress --fields ticket,assignee,labels,blocked
+pandan epic list --fields ticket,name,lead,target_date
+```
+
+- **Which verbs.** Every list verb: `list`, `activity`, `board list`, `epic list`,
+  `label list`, `view list`, `cycle list`, `template list`, `comment list`,
+  `notify list`. (Not the single-entity verbs like `get` — their payload is the whole
+  record already; `--fields` there is an unrecognised argument, not a no-op.)
+- **The vocabulary is the row's own `--json` keys** — whatever `pandan list --json`
+  shows for a card is a valid field name (`title`, `assignee`, `priority`, `column`,
+  `story_points`, `labels`, `blocked`, `blocked_by`, `due_date`, `needs_human`,
+  `epic_id`, `cycle_id`, `created_at`, `updated_at`, `description`, …). Deriving it
+  from the payload rather than a hand-kept list is deliberate: it cannot drift from
+  the API. Plus three aliases for the names the default row displays differently:
+  `ticket` → `ticket_number`, and `pts` / `points` → `story_points`.
+- **Values print bare**, tab-separated, `-` for null/empty: the default row's `pts=N`
+  labelling belongs to the default row, not to the field, so
+  `--fields ticket,column,title,pts` prints `KAN-7  todo  Ship it  3`. A list renders
+  comma-joined by each item's most identifying key (`labels` → `bug,infra`;
+  `blocked_by` → `3,9`), and a projected row is always **one line**.
+- **Names are case-insensitive** and surrounding spaces are ignored
+  (`--fields " Ticket , title "` works).
+- **An unknown name is an error naming it**, and listing what is valid:
+  `pandan: unknown --fields name 'titel' for card rows; available: assignee, …`
+  (exit `1`; an empty `--fields ""` is a usage error, exit `2`).
+- **`--fields` shapes the human row only — it never changes `--json`.** `--json` is a
+  verbatim passthrough of the full payload (see below), so there is nothing to
+  project; combining the two flags is allowed and the JSON is byte-identical.
+- The **empty state** (`(no cards)`) and the pagination hint
+  (`(more — next cursor: …)`) print unchanged under a projection.
+- Not to be confused with `--sort`'s **sort keys**, which order the rows rather than
+  choose the columns.
 
 ### The `--json` output shape (KAN-434)
 

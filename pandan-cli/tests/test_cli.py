@@ -8,6 +8,7 @@ drive the real client over an ``httpx.MockTransport`` to prove the HTTP wiring.
 """
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import pathlib
@@ -2034,3 +2035,476 @@ def test_write_config_file_renders_the_pandan_table():
     assert body.startswith("[pandan]")
     # And it round-trips through the reader.
     assert config.load_config().token == "pandan_pat_x"
+
+
+# --- V42 / KAN-425: `--fields` projection on list verbs (AXI 2) ---------------
+# The default row stays minimal (4 fields for a card); `--fields a,b,c` widens it
+# on demand. The vocabulary is the row's own `--json` keys plus the aliases
+# `ticket` / `pts` / `points`, so it can't drift from the API. `--fields` shapes the
+# HUMAN row only — `--json` remains a verbatim passthrough of the client result.
+
+# Two realistic CardRead rows (all the keys the API returns, so the field
+# vocabulary under test is the real one).
+FCARD_A = {
+    "ticket_number": "KAN-7", "id": 7, "board_id": 5, "column": "todo",
+    "title": "Ship it", "description": "long body", "story_points": 3,
+    "assignee": "agent:v42", "epic_id": 4, "cycle_id": None, "priority": "high",
+    "due_date": None, "needs_human": False, "attention_note": None,
+    "labels": [{"id": 1, "name": "bug", "color": "#f00"}],
+    "blocked_by": [3, 9], "blocks": [], "blocked": False, "links": [],
+    "position": 0, "created_at": "2026-07-30T00:00:00Z",
+    "updated_at": "2026-07-30T00:00:00Z",
+}
+FCARD_B = {
+    **FCARD_A,
+    "ticket_number": "KAN-8", "id": 8, "column": "done", "title": "Next",
+    "story_points": None, "assignee": None, "priority": "none",
+    "labels": [], "blocked_by": [], "needs_human": True,
+}
+
+
+def test_default_row_is_byte_identical_without_fields(monkeypatch, env, capsys):
+    """The 4-field default row is the contract `--fields` must not disturb: with the
+    flag absent, output is byte-for-byte what it was before this slice."""
+    patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A, FCARD_B]}))
+    assert cli.run(["list"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == (
+        "KAN-7\ttodo\tShip it\tpts=3\n"
+        "KAN-8\tdone\tNext\tpts=-\n"
+    )
+
+
+def test_fields_projects_exactly_the_named_columns(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A, FCARD_B]}))
+    assert cli.run(["list", "--fields", "ticket,title,assignee,priority"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == (
+        "KAN-7\tShip it\tagent:v42\thigh\n"
+        "KAN-8\tNext\t-\tnone\n"          # a null assignee renders `-`, never "None"
+    )
+
+
+def test_fields_accepts_the_raw_api_key_and_its_alias(monkeypatch, env, capsys):
+    """`ticket`/`pts` are aliases of `ticket_number`/`story_points`; both spellings
+    work and both print the BARE value (the `pts=` label belongs to the default row)."""
+    patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
+    assert cli.run(["list", "--fields", "ticket_number,pts"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "KAN-7\t3\n"
+    patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
+    assert cli.run(["list", "--fields", "ticket,story_points,points"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "KAN-7\t3\t3\n"
+
+
+def test_fields_are_case_insensitive_and_tolerate_spaces(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
+    assert cli.run(["list", "--fields", " Ticket , TITLE "]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "KAN-7\tShip it\n"
+
+
+def test_fields_renders_scalars_lists_and_nulls_compactly(monkeypatch, env, capsys):
+    """One projected row is always ONE line: booleans as true/false, an object list
+    by its most identifying key (a label's name), an int list comma-joined, an empty
+    list and a null both `-`."""
+    patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A, FCARD_B]}))
+    argv = ["list", "--fields", "needs_human,labels,blocked_by,due_date"]
+    assert cli.run(argv) == cli.EXIT_OK
+    assert capsys.readouterr().out == (
+        "false\tbug\t3,9\t-\n"
+        "true\t-\t-\t-\n"
+    )
+
+
+def test_fields_keeps_a_projected_row_on_one_line(monkeypatch, env, capsys):
+    """A description with a newline/tab in it must not break the row format."""
+    card = {**FCARD_A, "description": "line one\nline two\twith tab"}
+    patch_client(monkeypatch, FakeClient(result={"cards": [card]}))
+    assert cli.run(["list", "--fields", "ticket,description"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert out == "KAN-7\tline one line two with tab\n"
+    assert len(out.splitlines()) == 1
+
+
+def test_fields_unknown_name_is_a_clean_error_naming_the_field(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
+    assert cli.run(["list", "--fields", "ticket,nope"]) == cli.EXIT_ERROR
+    err = capsys.readouterr().err
+    assert "unknown --fields name 'nope'" in err   # names the offending field
+    assert "for card rows" in err                  # and which row type it applied to
+    assert "available:" in err and "ticket" in err  # and what IS valid
+    # V43 (KAN-426) folds this message into the structured error shape; the *content*
+    # asserted here (offending field + vocabulary) is what must survive that change.
+
+
+def test_fields_rejects_an_empty_list_as_a_usage_error(env):
+    # A syntactically empty flag value is argparse's business → exit 2, before any
+    # request. (An unknown *name* needs the rows, so it's a runtime error → exit 1.)
+    for value in ("", "  ", ",,"):
+        with pytest.raises(SystemExit) as exc:
+            cli.run(["list", "--fields", value])
+        assert exc.value.code == cli.EXIT_USAGE
+
+
+def test_fields_preserves_the_definitive_empty_state(monkeypatch, env, capsys):
+    # AXI 5: an empty result still says so explicitly, projection or not.
+    patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    assert cli.run(["list", "--fields", "ticket,title"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "(no cards)\n"
+
+
+def test_fields_preserves_the_next_cursor_hint(monkeypatch, env, capsys):
+    patch_client(
+        monkeypatch, FakeClient(result={"cards": [FCARD_A], "next_cursor": "abc123"})
+    )
+    assert cli.run(["list", "--fields", "ticket"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "KAN-7\n(more — next cursor: abc123)\n"
+
+
+def test_fields_does_not_touch_json_output(monkeypatch, env, capsys):
+    """`--json` is a verbatim passthrough of the client result (`_emit`), and V44 adds
+    a `summary` key beside `cards` — so a projection there would reshape a documented
+    machine contract. `--fields` is human-row-only, and the two are independent."""
+    page = {"cards": [FCARD_A, FCARD_B]}
+    patch_client(monkeypatch, FakeClient(result=page))
+    assert cli.run(["list", "--json"]) == cli.EXIT_OK
+    plain = capsys.readouterr().out
+    patch_client(monkeypatch, FakeClient(result=page))
+    assert cli.run(["list", "--json", "--fields", "ticket"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == plain
+    assert json.loads(plain) == page
+
+
+def test_fields_is_not_offered_on_single_entity_verbs(env):
+    # `--fields` is a LIST-row projection; on `get` (one entity, full payload) it is
+    # an unrecognized argument, not a silently ignored flag.
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["get", "KAN-7", "--fields", "title"])
+    assert exc.value.code == cli.EXIT_USAGE
+
+
+@pytest.mark.parametrize(
+    "argv,result,expected",
+    [
+        (
+            ["epic", "list", "--fields", "ticket,name"],
+            {"epics": [{"ticket_number": "EPIC-4", "id": 4, "name": "M7", "lead": None}]},
+            "EPIC-4\tM7\n",
+        ),
+        (
+            ["board", "list", "--fields", "id,name"],
+            {"boards": [{"id": 5, "name": "Roadmap", "owner_id": 1}]},
+            "5\tRoadmap\n",
+        ),
+        (
+            ["label", "list", "--board", "5", "--fields", "name,color"],
+            {"labels": [{"id": 1, "name": "bug", "color": "#f00"}]},
+            "bug\t#f00\n",
+        ),
+        (
+            ["view", "list", "--board", "5", "--fields", "id,name"],
+            {"views": [{"id": 2, "name": "Mine", "query": {"column": "todo"}}]},
+            "2\tMine\n",
+        ),
+        (
+            ["cycle", "list", "--board", "5", "--fields", "name,starts_on"],
+            {"cycles": [{"id": 3, "name": "S1", "starts_on": "2026-07-01", "ends_on": None}]},
+            "S1\t2026-07-01\n",
+        ),
+        (
+            ["template", "list", "--board", "5", "--fields", "id,name"],
+            {"templates": [{"id": 4, "name": "Slice", "cards": [{"title": "a"}]}]},
+            "4\tSlice\n",
+        ),
+        (
+            ["comment", "list", "7", "--fields", "id,body"],
+            {"comments": [{"id": 9, "body": "hi", "author_id": None, "created_at": "t"}]},
+            "9\thi\n",
+        ),
+        (
+            ["activity", "--board", "5", "--fields", "action,summary"],
+            {"activity": [{"ts": "t", "actor_label": "me", "action": "moved", "summary": "s"}]},
+            "moved\ts\n",
+        ),
+        (
+            ["notify", "list", "--fields", "id,kind"],
+            {"notifications": [{"id": 1, "kind": "mention", "body": "b", "read_at": None}]},
+            "1\tmention\n",
+        ),
+    ],
+    ids=["epic", "board", "label", "view", "cycle", "template", "comment", "activity", "notify"],
+)
+def test_fields_works_on_every_list_verb(monkeypatch, env, capsys, argv, result, expected):
+    patch_client(monkeypatch, FakeClient(result=result))
+    assert cli.run(argv) == cli.EXIT_OK
+    assert capsys.readouterr().out == expected
+
+
+def test_list_help_distinguishes_fields_from_sort_keys(capsys):
+    """`list --help` used to carry a bare `Fields:` line that was `--sort`'s key
+    vocabulary — mistaken for a projection flag more than once (M7 shaping note).
+    The help must now name --fields as the projection and label --sort's list as
+    SORT keys."""
+    with pytest.raises(SystemExit):
+        cli.run(["list", "--help"])
+    # argparse re-wraps help text, so compare on whitespace-normalised output.
+    out = " ".join(capsys.readouterr().out.split())
+    assert "--fields" in out
+    assert "Sort keys: position" in out
+    assert "Fields: position" not in out
+
+
+# --- V42 / KAN-425: identifier round-trip regression tests -------------------
+# The CLI must accept every identifier it PRINTS (KAN-285, commit a10eaee; source
+# `_id_or_ticket_arg` / `_parse_id_or_ticket` in cli.py). That behaviour had no
+# test, which is why a ten-day-old fix was later mistaken for a live defect (the
+# reporter was on a stale 0.3.0 binary). These tests close the loop for real: run a
+# list verb, take the identifier out of the PRINTED row, feed it back verbatim.
+
+
+def _printed_identifier(monkeypatch, capsys, list_argv, page):
+    """Run a list verb and return the identifier from column 0 of its first printed
+    row — i.e. exactly the string a human/agent would copy off the screen."""
+    patch_client(monkeypatch, FakeClient(result=page))
+    assert cli.run(list_argv) == cli.EXIT_OK
+    return capsys.readouterr().out.splitlines()[0].split("\t")[0]
+
+
+_CARD_PAGE = {"cards": [_card("KAN-7", 7)]}
+_EPIC_PAGE = {"epics": [_epic("EPIC-4", 9)]}
+
+# Every card-id-taking verb (enumerated from cli.py's `type=_id_or_ticket_arg`
+# arguments, not from a doc). `{ref}` is substituted with the printed ticket.
+_CARD_REF_VERBS = [
+    (["get", "{ref}"], "get_card"),
+    (["update", "{ref}", "--title", "x"], "update_card"),
+    (["move", "{ref}", "done"], "move_card"),
+    (["delete", "{ref}", "--yes"], "delete_card"),
+    (["needs-human", "{ref}"], "flag_needs_human"),
+    (["resolve", "{ref}"], "resolve_card"),
+    (["dep", "add", "{ref}", "--blocked-by", "{ref}"], "add_dependency"),
+    (["dep", "rm", "{ref}", "--blocked-by", "{ref}"], "remove_dependency"),
+    (["dep", "list", "{ref}"], "list_dependencies"),
+    (["link", "add", "{ref}", "--url", "https://e.example/1", "--label", "PR"], "add_link"),
+    (["link", "rm", "{ref}", "--link-id", "3"], "remove_link"),
+    (["comment", "add", "{ref}", "--body", "note"], "add_comment"),
+    (["comment", "list", "{ref}"], "list_comments"),
+]
+
+
+@pytest.mark.parametrize(
+    "argv_template,method", _CARD_REF_VERBS, ids=[" ".join(a[:2]) for a, _ in _CARD_REF_VERBS]
+)
+def test_card_verbs_round_trip_the_printed_ticket(
+    monkeypatch, env, capsys, argv_template, method
+):
+    ref = _printed_identifier(monkeypatch, capsys, ["list"], _CARD_PAGE)
+    assert ref == "KAN-7"  # what `list` prints in column 0
+    fake = patch_client(
+        monkeypatch, FakeClient(result=_card("KAN-7", 7), results={"list_cards": _CARD_PAGE})
+    )
+    argv = [ref if tok == "{ref}" else tok for tok in argv_template]
+    assert cli.run(argv) == cli.EXIT_OK
+    hits = [call for call in fake.calls if call[0] == method]
+    assert hits, f"{method} was never called; calls={fake.calls}"
+    assert hits[-1][1]["card_id"] == 7  # the printed ticket resolved to the numeric id
+
+
+_EPIC_REF_VERBS = [
+    (["epic", "update", "{ref}", "--name", "x"], "update_epic", "epic_id"),
+    (["epic", "delete", "{ref}", "--yes"], "delete_epic", "epic_id"),
+    (["list", "--epic", "{ref}"], "list_cards", "epic_id"),
+    (["create", "T", "--epic", "{ref}"], "create_card", "epic_id"),
+    (["update", "7", "--epic", "{ref}"], "update_card", "epic_id"),
+]
+
+
+@pytest.mark.parametrize(
+    "argv_template,method,kwarg",
+    _EPIC_REF_VERBS,
+    ids=[" ".join(a[:2]) for a, _, _ in _EPIC_REF_VERBS],
+)
+def test_epic_ref_verbs_round_trip_the_printed_ticket(
+    monkeypatch, env, capsys, argv_template, method, kwarg
+):
+    ref = _printed_identifier(monkeypatch, capsys, ["epic", "list"], _EPIC_PAGE)
+    assert ref == "EPIC-4"  # what `epic list` prints in column 0
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            result=_epic("EPIC-4", 9),
+            results={"list_epics": _EPIC_PAGE, "list_cards": _CARD_PAGE},
+        ),
+    )
+    argv = [ref if tok == "{ref}" else tok for tok in argv_template]
+    assert cli.run(argv) == cli.EXIT_OK
+    hits = [call for call in fake.calls if call[0] == method]
+    assert hits, f"{method} was never called; calls={fake.calls}"
+    assert hits[-1][1][kwarg] == 9
+
+
+def test_view_create_round_trips_the_printed_epic_ticket(monkeypatch, env, capsys):
+    # `view create --epic` stores the resolved numeric id inside the view's query.
+    ref = _printed_identifier(monkeypatch, capsys, ["epic", "list"], _EPIC_PAGE)
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            result={"id": 1, "name": "V", "query": {}},
+            results={"list_epics": _EPIC_PAGE},
+        ),
+    )
+    assert cli.run(["view", "create", "V", "--board", "5", "--epic", ref]) == cli.EXIT_OK
+    assert fake.calls[-1][1]["query"]["epic_id"] == 9
+
+
+# The numeric-id entities have no ticket, so their round-trip is the printed integer
+# in column 0 of their own list verb — same contract, different identifier form.
+_NUMERIC_ID_ROUNDTRIPS = [
+    (["label", "list", "--board", "5"], {"labels": [{"id": 11, "name": "bug", "color": "#f00"}]},
+     ["label", "delete", "{ref}", "--yes"], "delete_label", "label_id"),
+    (["view", "list", "--board", "5"], {"views": [{"id": 12, "name": "V", "query": {}}]},
+     ["view", "delete", "{ref}", "--board", "5", "--yes"], "delete_view", "view_id"),
+    (["cycle", "list", "--board", "5"],
+     {"cycles": [{"id": 13, "name": "S1", "starts_on": None, "ends_on": None}]},
+     ["cycle", "delete", "{ref}", "--board", "5", "--yes"], "delete_cycle", "cycle_id"),
+    (["cycle", "list", "--board", "5"],
+     {"cycles": [{"id": 13, "name": "S1", "starts_on": None, "ends_on": None}]},
+     ["cycle", "metrics", "{ref}", "--board", "5"], "cycle_metrics", "cycle_id"),
+    (["template", "list", "--board", "5"], {"templates": [{"id": 14, "name": "T", "cards": []}]},
+     ["template", "apply", "{ref}", "--board", "5"], "apply_template", "template_id"),
+    (["template", "list", "--board", "5"], {"templates": [{"id": 14, "name": "T", "cards": []}]},
+     ["template", "delete", "{ref}", "--board", "5", "--yes"], "delete_template", "template_id"),
+    (["notify", "list"],
+     {"notifications": [{"id": 15, "kind": "mention", "body": "b", "read_at": None}]},
+     ["notify", "read", "{ref}"], "mark_notification_read", "notification_id"),
+    (["board", "list"], {"boards": [{"id": 16, "name": "B", "owner_id": 1}]},
+     ["list", "--board", "{ref}"], "list_cards", "board_id"),
+]
+
+
+@pytest.mark.parametrize(
+    "list_argv,page,argv_template,method,kwarg",
+    _NUMERIC_ID_ROUNDTRIPS,
+    ids=[" ".join(t[:2]) for _, _, t, _, _ in _NUMERIC_ID_ROUNDTRIPS],
+)
+def test_numeric_id_verbs_round_trip_the_printed_id(
+    monkeypatch, env, capsys, list_argv, page, argv_template, method, kwarg
+):
+    ref = _printed_identifier(monkeypatch, capsys, list_argv, page)
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    argv = [ref if tok == "{ref}" else tok for tok in argv_template]
+    assert cli.run(argv) == cli.EXIT_OK
+    hits = [call for call in fake.calls if call[0] == method]
+    assert hits, f"{method} was never called; calls={fake.calls}"
+    assert hits[-1][1][kwarg] == int(ref)
+
+
+def test_link_rm_round_trips_the_printed_link_id(monkeypatch, env, capsys):
+    # `link add` prints `card <id>` then `id  label  url` per link; the link id in
+    # column 0 of that row is what `link rm --link-id` takes.
+    link = {"id": 21, "label": "PR", "url": "https://e.example/1"}
+    patch_client(
+        monkeypatch,
+        FakeClient(
+            result={"ticket_number": "KAN-7", "id": 7, "links": [link], "labels": []},
+            results={"list_cards": _CARD_PAGE},
+        ),
+    )
+    argv = ["link", "add", "7", "--url", link["url"], "--label", "PR"]
+    assert cli.run(argv) == cli.EXIT_OK
+    printed_link_id = capsys.readouterr().out.splitlines()[1].split("\t")[0]
+    assert printed_link_id == "21"
+    fake = patch_client(monkeypatch, FakeClient(result={"card_id": 7, "links": []}))
+    assert cli.run(["link", "rm", "7", "--link-id", printed_link_id]) == cli.EXIT_OK
+    assert fake.calls[-1] == ("remove_link", {"card_id": 7, "link_id": 21})
+
+
+# --- V42 / KAN-425: ref-parsing cases ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("42", (42, None)),
+        (" 42 ", (42, None)),            # surrounding whitespace is stripped
+        ("KAN-9", (None, "KAN-9")),
+        ("kan-9", (None, "KAN-9")),      # mixed case normalises upward
+        ("Kan-9", (None, "KAN-9")),
+        ("EPIC-3", (None, "EPIC-3")),
+        ("epic-3", (None, "EPIC-3")),
+    ],
+)
+def test_parse_id_or_ticket_accepts_ints_and_either_case(raw, expected):
+    assert cli._parse_id_or_ticket(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["#KAN-1", "KAN 1", "KAN-", "-5", "KAN-1x", "TASK-1", ""])
+def test_malformed_refs_are_usage_errors_before_any_request(monkeypatch, env, raw):
+    """A value that is neither a bare int nor a KAN-/EPIC- ticket is rejected by
+    argparse (exit 2) with no network call.
+
+    `#KAN-1` is in this list deliberately: the leading `#` is NOT accepted today
+    (the CLI never prints that form). Pinned as current behaviour rather than
+    changed — accepting it would be a one-line regex tweak, but it is not what
+    KAN-425 asks for, so it's raised in the PR body instead of assumed."""
+    fake = patch_client(monkeypatch, FakeClient())
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["get", raw])
+    assert exc.value.code == cli.EXIT_USAGE
+    assert fake.calls == []
+
+
+def test_id_or_ticket_arg_rejects_malformed_values_with_a_naming_message():
+    with pytest.raises(argparse.ArgumentTypeError) as exc:
+        cli._id_or_ticket_arg("#KAN-1")
+    assert "#KAN-1" in str(exc.value)  # the message quotes the offending value
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["get", "KAN-4242"],
+        ["update", "KAN-4242", "--title", "x"],
+        ["move", "KAN-4242", "done"],
+        ["delete", "KAN-4242", "--yes"],
+        ["comment", "list", "KAN-4242"],
+    ],
+    ids=["get", "update", "move", "delete", "comment-list"],
+)
+def test_unresolvable_card_ref_is_an_error_not_a_crash(monkeypatch, env, capsys, argv):
+    """A well-formed ticket that matches nothing fails cleanly on every verb that
+    resolves a ref.
+
+    NOTE: this asserts EXIT_ERROR (1) — the behaviour today. V43 / KAN-426 changes
+    client-side ref-resolution failure to EXIT_NOT_FOUND (5) so it agrees with the
+    server-side 404 a numeric id produces; this test is the one that must be
+    updated (deliberately) in that slice."""
+    fake = patch_client(monkeypatch, FakeClient(results={"list_cards": {"cards": []}}))
+    assert cli.run(argv) == cli.EXIT_ERROR
+    assert "no card found with ticket KAN-4242" in capsys.readouterr().err
+    assert [c[0] for c in fake.calls] == ["list_cards"]  # never reached the verb's call
+
+
+def test_unresolvable_epic_ref_is_an_error(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(results={"list_epics": {"epics": []}}))
+    assert cli.run(["epic", "update", "EPIC-4242", "--name", "x"]) == cli.EXIT_ERROR
+    assert "no epic found with ticket EPIC-4242" in capsys.readouterr().err
+    assert [c[0] for c in fake.calls] == ["list_epics"]
+
+
+@pytest.mark.parametrize(
+    "argv,message",
+    [
+        (["get", "EPIC-3"], "not a card ticket"),
+        (["move", "EPIC-3", "done"], "not a card ticket"),
+        (["comment", "add", "EPIC-3", "--body", "x"], "not a card ticket"),
+        (["dep", "add", "KAN-7", "--blocked-by", "EPIC-3"], "not a card ticket"),
+        (["epic", "delete", "KAN-3", "--yes"], "not an epic ticket"),
+        (["list", "--epic", "KAN-3"], "not an epic ticket"),
+    ],
+    ids=["get", "move", "comment-add", "dep-blocker", "epic-delete", "list-epic-filter"],
+)
+def test_wrong_entity_ticket_is_rejected_up_front(monkeypatch, env, capsys, argv, message):
+    """An EPIC- ticket handed to a card verb (or vice versa) is caught by shape
+    before any lookup — the mismatch is knowable without a request."""
+    fake = patch_client(monkeypatch, FakeClient(results={"list_cards": _CARD_PAGE}))
+    assert cli.run(argv) == cli.EXIT_ERROR
+    assert message in capsys.readouterr().err
+    assert "add_dependency" not in [c[0] for c in fake.calls]
