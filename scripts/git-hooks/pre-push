@@ -4,6 +4,13 @@
 # Docker daemon, so they stay CI-only (run them yourself with
 # `uv run pytest tests/integration`).
 #
+# THIS FILE HAS TESTS: `mcp/tests/test_prepush_hook.py` (KAN-484). CI runs them for
+# any change under `scripts/git-hooks/**` via the `mcp` paths filter, so edit the
+# hook and the tests together. They drive this script against throwaway repos in
+# `tmp_path` with fabricated stdin; point `PREPUSH_HOOK` at another copy to test a
+# mutated or historical version without checking it out (switching branches would
+# swap the hook itself).
+#
 # Path-scoped (KAN-36): only the checks for areas touched by the commits being
 # pushed run. A backend/mcp/client-only worktree (no frontend toolchain) no longer
 # fails on svelte-check for a change that never touched frontend/, so scoped slices
