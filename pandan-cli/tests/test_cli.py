@@ -916,11 +916,20 @@ def test_delete_with_yes(monkeypatch, env, capsys):
 # --- --json vs human output -------------------------------------------------
 
 
-def test_json_output_is_raw(monkeypatch, env, capsys):
+def test_json_output_is_the_envelope_plus_the_summary(monkeypatch, env, capsys):
+    """``--json`` is the client envelope verbatim **plus** V44's ``summary`` object
+    (KAN-427): the rows are untouched, and the aggregate rides beside them rather
+    than as a trailing line a JSON consumer would have to strip."""
     patch_client(monkeypatch, FakeClient(result={"cards": [CARD]}))
     assert cli.run(["list", "--json"]) == 0
     parsed = json.loads(capsys.readouterr().out)
-    assert parsed == {"cards": [CARD]}
+    assert parsed["cards"] == [CARD]
+    assert parsed == {
+        "cards": [CARD],
+        "summary": {
+            "count": 1, "todo": 1, "in_progress": 0, "done": 0, "needs_human": 0
+        },
+    }
 
 
 def test_json_flag_before_subcommand(monkeypatch, env, capsys):
@@ -931,16 +940,19 @@ def test_json_flag_before_subcommand(monkeypatch, env, capsys):
 
 def test_human_output_is_concise_line(monkeypatch, env, capsys):
     # CARD has no story_points → rendered pts=- (never the literal "None").
+    # The row is followed by V44's aggregate line (KAN-427).
     patch_client(monkeypatch, FakeClient(result={"cards": [CARD]}))
     cli.run(["list"])
     out = capsys.readouterr().out.strip()
-    assert out == "KAN-1\ttodo\tShip it\tpts=-"
+    assert out == "KAN-1\ttodo\tShip it\tpts=-\n1 card · 1 todo · 0 in_progress · 0 done"
 
 
 def test_human_output_empty_list(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"cards": []}))
     cli.run(["list"])
-    assert capsys.readouterr().out.strip() == "(no cards)"
+    assert capsys.readouterr().out.strip() == (
+        "(no cards)\n0 cards · 0 todo · 0 in_progress · 0 done"
+    )
 
 
 def test_create_with_points_shows_points_in_human_output(monkeypatch, env, capsys):
@@ -999,7 +1011,7 @@ def test_label_list_renders_labels(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result=labels))
     assert cli.run(["label", "list", "--board", "2"]) == 0
     out = capsys.readouterr().out.strip()
-    assert out == "1\tbug\t#f00\n2\tchore\t#0f0"
+    assert out == "1\tbug\t#f00\n2\tchore\t#0f0\n2 labels"
 
 
 def test_label_list_empty_shows_no_labels(monkeypatch, env, capsys):
@@ -1007,7 +1019,7 @@ def test_label_list_empty_shows_no_labels(monkeypatch, env, capsys):
     over-correct and break the genuine empty-list case)."""
     patch_client(monkeypatch, FakeClient(result={"labels": []}))
     assert cli.run(["label", "list", "--board", "2"]) == 0
-    assert capsys.readouterr().out.strip() == "(no labels)"
+    assert capsys.readouterr().out.strip() == "(no labels)\n0 labels"
 
 
 # --- exit codes / error mapping ---------------------------------------------
@@ -1075,19 +1087,22 @@ def test_board_create_passes_name(monkeypatch, env):
 def test_board_list_human_output(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"boards": [BOARD]}))
     cli.run(["board", "list"])
-    assert capsys.readouterr().out.strip() == "2\tRoadmap"
+    assert capsys.readouterr().out.strip() == "2\tRoadmap\n1 board"
 
 
 def test_board_list_empty(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"boards": []}))
     cli.run(["board", "list"])
-    assert capsys.readouterr().out.strip() == "(no boards)"
+    assert capsys.readouterr().out.strip() == "(no boards)\n0 boards"
 
 
 def test_board_list_json(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"boards": [BOARD]}))
     assert cli.run(["board", "list", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"boards": [BOARD]}
+    assert json.loads(capsys.readouterr().out) == {
+        "boards": [BOARD],
+        "summary": {"count": 1},
+    }
 
 
 # --- epic subcommands -------------------------------------------------------
@@ -1165,7 +1180,10 @@ def test_epic_delete_with_yes(monkeypatch, env, capsys):
 def test_epic_list_human_output(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"epics": [EPIC]}))
     cli.run(["epic", "list"])
-    assert capsys.readouterr().out.strip() == "EPIC-1\tOnboarding\t60% (3/5) [at_risk]"
+    assert capsys.readouterr().out.strip() == (
+        "EPIC-1\tOnboarding\t60% (3/5) [at_risk]\n"
+        "1 epic · 3/5 stories done (60%) · 1 at_risk"
+    )
 
 
 def test_epic_single_human_output(monkeypatch, env, capsys):
@@ -1334,7 +1352,10 @@ def test_dep_list_json_output(monkeypatch, env, capsys):
     result = {"card_id": 7, "blocked_by": [3], "blocks": []}
     patch_client(monkeypatch, FakeClient(result=result))
     assert cli.run(["dep", "list", "7", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == result
+    assert json.loads(capsys.readouterr().out) == {
+        **result,
+        "summary": {"blocked_by": 1, "blocks": 0},
+    }
 
 
 def test_link_add_maps_label_and_url(monkeypatch, env):
@@ -1427,13 +1448,13 @@ def test_comment_list_human_output(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"comments": [comment]}))
     assert cli.run(["comment", "list", "7"]) == 0
     out = capsys.readouterr().out.strip()
-    assert out == "5\t2026-07-20T00:00:00Z\tplease rebase"
+    assert out == "5\t2026-07-20T00:00:00Z\tplease rebase\n1 comment"
 
 
 def test_comment_list_empty_human_output(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"comments": []}))
     assert cli.run(["comment", "list", "7"]) == 0
-    assert capsys.readouterr().out.strip() == "(no comments)"
+    assert capsys.readouterr().out.strip() == "(no comments)\n0 comments"
 
 
 # --- config resolution chain (KAN-199) --------------------------------------
@@ -1882,20 +1903,20 @@ TEMPLATE = {
 def test_template_list_human_output(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"templates": [TEMPLATE]}))
     assert cli.run(["template", "list", "--board", "3"]) == 0
-    assert capsys.readouterr().out.strip() == "5\tsprint\t2 cards"
+    assert capsys.readouterr().out.strip() == "5\tsprint\t2 cards\n1 template"
 
 
 def test_template_list_empty_human_output(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"templates": []}))
     assert cli.run(["template", "list", "--board", "3"]) == 0
-    assert capsys.readouterr().out.strip() == "(no templates)"
+    assert capsys.readouterr().out.strip() == "(no templates)\n0 templates"
 
 
-def test_template_list_json_is_still_raw(monkeypatch, env, capsys):
+def test_template_list_json_carries_the_rows_verbatim(monkeypatch, env, capsys):
     result = {"templates": [TEMPLATE]}
     patch_client(monkeypatch, FakeClient(result=result))
     assert cli.run(["template", "list", "--board", "3", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == result
+    assert json.loads(capsys.readouterr().out) == {**result, "summary": {"count": 1}}
 
 
 # --- KAN-288: `label create` accepts --color as well as the positional --------
@@ -2093,7 +2114,13 @@ def test_write_config_file_renders_the_pandan_table():
 # The default row stays minimal (4 fields for a card); `--fields a,b,c` widens it
 # on demand. The vocabulary is the row's own `--json` keys plus the aliases
 # `ticket` / `pts` / `points`, so it can't drift from the API. `--fields` shapes the
-# HUMAN row only — `--json` remains a verbatim passthrough of the client result.
+# HUMAN row only — `--json` carries the rows verbatim (plus V44's `summary`).
+#
+# Every expected human output below also carries V44's trailing aggregate line
+# (KAN-427): a projection changes which columns print, never the count of rows.
+
+# V44's aggregate for the two-card page these tests share, spelled out once.
+FCARD_SUMMARY_LINE = "2 cards · 1 todo · 0 in_progress · 1 done · 1 needs-human\n"
 
 # Two realistic CardRead rows (all the keys the API returns, so the field
 # vocabulary under test is the real one).
@@ -2117,12 +2144,14 @@ FCARD_B = {
 
 def test_default_row_is_byte_identical_without_fields(monkeypatch, env, capsys):
     """The 4-field default row is the contract `--fields` must not disturb: with the
-    flag absent, output is byte-for-byte what it was before this slice."""
+    flag absent, the rows are byte-for-byte what they were before V42 (V44 appends
+    its aggregate line after them)."""
     patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A, FCARD_B]}))
     assert cli.run(["list"]) == cli.EXIT_OK
     assert capsys.readouterr().out == (
         "KAN-7\ttodo\tShip it\tpts=3\n"
         "KAN-8\tdone\tNext\tpts=-\n"
+        + FCARD_SUMMARY_LINE
     )
 
 
@@ -2132,24 +2161,28 @@ def test_fields_projects_exactly_the_named_columns(monkeypatch, env, capsys):
     assert capsys.readouterr().out == (
         "KAN-7\tShip it\tagent:v42\thigh\n"
         "KAN-8\tNext\t-\tnone\n"          # a null assignee renders `-`, never "None"
+        + FCARD_SUMMARY_LINE
     )
 
 
 def test_fields_accepts_the_raw_api_key_and_its_alias(monkeypatch, env, capsys):
     """`ticket`/`pts` are aliases of `ticket_number`/`story_points`; both spellings
     work and both print the BARE value (the `pts=` label belongs to the default row)."""
+    one_card = "1 card · 1 todo · 0 in_progress · 0 done\n"
     patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
     assert cli.run(["list", "--fields", "ticket_number,pts"]) == cli.EXIT_OK
-    assert capsys.readouterr().out == "KAN-7\t3\n"
+    assert capsys.readouterr().out == "KAN-7\t3\n" + one_card
     patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
     assert cli.run(["list", "--fields", "ticket,story_points,points"]) == cli.EXIT_OK
-    assert capsys.readouterr().out == "KAN-7\t3\t3\n"
+    assert capsys.readouterr().out == "KAN-7\t3\t3\n" + one_card
 
 
 def test_fields_are_case_insensitive_and_tolerate_spaces(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
     assert cli.run(["list", "--fields", " Ticket , TITLE "]) == cli.EXIT_OK
-    assert capsys.readouterr().out == "KAN-7\tShip it\n"
+    assert capsys.readouterr().out == (
+        "KAN-7\tShip it\n1 card · 1 todo · 0 in_progress · 0 done\n"
+    )
 
 
 def test_fields_renders_scalars_lists_and_nulls_compactly(monkeypatch, env, capsys):
@@ -2162,6 +2195,7 @@ def test_fields_renders_scalars_lists_and_nulls_compactly(monkeypatch, env, caps
     assert capsys.readouterr().out == (
         "false\tbug\t3,9\t-\n"
         "true\t-\t-\t-\n"
+        + FCARD_SUMMARY_LINE
     )
 
 
@@ -2171,8 +2205,9 @@ def test_fields_keeps_a_projected_row_on_one_line(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"cards": [card]}))
     assert cli.run(["list", "--fields", "ticket,description"]) == cli.EXIT_OK
     out = capsys.readouterr().out
-    assert out == "KAN-7\tline one line two with tab\n"
-    assert len(out.splitlines()) == 1
+    assert out.splitlines()[0] == "KAN-7\tline one line two with tab"
+    # One row + V44's aggregate — the embedded newline did not split the row.
+    assert len(out.splitlines()) == 2
 
 
 def test_fields_unknown_name_is_a_clean_error_naming_the_field(monkeypatch, env, capsys):
@@ -2199,10 +2234,13 @@ def test_fields_rejects_an_empty_list_as_a_usage_error(env):
 
 
 def test_fields_preserves_the_definitive_empty_state(monkeypatch, env, capsys):
-    # AXI 5: an empty result still says so explicitly, projection or not.
+    # AXI 5: an empty result still says so explicitly, projection or not — and V44's
+    # aggregate states the zero a second, machine-parseable way.
     patch_client(monkeypatch, FakeClient(result={"cards": []}))
     assert cli.run(["list", "--fields", "ticket,title"]) == cli.EXIT_OK
-    assert capsys.readouterr().out == "(no cards)\n"
+    assert capsys.readouterr().out == (
+        "(no cards)\n0 cards · 0 todo · 0 in_progress · 0 done\n"
+    )
 
 
 def test_fields_preserves_the_next_cursor_hint(monkeypatch, env, capsys):
@@ -2210,13 +2248,16 @@ def test_fields_preserves_the_next_cursor_hint(monkeypatch, env, capsys):
         monkeypatch, FakeClient(result={"cards": [FCARD_A], "next_cursor": "abc123"})
     )
     assert cli.run(["list", "--fields", "ticket"]) == cli.EXIT_OK
-    assert capsys.readouterr().out == "KAN-7\n(more — next cursor: abc123)\n"
+    assert capsys.readouterr().out == (
+        "KAN-7\n(more — next cursor: abc123)\n"
+        "1 card · 1 todo · 0 in_progress · 0 done\n"
+    )
 
 
 def test_fields_does_not_touch_json_output(monkeypatch, env, capsys):
-    """`--json` is a verbatim passthrough of the client result (`_emit`), and V44 adds
-    a `summary` key beside `cards` — so a projection there would reshape a documented
-    machine contract. `--fields` is human-row-only, and the two are independent."""
+    """`--json` carries the client's rows verbatim plus V44's `summary` key — so a
+    projection there would reshape a documented machine contract. `--fields` is
+    human-row-only, and the two are independent."""
     page = {"cards": [FCARD_A, FCARD_B]}
     patch_client(monkeypatch, FakeClient(result=page))
     assert cli.run(["list", "--json"]) == cli.EXIT_OK
@@ -2224,7 +2265,9 @@ def test_fields_does_not_touch_json_output(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result=page))
     assert cli.run(["list", "--json", "--fields", "ticket"]) == cli.EXIT_OK
     assert capsys.readouterr().out == plain
-    assert json.loads(plain) == page
+    parsed = json.loads(plain)
+    assert parsed["cards"] == page["cards"]
+    assert set(parsed) == {"cards", "summary"}
 
 
 def test_fields_is_not_offered_on_single_entity_verbs(env):
@@ -2241,47 +2284,49 @@ def test_fields_is_not_offered_on_single_entity_verbs(env):
         (
             ["epic", "list", "--fields", "ticket,name"],
             {"epics": [{"ticket_number": "EPIC-4", "id": 4, "name": "M7", "lead": None}]},
-            "EPIC-4\tM7\n",
+            # This fixture predates V32's `progress`, so the rollup degrades to 0/0
+            # rather than raising — an older API is a supported shape.
+            "EPIC-4\tM7\n1 epic · 0/0 stories done (0%)\n",
         ),
         (
             ["board", "list", "--fields", "id,name"],
             {"boards": [{"id": 5, "name": "Roadmap", "owner_id": 1}]},
-            "5\tRoadmap\n",
+            "5\tRoadmap\n1 board\n",
         ),
         (
             ["label", "list", "--board", "5", "--fields", "name,color"],
             {"labels": [{"id": 1, "name": "bug", "color": "#f00"}]},
-            "bug\t#f00\n",
+            "bug\t#f00\n1 label\n",
         ),
         (
             ["view", "list", "--board", "5", "--fields", "id,name"],
             {"views": [{"id": 2, "name": "Mine", "query": {"column": "todo"}}]},
-            "2\tMine\n",
+            "2\tMine\n1 view\n",
         ),
         (
             ["cycle", "list", "--board", "5", "--fields", "name,starts_on"],
             {"cycles": [{"id": 3, "name": "S1", "starts_on": "2026-07-01", "ends_on": None}]},
-            "S1\t2026-07-01\n",
+            "S1\t2026-07-01\n1 cycle\n",
         ),
         (
             ["template", "list", "--board", "5", "--fields", "id,name"],
             {"templates": [{"id": 4, "name": "Slice", "cards": [{"title": "a"}]}]},
-            "4\tSlice\n",
+            "4\tSlice\n1 template\n",
         ),
         (
             ["comment", "list", "7", "--fields", "id,body"],
             {"comments": [{"id": 9, "body": "hi", "author_id": None, "created_at": "t"}]},
-            "9\thi\n",
+            "9\thi\n1 comment\n",
         ),
         (
             ["activity", "--board", "5", "--fields", "action,summary"],
             {"activity": [{"ts": "t", "actor_label": "me", "action": "moved", "summary": "s"}]},
-            "moved\ts\n",
+            "moved\ts\n1 activity row\n",
         ),
         (
             ["notify", "list", "--fields", "id,kind"],
             {"notifications": [{"id": 1, "kind": "mention", "body": "b", "read_at": None}]},
-            "1\tmention\n",
+            "1\tmention\n1 notification · 1 unread\n",
         ),
     ],
     ids=["epic", "board", "label", "view", "cycle", "template", "comment", "activity", "notify"],
