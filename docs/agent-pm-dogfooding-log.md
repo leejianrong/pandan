@@ -1775,11 +1775,54 @@ PR reviewed and merged at a time.
 | KAN-484 | #230 | — | the version-bump guard asks the **branch**, not the last push |
 | KAN-505 | #233 | `v0.17.0` | `locally modified` is now claimed only when *provable* |
 | KAN-492 | #234 | `v0.18.0` | the AXI-10 `--help` freeze becomes a change-detector |
-| KAN-475 | #236 | — | MCP image build inputs — *open at the time of writing* |
+| KAN-475 | #236 | — | MCP image inputs recorded as digests — **auditable, not reproducible** |
 | KAN-502 | — | — | the four CLI↔MCP parity gaps — *in flight at the time of writing* |
 
 > Written mid-batch on purpose, because this project has twice lost detail by deferring the log to the
-> end. The last two rows are completed in the stage-7 addendum below once they land.
+> end. KAN-502 is completed in an addendum once it lands.
+
+#### KAN-475: the recommended option was impossible, and finding out took one more click
+
+The card recommended **(a)** — pin `uv` to a version tag and let dependabot bump it — reasoning it was
+"nearly free" because the repo already runs dependabot. The PM checked and found the mechanism missing:
+`.github/dependabot.yml` declares `uv` ×4, `npm` and `github-actions`, but **no `docker` ecosystem**, so
+a pin would have had no watcher. That correction was right *and still insufficient*. The agent went one
+level further:
+
+**Dependabot's Docker updater ignores image references in `COPY` instructions** —
+[dependabot-core#5103](https://github.com/dependabot/dependabot-core/issues/5103), open since 2022-05-07
+(verified independently by the PM via the API: `state=open`, labels `L: docker`, `T: bug`). `uv` enters
+at `mcp/Dockerfile:18` through `COPY --from=`, which is exactly the unsupported shape — so a pinned `uv`
+tag could never be bumped automatically **even with** the ecosystem entry the PM had made mandatory.
+Option (a) does not yield a maintained pin; it yields an *unwatched* one that looks maintained.
+
+So the answer became **(c) + (d)'s documentation**: the workflow resolves both inputs to immutable index
+digests once per release, feeds them to every build as build-args, records them as OCI labels, and the
+existing gate fails the release unless both labels are present *and* digest-pinned. Build-args default
+to the floating tags, so a plain local `docker build` still needs no arguments. Each release therefore
+takes current patches **and records exactly what it took** — *auditable rather than reproducible*, which
+is the honest scope statement and is now written down as one. It also closed the workflow's own admitted
+caveat for free: the `load:` gate build and the `push:` build can no longer resolve different bases.
+
+*Generalisable: "pin it and let the bot bump it" is two claims — that a pin is possible, and that
+something watches it. Check the second against the bot's actual capabilities, not the repo's habits.*
+
+**And the card's other characterisation was wrong in the more interesting direction.** It called
+`python:3.12-slim` "pinned to a minor, so it drifts across patch releases … rather than arbitrarily".
+Measured, it resolves to **`3.12.13-slim-trixie` — Debian 13.6, glibc 2.41** — having moved off Debian 12
+/ glibc 2.36. **The C library floor drifts across that tag**, which is precisely the property KAN-81
+pins deliberately for the CLI release. A "minor pin" that changes libc is not a minor pin.
+
+Two of the agent's own hypotheses were falsified **by building rather than reading**: `COPY --from=${VAR}`
+does not build at all (BuildKit rejects variable expansion there, so `uv` now arrives via a named stage),
+and `imagetools inspect --format` is silently ignored by buildx v0.31.1. It then ran the real gate against
+real images — exit 0 correctly labelled, exit 1 on a floating label, exit 1 on absent labels.
+
+**The best mutation was of a gap the gate cannot see.** Two of its five mutations exist because if the
+Dockerfile stopped *consuming* the build-args, `--build-arg` degrades to a no-op docker merely warns
+about — and the workflow would stamp labels that no longer describe the image, **with the gate still
+green**. That is a guard that can be bypassed without failing, and it was found by asking "what could
+make my labels lie?" rather than "does my assertion fire?".
 
 #### The incident: a worktree fence does not cover `git config`
 
