@@ -2123,3 +2123,74 @@ handled by ordering, since 517 lands a whole batch earlier.
 Adjacency was verified by reading in every case, including the negative ones: `mcp/tests/test_prepush_hook.py`
 imports only `os`, `subprocess`, `pathlib` and `pytest`, with **zero coupling to `pandan_mcp`**, which is
 what makes KAN-523 and KAN-517 safe to run together despite both living under `mcp/`.
+
+#### KAN-523 (PR #243): the guard decided to stop being a guard, and argued for it
+
+The card posed the design question rather than answering it: on a bare / non-work-tree context, should the
+hook hard-fail or warn-and-skip? The agent chose **skip loudly, exit 0**, on four grounds now written into
+the hook itself — the hook *cannot* do its job there (no work tree to lint, no package dirs to `cd` into),
+CI is the enforcing gate and `main` is protected so a skip cannot let anything reach `main` unevaluated,
+the only escape from a hard fail is `--no-verify` (the habit KAN-484 records as fatal to a guard) and
+unlike a real guard failure there is nothing in the user's *change* to fix, and — the load-bearing one —
+**the defect was never the exit code, it was the silence about why.**
+
+The sibling risk of "don't hard-fail" is a skip that reads as a pass, which is the exact
+confidently-wrong-output family the card places itself in. That is pinned separately by
+`test_the_bare_skip_does_not_pretend_the_checks_ran`: the skip path emits no `OK` line and claims no
+package check ran.
+
+**Both card claims confirmed, one of them sharper than written and one of them wrong in a useful way.**
+The hard abort is worse than "an error that does not name the cause" — measured, it was **exit 128, empty
+stdout, and a single stderr line** `fatal: this operation must be run in a work tree`. The hook produced
+no output of its own at all. But claim 2's mechanism was wrong: the card said `base_ref` depends on
+`origin/main`, and it did not — the pre-fix code at `:39` already fell back to a local `main`, so only
+when *both* are absent is the base unresolvable. Chasing that imprecision found a **second, distinct
+silence the card would have missed**: using a local `main` means the hook is policing a different baseline
+than CI, and that too said nothing. *Generalisable: when a card's mechanism is wrong but its symptom is
+real, the gap between them is where the unreported defect lives.*
+
+**`base_ref` grew a third candidate, and the mutation proves it is not cosmetic.** The chain is now
+`origin/main` → `refs/remotes/origin/HEAD` → local `main`, each non-default one announcing itself. Dropping
+the middle candidate makes the version-bump guard **fire a false positive on a compliant branch** under a
+`master` default — KAN-484's bug re-entering through a renamed default branch. `origin/main` stays first,
+so the healthy path is byte-for-byte unchanged.
+
+**Seven mutations, seven red, zero green** — and the test design is what makes that meaningful rather than
+lucky. Two choices worth copying:
+
+- **A negative control, plus a mutation that proves the control bites.** `test_a_resolved_baseline_stays_quiet`
+  asserts stderr is *exactly* `""` on a healthy push. Without it, every new notice assertion could be
+  satisfied by a hook that shouts on every push — and an always-on warning is functionally the same as no
+  warning. Mutation 7 (fire the notice unconditionally) exists solely to prove that control fires.
+- **Assert the specific words, because the bug also wrote to stderr.** The bare-context test asserts
+  `no work tree` and `core.bare` rather than "stderr is non-empty" — a laxer assertion would have passed
+  against the very pre-fix behaviour it pins. That is the blind-guard failure mode caught at design time
+  instead of by mutation.
+
+**The fixture set `core.bare` by appending to the config FILE, never via `git config`.** That is the exact
+key that escaped into the real repository during KAN-484, and a plain file append under `tmp_path` cannot
+escape no matter how badly `GIT_*` scrubbing regresses. `origin/HEAD` uses `git symbolic-ref`, which lives
+in the per-repository ref store and is fully contained by `-C`. The fixture's "never runs `git config`"
+property survived a card whose whole subject is a `git config` value — which is the strongest available
+evidence that the property was designed rather than incidental. `git config --list --local` audited after
+the run: nothing introduced.
+
+**A new shape of "guard with no watcher" — the fourth route, and it is not about CI.** The agent could not
+self-test its own change by pushing, and the reason generalises past this card. `.git/hooks/pre-push` is a
+symlink to `../../scripts/git-hooks/pre-push`, which resolves relative to the **primary checkout's**
+`.git/hooks/` — verified: `readlink -f` gives
+`/home/jian/…/simple-kanban/scripts/git-hooks/pre-push`. Linked worktrees share `.git/hooks`, so **every
+worktree's push runs whatever version of the hook is checked out in the primary checkout at that moment**,
+not the one in its own tree. Two consequences: a worktree editing this file can never exercise it via its
+own push (so `mcp/tests/test_prepush_hook.py` is genuinely the only thing that does), and the hook's
+*identity* is a function of an unrelated checkout's current branch. *Generalisable: the previous three
+watcher holes were about whether something runs the guard; this one is about which version of the guard
+runs. Both are worth asking.*
+
+**CI evidence, positively obtained** rather than read off the tick: the `mcp` job's step conclusions show
+`Skip (no mcp changes)` itself **skipped** — so the paths filter matched — with `Ruff lint` and `Pytest`
+both `success`, and the log line `129 passed in 3.07s` (up from 118; the hook file went 11 → 17 tests).
+The honest caveat the agent volunteered: this PR touches both `scripts/git-hooks/**` and `mcp/**`, so it
+**cannot itself** demonstrate the hook-only case empirically — the `ci.yml:74-84` filter config is the
+evidence, not this run. That is exactly the isolate-the-variable discipline the PM got wrong last stage,
+applied unprompted by an agent.
