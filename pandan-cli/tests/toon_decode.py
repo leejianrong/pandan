@@ -342,7 +342,10 @@ def decode(text: str) -> Any:
         indent = len(stripped) - len(stripped.lstrip(" "))
         lines.append((indent, stripped[indent:]))
     if not lines:
-        return None
+        # An empty document is an empty object — TOON's one genuinely ambiguous
+        # encoding (``encode({})`` is the empty string), resolved the same way the
+        # reference decoder resolves it. No Pandan endpoint returns a bare ``{}``.
+        return {}
 
     first = lines[0][1]
     if first == "[]":

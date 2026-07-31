@@ -291,7 +291,7 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   (AXI 10 regression guard).
 - **Acceptance:** the bare-command demo; suite green. CLI-only — no deploy.
 
-### V47 · `--format toon` for nested payloads (A6) — KAN-430
+### V47 · `--format toon` for nested payloads (A6) — KAN-430 ✅
 - **Build:** AXI 1, **scoped deliberately** (see the shaping): the TSV list default is already
   key-free and stays the default. Add `--format {human,json,toon}` (with the existing `--json` kept as
   a documented alias for `--format json`) and implement TOON for the **nested** payloads where it
@@ -303,6 +303,22 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   Record the measured token delta vs `--json` in the PR body — if it isn't a real saving on our actual
   payloads, say so and scope the slice down rather than shipping it for the rubric's sake.
 - **Acceptance:** the round-trip demo + the measured delta; suite green. CLI-only — no deploy.
+- **Shipped** as **v0.8.0**: `--format {human,json,toon}` on every verb, `--json` kept as a supported
+  alias (`--format` wins if both are given), and `_structured_payload` → `_render_structured` as the
+  one shaping+serializing seam both structured formats go through. Errors and `config show` follow the
+  flag too. The encoder is `pandan_cli/toon.py` — stdlib only, a port of the reference
+  `@toon-format/toon` verified **byte-identical** on a 36-case corpus including 11 live board
+  payloads; it is encode-only, and the round-trip contract is proven by a test-only decoder
+  (`tests/toon_decode.py`) rather than by shipping a parser.
+- **The measurement gate said ship, with a caveat worth keeping.** Measured on the real Pandan Roadmap
+  board in `o200k_base` tokens, **toon vs today's `--json`**: `metrics` **−56%**, `activity` **−43%**,
+  `dep list` **−38%**, `epic list` **−37%**, `get` −18%, cards list −10%. But roughly half of that is
+  pretty-printing: **vs *compact* JSON** the tabular payloads still win big (`metrics` −29%,
+  `activity` −24%, `epic list` −20%) while **`get` is +2% and the cards list is +12%** — TOON pays for
+  uniform *rows*, not for a single object or for rows carrying non-uniform nested arrays. The slice's
+  own scoping was therefore right on the evidence, and the cheap non-TOON win it implies —
+  a compact `--json` — is left un-taken on purpose: `--json`'s indentation is a published,
+  human-diffable contract, and `--format toon` now exists for callers who want the tokens back.
 
 ### V48 · Ambient context: session-hook install + packaged skill (A7) — KAN-431
 - **Build:** AXI 7. A `pandan install-context` (name TBD in the slice) that wires board state into an

@@ -437,17 +437,22 @@ def test_config_show_honours_the_format(capsys):
 # --- the extension points the next three slices need ------------------------
 
 
-def test_the_structured_payload_seam_feeds_both_formats():
-    """V44/V45 will reshape ``_structured_payload``; assert both structured formats
-    really do go through it, so neither slice can change one and miss the other."""
+def test_the_structured_payload_seam_feeds_both_formats(monkeypatch, capsys):
+    """V44/V45 will reshape ``_structured_payload``; assert ``_emit`` really routes
+    **both** structured formats through it, so neither slice can change one and miss
+    the other — and that the human branch does *not* go through it (V44's human
+    summary is a trailing line, not a payload key)."""
     marker = {"cards": [{"id": 1}], "summary": {"total": 1}}
-    original = cli._structured_payload
-    try:
-        cli._structured_payload = lambda result: marker
-        assert json.loads(cli._render_structured(cli._structured_payload({}), "json")) == marker
-        assert decode(cli._render_structured(cli._structured_payload({}), "toon")) == marker
-    finally:
-        cli._structured_payload = original
+    monkeypatch.setattr(cli, "_structured_payload", lambda result: marker)
+
+    cli._emit({"cards": []}, fmt=cli.FORMAT_JSON)
+    assert json.loads(capsys.readouterr().out) == marker
+
+    cli._emit({"cards": []}, fmt=cli.FORMAT_TOON)
+    assert decode(capsys.readouterr().out) == marker
+
+    cli._emit({"cards": []}, fmt=cli.FORMAT_HUMAN)
+    assert capsys.readouterr().out == "(no cards)\n"
 
 
 def test_structured_formats_are_exactly_json_and_toon():

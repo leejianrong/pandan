@@ -1497,8 +1497,8 @@ def _add_fields_arg(parser: argparse.ArgumentParser, example: str) -> None:
 
     Every list verb keeps its minimal default row; ``--fields`` replaces that row
     with exactly the named fields, tab-separated. Names are the row's own ``--json``
-    keys (so `--fields` and `--json` share one vocabulary and can't drift from the
-    API), plus the aliases ``ticket`` → ``ticket_number`` and ``pts``/``points`` →
+    keys (so ``--fields`` and the structured formats share one vocabulary and can't
+    drift from the API), plus the aliases ``ticket`` → ``ticket_number`` and ``pts``/``points`` →
     ``story_points``. Values print **bare** (``-`` for null): the default row's
     ``pts=N`` labelling is a property of the default row, not of the field."""
     parser.add_argument(
@@ -1509,7 +1509,7 @@ def _add_fields_arg(parser: argparse.ArgumentParser, example: str) -> None:
             "comma-separated fields to print instead of the default row, e.g. "
             f"--fields {example}. Names are the keys shown by --json (plus the "
             "aliases ticket/pts); values are printed bare and tab-separated. "
-            "Affects human output only, never --json"
+            "Affects human output only, never --format json/toon"
         ),
     )
 
