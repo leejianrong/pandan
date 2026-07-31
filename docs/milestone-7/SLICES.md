@@ -34,7 +34,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 | **V45 · Truncation** | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
 | **V46 · Content-first + disclosure** | bare command, `help[]` | A5 | 2 | KAN-429 | Bare `pandan` prints live board state and exits 0; results carry `help[]` next-step templates |
 | **V47 · TOON** | `--format toon` for nested payloads | A6 | 2 | KAN-430 | `pandan get KAN-304 --format toon` returns the same data as `--json`, materially cheaper |
-| **V48 · Ambient context** | session hook + packaged skill | A7 | 2 | KAN-431 | A fresh agent session already knows the open cards without calling anything |
+| **V48 · Ambient context** ✅ | session hook + packaged skill | A7 | 2 | KAN-431 | A fresh agent session already knows the open cards without calling anything |
 | **V49 · MCP right-sizing** *(tail)* | measure, decide, ADR, execute | A8 | 3 | KAN-432 | The MCP schema token cost is measured and published; the chosen surface is an ADR and is live |
 
 > **Correction (2026-07-31, after the plan was first written).** The AXI audit's headline finding —
@@ -357,7 +357,7 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   a compact `--json` — is left un-taken on purpose: `--json`'s indentation is a published,
   human-diffable contract, and `--format toon` now exists for callers who want the tokens back.
 
-### V48 · Ambient context: session-hook install + packaged skill (A7) — KAN-431
+### V48 · Ambient context: session-hook install + packaged skill (A7) — KAN-431 ✅
 - **Build:** AXI 7. A `pandan install-context` (name TBD in the slice) that wires board state into an
   agent session **before** it acts — a Claude Code session hook emitting the default board's open cards
   + V44's aggregate, so the agent starts already knowing the state instead of calling for it. Idempotent
@@ -368,6 +368,50 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   a slow/failing API soft-fails within the timeout instead of hanging. Manual — a fresh session shows
   the ambient block.
 - **Acceptance:** the fresh-session demo; suite green. Tooling-only — no deploy.
+- **Notes:** shipped as **`pandan context {install,uninstall,show,status}`**, not the placeholder
+  `install-context` — a nested noun group matches every other multi-verb area of this CLI (`board`,
+  `epic`, `config`, `template`), and one of the verbs (`show`) *is* the hook's own entry point, which
+  only reads sensibly under that noun. New module
+  [`pandan_cli/context.py`](../../pandan-cli/pandan_cli/context.py); all four verbs are `local_func`
+  handlers, deliberately outside the shared `_emit` path (see below).
+  - **The hook contract, verified — not inferred.** Event `SessionStart`; config lives in a
+    `settings.json` under `hooks.SessionStart[].hooks[]` with `type: "command"` + `command` required
+    and `timeout` a **number of seconds**; `matcher` is optional and **omitted here** so the hook
+    fires for every source (`startup`/`resume`/`clear`/`compact`/`fork`) — a compacted session needs
+    board state as much as a fresh one. stdout on exit 0 **is** added to the model's context for this
+    event, and the structured form is
+    `{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": …}}`. Sources:
+    the `hooks` propertyNames enum + hook-item schema in the `claude-code-settings.schema.json`
+    shipped with the Claude Code VS Code extension, plus
+    [hooks.md](https://code.claude.com/docs/en/hooks) and
+    [hooks-guide.md](https://code.claude.com/docs/en/hooks-guide) (whose own `SessionStart` example
+    omits `matcher`).
+  - **Cold start is the whole design, not an edge case.** A `SessionStart` hook cannot *block* the
+    session but it **is awaited**, and the harness's default command-hook timeout is **600 s**.
+    Meanwhile the shared `PandanClient` defaults to a 35 s read timeout + one 1 s-backoff retry
+    (`pandan-client/pandan_client/client.py:34-39`) — deliberately generous for batch CLI work on a
+    scale-to-zero backend, and a ~76 s worst case that would hang every agent session. So
+    `context show --hook` builds its **own** client at `--timeout/2` per request with
+    `retry_backoff=0`, writes an explicit `timeout` into the hook entry, and **always exits 0 with
+    either a valid envelope or nothing at all** on stdout. That last part is why these verbs sit
+    outside the V43 error contract: an `error<TAB>config<TAB>…` row on stdout would be *injected into
+    the model's context as board state*, which is strictly worse than no ambient block.
+  - **Aggregates:** the counts are computed client-side from the one page fetched, **not** from V44
+    (KAN-427), which was still in flight. One round trip on purpose — a board *name* isn't worth
+    doubling the time a session can be delayed.
+  - **Packaging the skill** means a real copy checked into the repo at
+    `pandan-cli/pandan_cli/skills/pandan/SKILL.md`, which `install` lays down at
+    `~/.claude/skills/pandan/SKILL.md`. It rides the wheel as package data and the onefile via a new
+    `--add-data` line in `release-cli.yml` (both verified by building each). **The repo copy is now
+    the source of truth** — edit it there and re-run `pandan context install --force-skill`, rather
+    than editing `~/.claude/skills/…` directly, which is exactly how KAN-434's out-of-repo half went
+    unshipped. A locally modified skill is never clobbered without `--force-skill` and never deleted
+    by `uninstall`.
+  - **Unconfigured** (`PANDAN_BOARD_ID` or `PANDAN_TOKEN` missing) is read as a no-op *plus* a clear
+    message *plus* `exit 1` with the `config` error code: config is resolved before the settings path
+    is even opened, so the file is provably never created, and an installer that exits 0 without
+    installing is the KAN-434 "looks done, isn't" failure mode. `uninstall` needs no config at all —
+    you must always be able to undo this.
 
 ## Wave 3 — MCP right-sizing *(Nice-to-have; the milestone demos complete without this)*
 
