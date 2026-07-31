@@ -19,5 +19,5 @@ from fastapi.security import HTTPBearer
 # (cookie session OR a valid personal access token), returning 401 itself otherwise.
 bearer_scheme = HTTPBearer(
     auto_error=False,
-    description="Personal access token (kanban_pat_…) — see the Tokens UI (V9, ADR 0014).",
+    description="Personal access token (pandan_pat_…) — see the Tokens UI (V9, ADR 0014).",
 )

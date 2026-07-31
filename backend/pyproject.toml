@@ -1,10 +1,10 @@
 [project]
 name = "pandan-backend"
 version = "0.1.0"
-description = "Simple Kanban MVP backend — FastAPI + sync SQLAlchemy 2.0 + psycopg v3"
+description = "Pandan MVP backend — FastAPI + sync SQLAlchemy 2.0 + psycopg v3"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.140.6",
+    "fastapi>=0.140.7",
     "uvicorn[standard]>=0.51.0",
     "sqlalchemy[asyncio]>=2.0.51",
     "psycopg[binary]>=3.3.4",

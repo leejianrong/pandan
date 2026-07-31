@@ -10,7 +10,7 @@
 [project]
 name = "pandan-docs-tooling"
 version = "0"
-description = "Documentation site toolchain (Zensical) for Simple Kanban."
+description = "Documentation site toolchain (Zensical) for Pandan."
 requires-python = ">=3.12"
 dependencies = [
     "zensical==0.0.50",

@@ -54,6 +54,8 @@ jobs:
       mcp: ${{ steps.filter.outputs.mcp }}
       client: ${{ steps.filter.outputs.client }}
       cli: ${{ steps.filter.outputs.cli }}
+      cli_code: ${{ steps.filter.outputs.cli_code }}
+      cli_version: ${{ steps.filter.outputs.cli_version }}
       app: ${{ steps.filter.outputs.app }}
     steps:
       # Needed so paths-filter can diff on `push` events (on `pull_request` it
@@ -75,6 +77,17 @@ jobs:
               - 'pandan-client/**'
             cli:
               - 'pandan-cli/**'
+            # Bump-on-fix guard (V50, KAN-435): `cli_code` is a change to CLI
+            # BEHAVIOUR, `cli_version` is a change to a version declaration. The
+            # `cli` job fails when the first is true and the second is not — a
+            # user-visible fix that never bumps the version ships a binary
+            # indistinguishable from source, which caused two false bug reports.
+            # Note a pure bump touches __init__.py, so it satisfies both.
+            cli_code:
+              - 'pandan-cli/pandan_cli/**'
+            cli_version:
+              - 'pandan-cli/pyproject.toml'
+              - 'pandan-cli/pandan_cli/__init__.py'
             app:
               - 'backend/**'
               - 'frontend/**'
@@ -146,7 +159,7 @@ jobs:
         run: uv run --frozen --group dev pytest tests/integration -q
 
   client:
-    name: Kanban client (lint + tests)
+    name: Pandan client (lint + tests)
     needs: changes
     runs-on: ubuntu-latest
     steps:
@@ -222,6 +235,20 @@ jobs:
         if: needs.changes.outputs.cli == 'true'
         working-directory: pandan-cli
         run: uv run --frozen --group dev pytest -q
+      # Bump-on-fix (V50, KAN-435). Lives in CI as well as the pre-push hook
+      # because the hook is opt-in (a symlink per clone) and bypassable with
+      # --no-verify, and this rule is exactly the kind that gets bypassed "just
+      # this once" — which is how 0.3.0 shipped twice with different behaviour.
+      # Uses the `changes` job's paths-filter outputs rather than git plumbing, so
+      # it needs no deepened checkout and works on both pull_request and push.
+      - name: CLI version bump
+        if: needs.changes.outputs.cli_code == 'true'
+        run: |
+          if [ "${{ needs.changes.outputs.cli_version }}" != "true" ]; then
+            echo "::error::pandan-cli/pandan_cli/ changed but the CLI version did not. Bump __version__ in pandan-cli/pandan_cli/__init__.py AND version in pandan-cli/pyproject.toml (then re-run \`uv lock\`) in this same PR — otherwise \`pandan --version\` cannot distinguish a stale build from current source (V50, KAN-435)."
+            exit 1
+          fi
+          echo "CLI behaviour changed and the version was bumped — OK."
 
   frontend:
     name: Frontend build & type-check

@@ -1,4 +1,4 @@
-# Simple Kanban — developer & demo shortcuts.
+# Pandan — developer & demo shortcuts.
 #
 # Wraps the commands already documented in CLAUDE.md so a newcomer or agent can
 # run one target instead of a multi-step sequence. Run `make` (or `make help`)
@@ -43,7 +43,7 @@ WT_BACKEND_PORT  := $(shell echo "$(CURDIR)be" | cksum | awk '{print 8100 + ($$1
         worktree-db worktree-db-url worktree-db-down worktree-e2e
 
 help: ## Show this help (the default target)
-	@awk 'BEGIN {FS = ":.*##"; printf "\nSimple Kanban — make targets\n\nUsage: make <target>\n\n"} \
+	@awk 'BEGIN {FS = ":.*##"; printf "\nPandan — make targets\n\nUsage: make <target>\n\n"} \
 		/^[a-zA-Z0-9_-]+:.*?##/ { printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2 } \
 		END { printf "\n" }' $(MAKEFILE_LIST)
 

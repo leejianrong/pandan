@@ -38,7 +38,7 @@ def test_create_returns_secret_once_and_hashes_at_rest(login_as, client):
     assert created.status_code == 201
     body = created.json()
     raw = body["token"]
-    assert raw.startswith("kanban_pat_")
+    assert raw.startswith("pandan_pat_")
     assert body["name"] == "ci-bot"
     assert body["token_prefix"] == raw[:15]
     assert body["last_used_at"] is None
@@ -123,8 +123,74 @@ def test_expired_token_is_401(login_as, client):
 
 
 def test_bad_token_is_401(client):
+    assert client.get(BOARDS, headers=_bearer("pandan_pat_not-a-real-token")).status_code == 401
+    # A retired-but-accepted prefix is still only a *shape* — the hash must match.
     assert client.get(BOARDS, headers=_bearer("kanban_pat_not-a-real-token")).status_code == 401
     assert client.get(BOARDS, headers=_bearer("not-even-our-prefix")).status_code == 401
+
+
+# --- rebrand: retired token prefixes keep authenticating (V40, KAN-423) -------
+
+
+def test_legacy_prefix_token_still_authenticates(login_as, client):
+    """A PAT minted before the ``kanban_pat_`` → ``pandan_pat_`` rename still works.
+
+    Regression guard for ADR 0018: verification is a hash lookup over the whole raw
+    token, and the resolver's cheap fast-path reject (``app/authz.py``, ``_resolve_pat``)
+    accepts every prefix in ``ACCEPTED_TOKEN_PREFIXES`` — not just the current one. A
+    prefix flip *without* that tuple would 401 every already-issued token.
+
+    Seeded directly through ``hash_token`` rather than the API, since the mint path
+    only ever produces the current prefix.
+    """
+    from sqlalchemy import text
+
+    from app.db import engine
+    from app.tokens import LEGACY_TOKEN_PREFIXES, hash_token
+
+    alice = login_as(*ALICE)
+    # Give Alice a board so a successful call has something owner-gated to return.
+    alice.post(BOARDS, json={"name": "legacy-pat-board"})
+    user_id = alice.get("/users/me").json()["id"]
+
+    legacy_raw = LEGACY_TOKEN_PREFIXES[0] + "seeded-legacy-token-value"
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO personal_access_token"
+                " (user_id, name, token_prefix, token_hash, scope, created_at)"
+                " VALUES (:uid, :name, :prefix, :hash, 'write', now())"
+            ),
+            {
+                "uid": user_id,
+                "name": "pre-rebrand-bot",
+                "prefix": legacy_raw[:15],
+                "hash": hash_token(legacy_raw),
+            },
+        )
+
+    resolved = client.get(BOARDS, headers=_bearer(legacy_raw))
+    assert resolved.status_code == 200
+    # Owner-scoped to Alice — the claim-on-login default board plus the one made above.
+    assert "legacy-pat-board" in [b["name"] for b in resolved.json()]
+
+
+def test_unknown_prefix_short_circuits_without_a_db_lookup(client, monkeypatch):
+    """A bearer matching *no* accepted prefix is rejected before any DB round-trip.
+
+    The fast-path guard exists so a stray Authorization header can't be used to
+    generate query load. Asserted by making the lookup itself explode: if the guard
+    ever stops short-circuiting, this test fails loudly instead of silently
+    regressing into a DB hit per bogus bearer.
+    """
+    from app import authz
+
+    def _explode(*_args, **_kwargs):  # pragma: no cover - must never be reached
+        raise AssertionError("hash_token called for a bearer with an unaccepted prefix")
+
+    monkeypatch.setattr(authz, "hash_token", _explode)
+    assert client.get(BOARDS, headers=_bearer("github_pat_11ABCDE")).status_code == 401
+    assert client.get(BOARDS, headers=_bearer("pandan-pat-wrong-separator")).status_code == 401
 
 
 # --- token management is per-user --------------------------------------------

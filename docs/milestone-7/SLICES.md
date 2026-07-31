@@ -25,11 +25,11 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 
 | Slice | What | Part | Wave | Card | Ends in (demo) |
 |-------|------|:----:|:----:|------|----------------|
-| **V40 · Rebrand sweep** | code, CLI, MCP, skills, docs | N1 | 1 | KAN-423 | `pandan list` works; the UI, README and board all say *pandan*; a `KANBAN_*`-configured client still works with a deprecation notice |
-| **V41 · Rebrand deploy identity** | Fly app, ghcr, OAuth, CI | N2 | 1 | KAN-424 | The app serves from the new origin over its own cert; GitHub login works there; the old Fly app is gone |
-| **V50 · CLI release discipline** | version-bump-on-fix + discriminating `--version` | A0 | 2 | KAN-435 | `pandan --version` says which build this is; a stale binary is detectable, not silent |
-| **V42 · `--fields` + round-trip tests** | projection flag; pin the shipped ref handling | A1 | 2 | KAN-425 | `--fields` widens the row; a per-verb test feeds each printed identifier back |
-| **V43 · Error contract** | structured errors, exit codes | A2 | 2 | KAN-426 | A bad flag, a bad value and a missing token each print a parseable error on **stdout** with the documented exit code |
+| **V40 · Rebrand sweep** ✅ | code, CLI, MCP, skills, docs | N1 | 1 | KAN-423 | `pandan list` works; the UI, README and board all say *pandan*; a `KANBAN_*`-configured client still works with a deprecation notice |
+| **V41 · Rebrand deploy identity** ⏸️ **deferred** | Fly app, ghcr, OAuth, CI | N2 | 1 | KAN-424 *(blocked-by KAN-439)* | — deferred behind the k8s homelab migration; the in-place renames are carved out as **KAN-437** |
+| **V50 · CLI release discipline** ✅ | version-bump-on-fix + discriminating `--version` | A0 | 2 | KAN-435 | `pandan --version` says which build this is; a stale binary is detectable, not silent |
+| **V42 · `--fields` + round-trip tests** ✅ | projection flag; pin the shipped ref handling | A1 | 2 | KAN-425 | `--fields` widens the row; a per-verb test feeds each printed identifier back |
+| **V43 · Error contract** ✅ | structured errors, exit codes | A2 | 2 | KAN-426 | A bad flag, a bad value and a missing token each print a parseable error on **stdout** with the documented exit code |
 | **V44 · Aggregates** | summary on every list verb | A3 | 2 | KAN-427 | `pandan list` ends with `42 cards · 12 todo · 5 in_progress · 25 done`; no second call needed for a count |
 | **V45 · Truncation** | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
 | **V46 · Content-first + disclosure** | bare command, `help[]` | A5 | 2 | KAN-429 | Bare `pandan` prints live board state and exits 0; results carry `help[]` next-step templates |
@@ -47,10 +47,17 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 > prioritised **first** in Wave 2. Audit against `uv run python -m pandan_cli` from `pandan-cli/`,
 > never a `kan` on `PATH` — see the [shaping](SHAPING.md)'s methodology note.
 
-> **Status:** 🔜 **not started (0/11).** Board cards **KAN-423…KAN-432** + **KAN-435** under the three `M7:` epics
+> **Status:** 🚧 **in progress (4/11 shipped, 1 deferred).** **V40 / KAN-423 is shipped** (two PRs —
+> structural then semantic; see its slice note), and Wave 2 has begun: **V50 / KAN-435** shipped as
+> **v0.5.0** (release provenance in `--version` + the version-bump guard), **V42 / KAN-425** as
+> **v0.6.0** (`--fields` + the identifier round-trip suite), and **V43 / KAN-426** as **v0.7.0** (the
+> CLI's error contract: structured errors on stdout, the six-code exit scheme documented and pinned,
+> and ref-resolution failure repaired to exit `5`). **V41 / KAN-424 is ⏸️ deferred**, `blocked-by`
+> **KAN-439** (k8s homelab migration), with **KAN-437** carved out for the in-place renames.
+> Board cards **KAN-423…KAN-432** + **KAN-435** under the three `M7:` epics
 > **EPIC-66** (Pandan Rebrand), **EPIC-67** (Agent-Ergonomic CLI), **EPIC-68** (MCP Right-Sizing).
 > The rebrand decision is [ADR 0018](../adr/0018-pandan-rebrand.md). The sister-app kickoff
-> (**KAN-304**, human-owned) is blocked on V40 landing.
+> (**KAN-304**, human-owned) is **unblocked** now V40 has landed.
 >
 > **Also under EPIC-67, not a slice:** **KAN-434** — `list --json` returns `{cards: […]}` rather than a
 > bare array, an intentional API-passthrough envelope that is **nowhere documented** (`SKILL.md` says
@@ -66,9 +73,10 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 
 ### V40 · Rebrand sweep: code, CLI, MCP, skills, docs (N1) — KAN-423
 - **Build:** rename `simple-kanban` → **`pandan`** across the repo (~52 files carry the brand string).
-  - **Packages:** `simple-kanban-{backend,frontend,cli,mcp}` → `pandan-*`; the `pandan-cli/`,
-    `pandan-client/` and `mcp/pandan_mcp/` directories and import roots follow (`pandan_cli`,
-    `pandan_client`, `pandan_mcp`).
+  - **Packages:** `simple-kanban-{backend,frontend,cli,mcp}` → `pandan-*`; the `kanban-cli/`,
+    `kanban-client/` and `mcp/kanban_mcp/` directories and import roots were moved with them, so the
+    packages are now `pandan-cli/` / `pandan_cli`, `pandan-client/` / `pandan_client` and
+    `mcp/pandan_mcp/`. (`kanban-docs-tooling` → `pandan-docs-tooling` too.)
   - **CLI:** console script `kan` → **`pandan`**, plus a **`pdn`** alias (a second
     `[project.scripts]` entry pointing at the same `main`). The PyInstaller entry + the standalone
     binary release name follow.
@@ -81,29 +89,70 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
     file's own keys (`api_url`/`token`/`board_id`) are already brand-free — unchanged. Config path
     `~/.config/kan/…` → `~/.config/pandan/…`, migrating an existing file if present.
   - **PAT mint prefix:** `TOKEN_PREFIX` in [`backend/app/tokens.py`](../../backend/app/tokens.py)
-    `kanban_pat_` → `pandan_pat_`. **Safe by inspection:** the prefix is used only at mint time and for
-    the non-secret display hint; verification is a hash lookup over the whole raw token with no
-    `startswith` guard, so existing `kanban_pat_…` tokens keep authenticating.
+    `kanban_pat_` → `pandan_pat_`, **plus** `LEGACY_TOKEN_PREFIXES = ("kanban_pat_",)` and an
+    accepted-prefix tuple at the resolver's fast-path guard, so already-issued tokens keep
+    authenticating. **This slice note originally said the change was "safe by inspection" because
+    "verification is a hash lookup over the whole raw token with no `startswith` guard" — that was
+    wrong.** The guard exists at [`backend/app/authz.py:85`](../../backend/app/authz.py) (`_resolve_pat`,
+    a deliberate no-DB-round-trip-for-a-stray-bearer optimisation), so a bare prefix flip would have
+    `401`'d every existing PAT. See ADR 0018 §"The PAT prefix" for the full correction and the
+    "cite the `file:line` you inspected" convention it adopted.
   - **UI:** document title, nav/brand text, landing copy, `frontend/index.html`.
   - **Skills:** `simple-kanban` → `pandan`, `project-manager-kanban` → `pandan-pm` (directory,
     frontmatter name, description, and every in-body command example).
   - **Docs:** `README.md`, `CLAUDE.md`, `docs/**` (including this milestone's own files), and the
     Roadmap **board name** via `PATCH /api/v1/boards/5`.
   - **Explicitly NOT renamed:** the `KAN-` / `EPIC-` ticket prefixes (R1.6) and the config file's
-    generic keys. Leave a comment at `TOKEN_PREFIX` and in `models.py` saying why, so nobody "finishes"
-    the rename later.
+    generic keys — with a comment at `TOKEN_PREFIX` and in `models.py` saying why, so nobody
+    "finishes" the rename later. Also left alone, and recorded in ADR 0018's non-goals: the
+    `kanbanauth` cookie, the `X-Kanban-Event` webhook header, the `kanban.*` logger names, the
+    `kanban.theme` / `kanban.activeBoardId` localStorage keys, the `kanban:kanban@…/kanban` local
+    Postgres credentials, and the **CI job display names** (branch protection matches required checks
+    on them — ops work, sequenced with KAN-437). The deployed Fly origin and OAuth App stay too, see
+    V41 below.
 - **Tests:** backend integration — a newly minted PAT carries `pandan_pat_`, and a pre-existing
   `kanban_pat_`-shaped token (seeded via `hash_token`) still authenticates. CLI unit — `PANDAN_*`
   wins over `KANBAN_*`; `KANBAN_*` alone still resolves and warns; neither set → the structured
   "token required" error. MCP unit — the tool-list smoke passes under the new module path. Frontend —
   `svelte-check` + the e2e smoke (title assertion updated).
 - **Acceptance:** the demo; suite green. App code + docs — **deploys** (no migration).
-- **Notes:** land as one PR. It is large but mechanical, and splitting it leaves the repo in a
-  half-renamed state that's worse to review. Grep for the old strings as the last review step:
-  `grep -ri 'simple.kanban\|pandan_cli\|pandan_mcp\|KANBAN_' --exclude-dir={.venv,node_modules,.git}`
-  should return only the intentional fallback + the "why we kept `KAN-`" comments.
+- **Notes:** **shipped as two sequential PRs, not one** (the original note said one). PR 1 was
+  structural — directory / package / import-root / distribution-name moves plus every path that
+  references them, with *no* user-visible string change — and is verifiable by CI. PR 2 was semantic
+  (command names, env vars, PAT prefix, UI copy, prose) and verifiable only by reading. Splitting kept
+  the second reviewable instead of buried in the first, and surfaced the `startswith` bug above before
+  any user-visible change shipped; see ADR 0018's amendment. Grep for the old strings as the last
+  review step:
+  `grep -ri 'simple.kanban\|kanban_cli\|kanban_mcp\|kanban_client\|KANBAN_' --exclude-dir={.venv,node_modules,.git}`
+  should return only the intentional fallback, the deliberate non-renames, and the "why we kept `KAN-`"
+  comments.
 
-### V41 · Rebrand deploy identity: Fly app, ghcr image, OAuth callbacks (N2) — KAN-424
+### V41 · Rebrand deploy identity: Fly app, ghcr image, OAuth callbacks (N2) — KAN-424 ⏸️ DEFERRED
+
+> **⏸️ Deferred, not descoped (decided 2026-07-31, after V40 landed).** The project is moving to a
+> **self-hosted k8s homelab** — board card **KAN-439** — which replaces the Fly deployment outright. A
+> Fly→Fly cutover first would pay the same migration **twice**: two new OAuth Apps, two DNS cuts, two
+> verification passes, for an interim hostname with a short remaining life. So **KAN-424 is deferred
+> and marked `blocked-by` KAN-439**; the deploy identity is renamed **once**, when the homelab is stood
+> up. See ADR 0018 §"The deploy identity: DEFERRED, not executed".
+>
+> **What that means concretely:**
+> - The origin **stays** `simple-kanban-jian.fly.dev`, on the Fly app `simple-kanban-jian`, with the
+>   **existing** prod GitHub OAuth App and the **existing** `AUTH_SECRET` (rotating it would invalidate
+>   every PAT and session for nothing). V40 therefore rewrote **no** `*.fly.dev` URL, and `fly.toml`'s
+>   `app = "simple-kanban-jian"` is untouched.
+> - The renames that *can* happen in place are carved out as **KAN-437**: the **GitHub repository**
+>   name, the **OAuth App display name**, and the **ghcr image path**
+>   (`ghcr.io/…/simple-kanban-mcp` → `…/pandan-mcp`). Cheap and reversible, but they still move URLs
+>   (repo, `github.io` docs site, image pull), so they are their own change. This is why the repo URL,
+>   the docs-site URL and the ghcr path still read `simple-kanban` after V40. Pair the **CI job
+>   display-name** rename with it — branch protection matches required checks on those strings.
+> - **Nothing is blocked.** V40 already unblocked **KAN-304** (the `kaya` kickoff); the hostname is
+>   the only place the retired name is still user-visible.
+
+The original plan is preserved below for whoever executes the homelab cutover — the *sequence* is
+still the right one, only the target changes from a new Fly app to the k8s ingress.
+
 - **Build:** ops-only, sequenced (a Fly app **cannot** be renamed, and a GitHub OAuth App permits
   exactly **one** callback URL):
   1. `fly apps create pandan` (or the final chosen app name) and set every secret on it —
@@ -123,8 +172,9 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
   workflow green on its next run, and the inbound-webhook signature path still verifying.
 - **Acceptance:** the demo; the old app destroyed; docs' URLs updated. Config + ops — the deploy
   workflow change itself deploys.
-- **Notes:** do **not** start this until V40 is merged and deployed. Leaving the old app running until
-  step 6 means every step is reversible up to the DNS cut.
+- **Notes:** superseded by the deferral above — do **not** execute this as a Fly→Fly move. Leaving the
+  old app running until the final step is still the right shape for the homelab cutover: every step
+  stays reversible up to the DNS cut.
 
 ## Wave 2 — Sharpen the tools
 
@@ -150,7 +200,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 - **Notes:** **builds first in Wave 2**, before the other AXI slices. Every guarantee they add is
   unverifiable in the field while "which build am I running?" has no answer.
 
-### V42 · `--fields` projection + identifier round-trip regression tests (A1) — KAN-425
+### V42 · `--fields` projection + identifier round-trip regression tests (A1) — KAN-425 ✅
 - **Build:** de-scoped from the original plan (see the correction note). The **round-trip half is
   already shipped** — `_id_or_ticket_arg` + `_parse_id_or_ticket` accept `KAN-`/`EPIC-` refs
   case-insensitively wherever an id is taken (KAN-285), and an unknown ref already exits `1` with
@@ -162,25 +212,50 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
     ten-day-old fix could be mistaken for a live defect.
 - **Tests:** a **round-trip test per id-taking verb** (`get`/`update`/`move`/`delete`/`dep`/`link`/
   `comment`/`needs-human`/`resolve` + the epic verbs): list, take the printed identifier verbatim, feed
-  it back, assert success. Ref parsing: mixed case, `#KAN-1`, a bare int, an unresolvable ref (exit 1,
+  it back, assert success. Ref parsing: mixed case, a bare int, an unresolvable ref (exit 1,
   not exit 2), an epic ref handed to a card verb. `--fields` selects, rejects unknown names, and leaves
   the default row untouched.
 - **Acceptance:** the `--fields` demo + the round-trip suite; green. CLI-only — no deploy.
+- **Non-goal, recorded: a leading `#` (`#KAN-1`) is NOT accepted.** An earlier draft of this slice
+  listed `#`-tolerance as a test case; that was invention, not a requirement. The contract is *"any
+  identifier the tool prints must be accepted"*, and nothing prints `#KAN-1` — while leniency in an
+  identifier parser buys a future ambiguity for no measured need. It stays a usage error (exit `2`),
+  pinned by a test so the decision is visible rather than accidental.
+- **Shipped** as **v0.6.0** (PR #205): `--fields` on all ten list verbs with the vocabulary derived
+  from the row's own `--json` keys (so it can't drift from the API), the 4-field default row pinned
+  byte-identically, and 77 new tests — one round-trip per id-taking verb (13 card-ticket, 6 epic-ticket,
+  8 numeric-id, plus `link rm`). `--sort`'s help line was reworded `Fields:` → `Sort keys:` with a test,
+  killing the ambiguity that made the audit misread it. `--fields` deliberately does **not** touch
+  `--json` (a verbatim passthrough; V44 adds `summary` there).
 
-### V43 · Structured errors on stdout + documented exit codes (A2) — KAN-426
-- **Build:** AXI 6, narrower than first assumed — the audit found the **exit codes are already
-  correct** (`0` success, `1` runtime error, `2` argparse error; `get KAN-99999` already exits `1` with
-  `no card found with ticket KAN-99999`). So this slice is about *stream and shape*, plus pinning what
-  already works: emit a parseable error on **stdout** (single-line, or TOON/JSON matching `--format`)
-  carrying a stable **machine code**, the human message and the offending argument; **document** the
-  0/1/2 contract in `--help` and the CLI README and pin it with tests; guarantee **no verb prompts**
-  when stdin isn't a tty — `login`'s `getpass` becomes tty-gated and fails structured otherwise. Keep
-  the usage text on `--help`.
+### V43 · Structured errors on stdout + documented exit codes (A2) — KAN-426 ✅
+- **Build:** AXI 6 — *stream and shape*, plus pinning and repairing what already exists. Emit a
+  parseable error on **stdout** (single-line, or JSON/TOON matching the output flag) carrying a stable
+  **machine code**, the human message and the offending argument; guarantee **no verb prompts** when
+  stdin isn't a tty (`login`'s `getpass` is already tty-gated — give it a structured failure instead of
+  a bare stderr line); keep the usage text on `--help`.
+  **Document and pin the real scheme, which is six codes, not three** (the earlier "0/1/2 contract"
+  here was wrong): `0` ok, `1` general/config, `2` usage (argparse), `3` `401`, `4` `403`, `5` `404`.
+  **Do not renumber them** — they're a published scripting contract.
+  **And fix the one genuine inconsistency:** client-side ref-resolution failure must return **`5`**,
+  not `1`, so `get 999999` and `get KAN-999999` agree on "no such card" (it applies to every verb that
+  resolves a ref, not just `get`).
 - **Tests:** CLI unit — one case per failure class asserting **stream, shape and exit code**: unknown
-  flag (2), invalid enum value (2), missing token (1), 404 (1), 401 (1), transport error (1), success
-  (0). `login` with a non-tty stdin errors structured instead of hanging.
+  flag (2), invalid enum value (2), missing token (1), 404 (5), 401 (3), 403 (4), transport error (1),
+  success (0), and both identifier forms of a missing card agreeing on 5. `login` with a non-tty stdin
+  errors structured instead of hanging. The exit-code scheme and the code→exit table are pinned by
+  literal-value tests.
 - **Acceptance:** the three-error demo; suite green. CLI-only — no deploy.
 - **Notes:** this slice defines the error shape the rest of Wave 2 emits, so it lands before V44–V47.
+- **Shipped** as **v0.7.0** (PR #207), paired with KAN-425 under one agent because V42's regression
+  tests cover the identifier-resolution path this slice then had to repair. The exit-code
+  inconsistency was fixed **in the resolver** (`_resolve_card_id`/`_resolve_epic_id`) rather than at
+  the call sites, so it covers every ref-taking verb including `dep --blocked-by`. An add-only
+  `ERROR_CODES` table (`pandan-cli/pandan_cli/cli.py:73`) maps 14 named codes → exit numbers so a
+  raise site picks a *meaning*, never a number; 24 generic `ConfigError` sites were converted. The
+  `403 → 4` row was shipped **flagged unverified** by the PM and then genuinely closed by the agent
+  (prod board 11 exists but isn't ours → `403` → exit `4`; policy at `backend/app/authz.py:194-205`) —
+  flagging the gap is what got it closed.
 
 ### V44 · Pre-computed aggregates on every list verb (A3) — KAN-427
 - **Build:** AXI 4. Every list verb ends with a summary the agent would otherwise pay a round trip for:
@@ -226,7 +301,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
   (AXI 10 regression guard).
 - **Acceptance:** the bare-command demo; suite green. CLI-only — no deploy.
 
-### V47 · `--format toon` for nested payloads (A6) — KAN-430
+### V47 · `--format toon` for nested payloads (A6) — KAN-430 ✅
 - **Build:** AXI 1, **scoped deliberately** (see the shaping): the TSV list default is already
   key-free and stays the default. Add `--format {human,json,toon}` (with the existing `--json` kept as
   a documented alias for `--format json`) and implement TOON for the **nested** payloads where it
@@ -238,6 +313,22 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
   Record the measured token delta vs `--json` in the PR body — if it isn't a real saving on our actual
   payloads, say so and scope the slice down rather than shipping it for the rubric's sake.
 - **Acceptance:** the round-trip demo + the measured delta; suite green. CLI-only — no deploy.
+- **Shipped** as **v0.8.0**: `--format {human,json,toon}` on every verb, `--json` kept as a supported
+  alias (`--format` wins if both are given), and `_structured_payload` → `_render_structured` as the
+  one shaping+serializing seam both structured formats go through. Errors and `config show` follow the
+  flag too. The encoder is `pandan_cli/toon.py` — stdlib only, a port of the reference
+  `@toon-format/toon` verified **byte-identical** on a 36-case corpus including 11 live board
+  payloads; it is encode-only, and the round-trip contract is proven by a test-only decoder
+  (`tests/toon_decode.py`) rather than by shipping a parser.
+- **The measurement gate said ship, with a caveat worth keeping.** Measured on the real Pandan Roadmap
+  board in `o200k_base` tokens, **toon vs today's `--json`**: `metrics` **−56%**, `activity` **−43%**,
+  `dep list` **−38%**, `epic list` **−37%**, `get` −18%, cards list −10%. But roughly half of that is
+  pretty-printing: **vs *compact* JSON** the tabular payloads still win big (`metrics` −29%,
+  `activity` −24%, `epic list` −20%) while **`get` is +2% and the cards list is +12%** — TOON pays for
+  uniform *rows*, not for a single object or for rows carrying non-uniform nested arrays. The slice's
+  own scoping was therefore right on the evidence, and the cheap non-TOON win it implies —
+  a compact `--json` — is left un-taken on purpose: `--json`'s indentation is a published,
+  human-diffable contract, and `--format toon` now exists for callers who want the tokens back.
 
 ### V48 · Ambient context: session-hook install + packaged skill (A7) — KAN-431
 - **Build:** AXI 7. A `pandan install-context` (name TBD in the slice) that wires board state into an
@@ -282,6 +373,6 @@ Recorded so it doesn't creep in:
 - **Removing the `KANBAN_*` env-var fallback.** It ships deprecated in V40 and is deleted in a later
   milestone, once nothing reads it.
 - **The `kaya` sister app itself.** V40 unblocks `KAN-304`; building `kaya` is its own repo and its own
-  shaping ([simple-markdown-vision](../simple-markdown-vision.md), to be renamed with the app).
+  shaping ([kaya-vision](../kaya-vision.md), renamed from `simple-markdown-vision.md` in V40).
 - **The Cloudflare edge setup** (`KAN-305`) — still open from M6, and V41 must coordinate with it
   rather than absorb it.

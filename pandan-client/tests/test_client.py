@@ -1,4 +1,4 @@
-"""Unit tests for KanbanClient — every method against a mocked transport.
+"""Unit tests for PandanClient — every method against a mocked transport.
 
 No real server: an ``httpx.MockTransport`` captures each outgoing request so we
 can assert method/path/params/body/headers, and returns canned responses so we
@@ -9,7 +9,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from pandan_client import KanbanApiError, KanbanClient
+from pandan_client import PandanApiError, PandanClient
 from pandan_client.client import (
     DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_TIMEOUT,
@@ -17,7 +17,7 @@ from pandan_client.client import (
 
 
 def make_client(handler, token=None):
-    return KanbanClient("http://test", token=token, transport=httpx.MockTransport(handler))
+    return PandanClient("http://test", token=token, transport=httpx.MockTransport(handler))
 
 
 def capture(response):
@@ -462,7 +462,7 @@ def test_create_cards_fail_fast_leaves_earlier_creates_applied():
             return httpx.Response(201, json={"id": 1})
         return httpx.Response(422, json={"detail": "bad story_points"})
 
-    with pytest.raises(KanbanApiError) as excinfo:
+    with pytest.raises(PandanApiError) as excinfo:
         make_client(handler).create_cards([{"title": "A"}, {"title": "B", "story_points": 4}])
     assert excinfo.value.status_code == 422
     assert calls["count"] == 2  # first created, second rejected — no third attempt
@@ -608,21 +608,21 @@ def test_no_token_means_no_authorization_header():
 
 def test_401_raises_with_friendly_hint_and_raw_detail():
     handler, _ = capture(httpx.Response(401, json={"detail": "authentication required"}))
-    with pytest.raises(KanbanApiError) as excinfo:
+    with pytest.raises(PandanApiError) as excinfo:
         make_client(handler).create_card("T")
     assert excinfo.value.status_code == 401
     # The raw server detail is preserved ...
     assert excinfo.value.detail == "authentication required"
     # ... and the agent-facing message frames it as a token problem (V10).
     assert "401" in str(excinfo.value)
-    assert "KANBAN_TOKEN" in str(excinfo.value)
+    assert "PANDAN_TOKEN" in str(excinfo.value)
 
 
 def test_403_raises_with_wrong_board_hint():
     handler, _ = capture(
         httpx.Response(403, json={"detail": "you do not have access to this board"})
     )
-    with pytest.raises(KanbanApiError) as excinfo:
+    with pytest.raises(PandanApiError) as excinfo:
         make_client(handler).create_card("T", board_id=99)
     assert excinfo.value.status_code == 403
     assert "list_boards" in str(excinfo.value)
@@ -630,7 +630,7 @@ def test_403_raises_with_wrong_board_hint():
 
 def test_error_without_json_body_falls_back_to_status():
     handler, _ = capture(httpx.Response(500, text="Internal Server Error"))
-    with pytest.raises(KanbanApiError) as excinfo:
+    with pytest.raises(PandanApiError) as excinfo:
         make_client(handler).get_card(1)
     assert excinfo.value.status_code == 500
 
@@ -640,7 +640,7 @@ def test_error_without_json_body_falls_back_to_status():
 
 def retry_client(handler, token=None):
     """A client whose retry sleep is disabled so tests don't actually wait."""
-    return KanbanClient(
+    return PandanClient(
         "http://test",
         token=token,
         transport=httpx.MockTransport(handler),
@@ -670,13 +670,13 @@ def test_timeout_defaults_are_generous_for_a_cold_start():
     # The documented defaults: short connect, generous read to ride the wake.
     assert DEFAULT_TIMEOUT == 35.0
     assert DEFAULT_CONNECT_TIMEOUT == 5.0
-    client = KanbanClient("http://test")
+    client = PandanClient("http://test")
     assert client._client.timeout.read == 35.0
     assert client._client.timeout.connect == 5.0
 
 
 def test_timeout_is_caller_configurable():
-    client = KanbanClient("http://test", timeout=60.0, connect_timeout=2.0)
+    client = PandanClient("http://test", timeout=60.0, connect_timeout=2.0)
     assert client._client.timeout.read == 60.0
     assert client._client.timeout.connect == 2.0
 
@@ -748,9 +748,9 @@ def test_only_one_retry_then_the_error_propagates():
 
 def test_http_error_response_is_not_retried():
     # A 404 is an error *response*, not a cold start — no retry, still maps to
-    # KanbanApiError (no regression to the existing error mapping).
+    # PandanApiError (no regression to the existing error mapping).
     handler, calls = flaky([], httpx.Response(404, json={"detail": "not found"}))
-    with pytest.raises(KanbanApiError) as excinfo:
+    with pytest.raises(PandanApiError) as excinfo:
         retry_client(handler).get_card(1)
     assert excinfo.value.status_code == 404
     assert calls["count"] == 1
@@ -758,7 +758,7 @@ def test_http_error_response_is_not_retried():
 
 def test_403_response_is_not_retried():
     handler, calls = flaky([], httpx.Response(403, json={"detail": "not your board"}))
-    with pytest.raises(KanbanApiError) as excinfo:
+    with pytest.raises(PandanApiError) as excinfo:
         retry_client(handler).create_card("T", board_id=99)
     assert excinfo.value.status_code == 403
     assert calls["count"] == 1

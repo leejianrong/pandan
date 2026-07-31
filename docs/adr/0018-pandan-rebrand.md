@@ -12,7 +12,7 @@
 
 `simple-kanban` was an honest name for one app. It becomes a liability the moment there are two,
 because the sibling would have to be `simple-markdown` — and a `simple-X` scheme names a tech demo,
-not a product pair. The sibling is imminent: [simple-markdown-vision](../simple-markdown-vision.md)
+not a product pair. The sibling is imminent: [kaya-vision](../kaya-vision.md)
 already commits both apps to a shared identity contract (one account, one PAT namespace spanning
 both) and bidirectional cross-links. Whatever names exist when that shaping starts get baked into a
 schema and a token format, so naming is a **prerequisite**, not a later polish pass.
@@ -62,10 +62,22 @@ and not on the critical path.
 
 ### What gets renamed
 
-Mechanically, in **V40** (one PR — a half-renamed repo is worse to review than a large mechanical one):
-package and directory names and import roots (`pandan_cli`, `pandan_client`, `pandan_mcp`); the UI
-title, nav and landing copy; `README.md`, `CLAUDE.md` and `docs/**`; the Roadmap board's own name; and
-the skills (`simple-kanban` → `pandan`, `project-manager-kanban` → `pandan-pm`).
+Mechanically, in **V40**: package and directory names and import roots (`pandan_cli`, `pandan_client`,
+`pandan_mcp`); distribution names; the UI title, nav and landing copy; `README.md`, `CLAUDE.md` and
+`docs/**`; the Roadmap board's own name; and the skills (`simple-kanban` → `pandan`,
+`project-manager-kanban` → `pandan-pm`).
+
+> **Amendment: V40 shipped as two sequential PRs, not one.** This ADR originally argued for a single
+> PR on the grounds that "a half-renamed repo is worse to review than a large mechanical one". In
+> practice the slice split cleanly along a seam that argument missed: a **structural** PR (directory /
+> package / import-root / distribution-name moves, plus every path that references them) is verifiable
+> almost entirely *by CI* — if the `dorny/paths-filter` globs, the `uv.lock`s, the Dockerfile `COPY`
+> and the release workflows are right, the jobs run and pass — whereas a **semantic** PR (command
+> names, env vars, the PAT prefix, UI copy, prose) can only be verified *by reading*. Mixing them
+> would have buried the second kind in ~700 lines of the first. Splitting also surfaced the
+> `startswith` bug below before any user-visible change shipped. The "don't leave it half-renamed"
+> concern was handled by landing them back-to-back, with the structural PR carrying **no** user-visible
+> string change at all. Prefer this split next time a rename is this large.
 
 Three of those deserve their own note:
 
@@ -93,29 +105,97 @@ Three of those deserve their own note:
   ADR 0009). There is no correct way to renumber history, so a prefix change would leave `KAN-1…432`
   beside `PAN-433…` on a board whose entire purpose is being the project's own record. A legacy prefix
   is strictly better than a split one. `KAN` is retconned as simply "kanban". A comment at the
-  sequence definitions records this so nobody completes the rename later.
-- **The config file's generic keys** — already brand-neutral.
+  sequence definitions ([`backend/app/models.py`](../../backend/app/models.py), module docstring +
+  both `server_default`s) and at `TOKEN_PREFIX` records this so nobody completes the rename later.
+- **The config file's generic keys** — already brand-neutral. (The config file's *table* moved
+  `[kan]` → `[pandan]` and its *directory* `~/.config/kan/` → `~/.config/pandan/`, migrating an
+  existing file; a legacy `[kan]` table is still read.)
+- **Session, wire and client-storage identifiers.** Each of these is a *live compatibility surface*
+  where a rename costs something real and buys nothing:
 
-### The PAT prefix: changed, and safe
+  | Identifier | Where | Cost of renaming |
+  |---|---|---|
+  | `kanbanauth` | session cookie name ([`backend/app/users.py`](../../backend/app/users.py)) | logs every signed-in user out |
+  | `X-Kanban-Event` | outbound webhook header ([`backend/app/outbound.py`](../../backend/app/outbound.py)) | breaks any configured consumer, silently |
+  | `kanban.access` / `kanban.ratelimit` / `kanban.health` | logger names ([`backend/app/observability.py`](../../backend/app/observability.py) et al.) | invalidates `LOG_LEVEL` docs and any log-based alerting |
+  | `kanban.theme`, `kanban.activeBoardId` | browser `localStorage` keys | resets every user's theme + active board |
+  | `kanban:kanban@…/kanban` | local Postgres role/db (`docker-compose.yml`, `Makefile`) | breaks every existing dev volume and worktree DB |
 
-`TOKEN_PREFIX` in [`backend/app/tokens.py`](../../backend/app/tokens.py) becomes `pandan_pat_`.
-Verified by inspection rather than assumed: the prefix is used **only** at mint time
-(`TOKEN_PREFIX + secrets.token_urlsafe(32)`) and to derive the non-secret display hint. Verification is
-an HMAC hash lookup over the **whole raw token** with no `startswith` guard anywhere in the resolver.
-So existing `kanban_pat_…` tokens keep authenticating indefinitely while newly minted ones carry the
-new, greppable marker — no forced rotation, no migration. (Rotating `AUTH_SECRET` would invalidate
-them, per §Configuration; the rebrand does not touch it.)
+- **The CI job *display* names** (`Kanban client (lint + tests)`, `CLI (lint + tests)`). Branch
+  protection matches required status checks on the job name string, so renaming them makes the
+  required checks unresolvable and blocks every PR until the protection rule is edited in the same
+  breath. That makes it **ops work, sequenced with KAN-437** — not a code change.
+- **The `KanbanClient` class name was renamed** to `PandanClient` (with `KanbanApiError` →
+  `PandanApiError`); noted here only because it is the one *public symbol* rename, and it is safe
+  precisely because the only consumers are in-repo (the CLI and the MCP server).
 
-### The deploy identity: create-migrate-destroy (V41)
+### The PAT prefix: changed, and safe — but only because of an accepted-prefix tuple
 
-Two hosting facts force a sequenced ops slice rather than a config edit: **a Fly app cannot be
-renamed**, and **a GitHub OAuth App permits exactly one callback URL** (ADR 0011 — which is already
-why dev and prod use separate apps). So: create the new Fly app and set every secret on it (same Neon
-database — this is not a data move); create a new prod OAuth App for the new origin; deploy and verify
-on the new `*.fly.dev` hostname; move the cert/DNS, coordinating with the still-open Cloudflare setup
-(`KAN-305`); retarget `fly.toml`, the deploy and keep-alive workflows, and the ghcr MCP image path;
-and only then destroy `simple-kanban-jian`. Every step before the DNS cut is reversible because the
-old app stays up.
+`TOKEN_PREFIX` in [`backend/app/tokens.py`](../../backend/app/tokens.py) becomes `pandan_pat_`, and a
+sibling `LEGACY_TOKEN_PREFIXES = ("kanban_pat_",)` is added. The resolver's fast-path guard tests the
+**union** of the two, so tokens minted before the rename keep authenticating indefinitely while newly
+minted ones carry the new, greppable marker — no forced rotation, no migration. (Rotating
+`AUTH_SECRET` *would* invalidate them, per §Configuration; the rebrand does not touch it.)
+
+**Correction — an earlier revision of this ADR got this wrong, and the error is worth recording.** It
+claimed the prefix was used "only at mint time and for the non-secret display hint", and that
+verification was "an HMAC hash lookup over the whole raw token with **no `startswith` guard anywhere
+in the resolver**". That was false. The guard exists, at
+[`backend/app/authz.py:85`](../../backend/app/authz.py) in `_resolve_pat`:
+
+```python
+    # Fast-path skip: only strings minted by us can match, so a stray bearer never
+    # triggers a DB round-trip.
+    if not raw.startswith(TOKEN_PREFIX):
+        return None
+```
+
+It is a deliberate load-shedding measure — a stray `Authorization` header must not cost a DB
+round-trip — but it made the prefix load-bearing at *verification* time, not just at mint time. A
+bare `TOKEN_PREFIX` flip would therefore have returned `401` for **every already-issued
+`kanban_pat_…` token** before the hash lookup ran: precisely the forced rotation this section
+promised to avoid. The fix is the accepted-prefix tuple above, pinned by an integration test that
+seeds a legacy-shaped token through `hash_token` and asserts it still resolves, plus one asserting an
+unrecognised prefix still short-circuits before any hash lookup (so the load-shedding intent doesn't
+silently regress).
+
+Two process lessons, adopted going forward:
+
+- **"Verified by inspection" must cite the `file:line` it inspected.** The original claim was reached
+  by grepping `kanban_pat` and `TOKEN_PREFIX` *within `tokens.py` only*, so a guard in another module
+  that imported the constant was invisible. A citation forces the grep to be repo-wide.
+- **An ADR asserting a property of the code is a claim to be checked, not a fact.** This is the
+  inverse of the usual drift (docs lagging code): here a doc asserted something the code never did.
+
+### The deploy identity: DEFERRED, not executed (V41 / KAN-424)
+
+Two hosting facts mean the deployed identity cannot be renamed by editing config: **a Fly app cannot
+be renamed**, and **a GitHub OAuth App permits exactly one callback URL** (ADR 0011 — which is already
+why dev and prod use separate apps). The original plan was a sequenced create-migrate-destroy ops
+slice: stand up a new Fly app on the same Neon database, create a new prod OAuth App for the new
+origin, verify on the new `*.fly.dev` hostname, move the cert/DNS alongside the still-open Cloudflare
+setup (`KAN-305`), retarget `fly.toml` + the deploy and keep-alive workflows, and only then destroy
+`simple-kanban-jian`.
+
+**That slice is deferred.** The project is moving to a **self-hosted k8s homelab** (`KAN-439`), which
+replaces the Fly deployment outright. Doing a Fly→Fly cutover first would pay the same migration
+twice — two new OAuth Apps, two DNS cuts, two verification passes — for an interim hostname with a
+short remaining life. So `KAN-424` is deferred and marked `blocked-by` `KAN-439`; the identity rename
+happens **once**, as part of standing up the homelab.
+
+Consequently, and on purpose:
+
+- **The origin stays `simple-kanban-jian.fly.dev`**, on the Fly app `simple-kanban-jian`, with the
+  **existing GitHub OAuth App** and the **existing `AUTH_SECRET`** (rotating it would invalidate every
+  PAT and session for no benefit). No URL in the docs or the SPA is rewritten.
+- **The renames that *can* happen in place are carved out as `KAN-437`**: the GitHub repository name,
+  the OAuth App's display name, and the ghcr image path
+  (`ghcr.io/…/simple-kanban-mcp` → `…/pandan-mcp`). Those are cheap and reversible, but they still
+  move URLs (repo, docs site, image pull), so they are their own change — which is why the repo URL,
+  the `github.io/simple-kanban/` docs URL and the ghcr path still read `simple-kanban` after V40.
+- **Nothing blocks on this.** V40 gave the product, CLI, packages and docs their new name; the
+  hostname is the one place the old name remains user-visible, and it is a label on
+  infrastructure that is itself scheduled for replacement.
 
 ## Consequences
 
@@ -128,9 +208,10 @@ old app stays up.
   the old strings is the review's last step. `pdn` means two console scripts to keep working. The
   `KANBAN_*` fallback is dead weight carried on purpose, with a scheduled removal.
 - **Negative / deferred:** the board permanently mixes a `KAN-` prefix with a `pandan` product name —
-  accepted, and documented above as the lesser evil. The Fly cutover has a genuine window where DNS
-  and the OAuth callback must land together; it is isolated in its own slice for that reason, and must
-  not start until V40 is deployed. The distribution names on PyPI/npm need a suffix
+  accepted, and documented above as the lesser evil. **The deployed hostname keeps the old name
+  indefinitely** (`simple-kanban-jian.fly.dev`) because the Fly cutover is deferred behind the k8s
+  migration (`KAN-439`); a user reaching the app sees `pandan` everywhere except the URL bar, which is
+  the ugliest surviving seam of this rebrand and is accepted knowingly. The distribution names on PyPI/npm need a suffix
   (`pandan-cli`, `kaya-notes`) until or unless the abandoned stubs are reclaimed. Any external
   reference to `mcp__kanban__*` tool names or the `kan` binary — including anything outside this repo
   — breaks at V40; acceptable while we are the only user, and the reason this ADR records the

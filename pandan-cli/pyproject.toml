@@ -1,7 +1,7 @@
 [project]
 name = "pandan-cli"
-version = "0.3.0"
-description = "The `kan` CLI over the Simple Kanban API (/api/v1)"
+version = "0.8.0"
+description = "The `pandan` CLI over the Pandan API (/api/v1)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -25,7 +25,10 @@ dev = [
 ]
 
 [project.scripts]
-kan = "pandan_cli.__main__:main"
+# `pandan` is the canonical command; `pdn` is a keystroke-ergonomics alias on the
+# same entry point, so the rebrand off `kan` costs no typing (V40, ADR 0018).
+pandan = "pandan_cli.__main__:main"
+pdn = "pandan_cli.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

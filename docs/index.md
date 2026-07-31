@@ -1,4 +1,4 @@
-# Simple Kanban
+# Pandan
 
 A small, API-first kanban board built as a [Shape Up](https://basecamp.com/shapeup) project —
 view, create, edit, delete, and drag-to-move stories across columns, behind a clean REST API with
@@ -54,4 +54,4 @@ flowchart LR
 
     These docs describe intent. Where a documented detail and the source disagree, the source wins —
     check the repository at
-    [github.com/leejianrong/simple-kanban](https://github.com/leejianrong/simple-kanban).
+    [github.com/leejianrong/pandan](https://github.com/leejianrong/pandan).

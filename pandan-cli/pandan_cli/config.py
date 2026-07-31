@@ -1,46 +1,88 @@
-"""Runtime config for the ``kan`` CLI.
+"""Runtime config for the ``pandan`` CLI (also available as ``pdn``).
 
 Each value (``api_url`` / ``token`` / ``board_id``) is resolved independently
 through a precedence chain — the first source that supplies a non-empty value
 wins:
 
-1. **Environment** — ``KANBAN_API_URL`` / ``KANBAN_TOKEN`` / ``KANBAN_BOARD_ID``.
-2. **User config file** — ``~/.config/kan/config.toml`` (``$XDG_CONFIG_HOME``
-   aware), a ``[kan]`` table with ``api_url`` / ``token`` / ``board_id``. Written
-   by ``kan config set`` / ``kan login`` at mode ``0600``.
+1. **Environment** — ``PANDAN_API_URL`` / ``PANDAN_TOKEN`` / ``PANDAN_BOARD_ID``,
+   and, as a **deprecated fallback**, the pre-rebrand ``KANBAN_*`` spellings
+   (read second, with a one-line notice on stderr; V40, KAN-423, ADR 0018).
+2. **User config file** — ``~/.config/pandan/config.toml`` (``$XDG_CONFIG_HOME``
+   aware), a ``[pandan]`` table with ``api_url`` / ``token`` / ``board_id``. Written
+   by ``pandan config set`` / ``pandan login`` at mode ``0600``. A pre-rebrand
+   ``~/.config/kan/config.toml`` is migrated across on first use, and a legacy
+   ``[kan]`` table is still read.
 3. **``.mcp.json``** — found by walking up from the CWD, reading
-   ``.mcpServers.kanban.env.{KANBAN_API_URL,KANBAN_TOKEN,KANBAN_BOARD_ID}``. This
-   matches Claude Code's convention: the PAT already lives there for the MCP
+   ``.mcpServers.pandan.env`` (falling back to the pre-rebrand ``.kanban.env``).
+   This matches Claude Code's convention: the PAT already lives there for the MCP
    server, so the CLI can reuse it.
 
 The point of sources 2 and 3 is that a **PAT never has to be put on a command
 line or echoed into the environment by hand** — it stays machine-side, so it
 can't leak into a shell transcript / model context. Vars:
 
-- ``KANBAN_API_URL`` — base URL of the Kanban API (default the local dev backend).
+- ``PANDAN_API_URL`` — base URL of the Pandan API (default the local dev backend).
   The ``/api/v1`` prefix is added by the client, so give just the origin.
-- ``KANBAN_TOKEN`` — bearer token. Since M3 V8 (ADR 0013) the whole ``/api/v1``
+- ``PANDAN_TOKEN`` — bearer token. Since M3 V8 (ADR 0013) the whole ``/api/v1``
   surface is auth-required, so this is **required**: a personal access token
-  (``kanban_pat_…``, created in the SPA Tokens UI, V9/ADR 0014). Empty/unset from
-  every source is a clean CLI error before any request is made.
-- ``KANBAN_BOARD_ID`` — optional default board (an integer id) for board-scoped
+  (``pandan_pat_…``, created in the SPA Tokens UI, V9/ADR 0014; a pre-rebrand
+  ``kanban_pat_…`` token still authenticates). Empty/unset from every source is a
+  clean CLI error before any request is made.
+- ``PANDAN_BOARD_ID`` — optional default board (an integer id) for board-scoped
   commands (``list``/``create``) when they omit ``--board``. Unset → the API's own
   fallback (list = all your boards; create = your earliest board).
+
+The ``KANBAN_*`` fallback exists so the cutover can't brick an existing
+``.mcp.json``, config file or CI job mid-flight. It is scheduled for removal once
+nothing reads it (ADR 0018 §Consequences).
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_API_URL = "http://localhost:8000"
 
-# The three config keys, in their environment-variable spelling.
-_ENV_API_URL = "KANBAN_API_URL"
-_ENV_TOKEN = "KANBAN_TOKEN"
-_ENV_BOARD_ID = "KANBAN_BOARD_ID"
+# Each config key's environment-variable spellings, **in precedence order**: the
+# current name first, then names retired by the rebrand (V40, KAN-423).
+_ENV_NAMES: dict[str, tuple[str, ...]] = {
+    "api_url": ("PANDAN_API_URL", "KANBAN_API_URL"),
+    "token": ("PANDAN_TOKEN", "KANBAN_TOKEN"),
+    "board_id": ("PANDAN_BOARD_ID", "KANBAN_BOARD_ID"),
+}
+# Canonical (non-deprecated) spellings, for error messages.
+_ENV_API_URL = _ENV_NAMES["api_url"][0]
+_ENV_TOKEN = _ENV_NAMES["token"][0]
+_ENV_BOARD_ID = _ENV_NAMES["board_id"][0]
+
+# The ``.mcp.json`` server key, current name first then the retired one.
+_MCP_SERVER_NAMES = ("pandan", "kanban")
+# The config file's TOML table, current name first then the retired one.
+_CONFIG_TABLE_NAMES = ("pandan", "kan")
+# Config directory basename, and the pre-rebrand one migrated from.
+_CONFIG_DIR = "pandan"
+_LEGACY_CONFIG_DIR = "kan"
+
+# Notices are advisory and must not repeat once per lookup — resolution touches the
+# environment several times per invocation.
+_warned: set[str] = set()
+
+
+def _warn_once(key: str, message: str) -> None:
+    """Emit ``message`` on **stderr** at most once per process.
+
+    stderr, never stdout: every command's stdout is machine-readable (JSON or a
+    stable table), so a deprecation notice there would corrupt a caller's parse.
+    """
+    if key in _warned:
+        return
+    _warned.add(key)
+    print(message, file=sys.stderr)
 
 
 class ConfigError(Exception):
@@ -55,11 +97,45 @@ class Config:
 
 
 def config_file_path() -> Path:
-    """Path to the user config file: ``$XDG_CONFIG_HOME/kan/config.toml``, or
-    ``~/.config/kan/config.toml`` when ``XDG_CONFIG_HOME`` is unset."""
+    """Path to the user config file: ``$XDG_CONFIG_HOME/pandan/config.toml``, or
+    ``~/.config/pandan/config.toml`` when ``XDG_CONFIG_HOME`` is unset."""
+    return _config_root() / _CONFIG_DIR / "config.toml"
+
+
+def legacy_config_file_path() -> Path:
+    """The pre-rebrand location, ``…/kan/config.toml`` (V40, KAN-423)."""
+    return _config_root() / _LEGACY_CONFIG_DIR / "config.toml"
+
+
+def _config_root() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME", "").strip()
-    root = Path(base) if base else Path.home() / ".config"
-    return root / "kan" / "config.toml"
+    return Path(base) if base else Path.home() / ".config"
+
+
+def migrate_legacy_config_file() -> Path | None:
+    """Move a pre-rebrand ``…/kan/config.toml`` to ``…/pandan/config.toml``.
+
+    Returns the new path when a migration happened, else ``None``. Copy-then-keep
+    (not a move): the old file is left in place so a still-installed ``kan`` binary
+    keeps working through the cutover. Idempotent, and any OS error is swallowed —
+    a config file is a convenience, never a hard dependency.
+    """
+    new = config_file_path()
+    old = legacy_config_file_path()
+    if new.is_file() or not old.is_file():
+        return None
+    try:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(old, new)
+        new.chmod(0o600)  # it holds a token — owner-only, same as write_config_file
+    except OSError:
+        return None
+    _warn_once(
+        "config-dir",
+        f"pandan: migrated your config from {old} to {new} "
+        "(the old file was left in place; you can delete it).",
+    )
+    return new
 
 
 def find_mcp_json(start: Path | None = None) -> Path | None:
@@ -74,19 +150,37 @@ def find_mcp_json(start: Path | None = None) -> Path | None:
 
 
 def _from_env() -> dict[str, str]:
-    """The three values as seen in the environment (missing → absent key)."""
+    """The three values as seen in the environment (missing → absent key).
+
+    Per key, the current ``PANDAN_*`` name wins; a retired ``KANBAN_*`` name is read
+    only if the current one is empty, and resolving from one emits a deprecation
+    notice naming both (V40, KAN-423).
+    """
     out: dict[str, str] = {}
-    for key, env in (("api_url", _ENV_API_URL), ("token", _ENV_TOKEN), ("board_id", _ENV_BOARD_ID)):
-        val = os.environ.get(env, "").strip()
+    for key, names in _ENV_NAMES.items():
+        current, *legacy = names
+        val = os.environ.get(current, "").strip()
         if val:
             out[key] = val
+            continue
+        for name in legacy:
+            val = os.environ.get(name, "").strip()
+            if val:
+                out[key] = val
+                _warn_once(
+                    f"env:{name}",
+                    f"pandan: {name} is deprecated — use {current} instead.",
+                )
+                break
     return out
 
 
 def _from_config_file() -> dict[str, str]:
-    """Values from the ``[kan]`` table of the user config file. A missing or
-    malformed file yields ``{}`` — a broken fallback never crashes the CLI, since
-    another source (or the final ``KANBAN_TOKEN required`` error) still applies."""
+    """Values from the ``[pandan]`` table of the user config file (a pre-rebrand
+    ``[kan]`` table is still read). A missing or malformed file yields ``{}`` — a
+    broken fallback never crashes the CLI, since another source (or the final
+    ``PANDAN_TOKEN required`` error) still applies."""
+    migrate_legacy_config_file()
     path = config_file_path()
     if not path.is_file():
         return {}
@@ -94,32 +188,53 @@ def _from_config_file() -> dict[str, str]:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):
         return {}
-    table = data.get("kan", data)  # tolerate keys at top level too
+    table = _config_table(data)
     if not isinstance(table, dict):
         return {}
     return _normalize({k: table.get(k) for k in ("api_url", "token", "board_id")})
 
 
+def _config_table(data: dict) -> object:
+    """The config table out of a parsed file: ``[pandan]``, else the pre-rebrand
+    ``[kan]``, else the document itself (keys at top level are tolerated)."""
+    for name in _CONFIG_TABLE_NAMES:
+        if isinstance(data.get(name), dict):
+            return data[name]
+    return data
+
+
 def _from_mcp_json() -> dict[str, str]:
-    """Values from ``.mcpServers.kanban.env`` of the nearest ``.mcp.json``.
-    Missing/malformed → ``{}`` (see ``_from_config_file``)."""
+    """Values from ``.mcpServers.pandan.env`` of the nearest ``.mcp.json`` (falling
+    back to the pre-rebrand ``.kanban`` server key). Missing/malformed → ``{}``
+    (see ``_from_config_file``)."""
     path = find_mcp_json()
     if path is None:
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        env = data["mcpServers"]["kanban"]["env"]
+        servers = json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
     except (OSError, json.JSONDecodeError, KeyError, TypeError):
         return {}
-    if not isinstance(env, dict):
+    if not isinstance(servers, dict):
         return {}
-    return _normalize(
-        {
-            "api_url": env.get(_ENV_API_URL),
-            "token": env.get(_ENV_TOKEN),
-            "board_id": env.get(_ENV_BOARD_ID),
+    for name in _MCP_SERVER_NAMES:
+        env = servers.get(name, {})
+        if not isinstance(env, dict):
+            continue
+        env = env.get("env")
+        if not isinstance(env, dict):
+            continue
+        # Within a server block, honour both env spellings (current first).
+        values = {
+            key: next(
+                (env[n] for n in names if env.get(n) not in (None, "")),
+                None,
+            )
+            for key, names in _ENV_NAMES.items()
         }
-    )
+        found = _normalize(values)
+        if found:
+            return found
+    return {}
 
 
 def _normalize(raw: dict[str, object]) -> dict[str, str]:
@@ -138,8 +253,8 @@ def _normalize(raw: dict[str, object]) -> dict[str, str]:
 def load_config(*, require_token: bool = True) -> Config:
     """Resolve config through the env → config-file → ``.mcp.json`` chain (see the
     module docstring). Raises ``ConfigError`` (mapped to a clean stderr message +
-    non-zero exit by the CLI) when ``KANBAN_TOKEN`` resolves to nothing or
-    ``KANBAN_BOARD_ID`` is not an integer.
+    non-zero exit by the CLI) when ``PANDAN_TOKEN`` resolves to nothing or
+    ``PANDAN_BOARD_ID`` is not an integer.
 
     ``require_token=False`` skips the token check for commands that only hit the
     public, unauthenticated ``/api/health`` endpoint (``warmup``), so they work as
@@ -150,9 +265,9 @@ def load_config(*, require_token: bool = True) -> Config:
     token = resolved.get("token", "")
     if require_token and not token:
         raise ConfigError(
-            "KANBAN_TOKEN is required (a personal access token 'kanban_pat_…'; "
-            "create one in the Tokens UI). Set it via the KANBAN_TOKEN env var, "
-            "`kan config set --token-stdin`, or .mcpServers.kanban.env in .mcp.json. "
+            f"{_ENV_TOKEN} is required (a personal access token 'pandan_pat_…'; "
+            f"create one in the Tokens UI). Set it via the {_ENV_TOKEN} env var, "
+            "`pandan config set --token-stdin`, or .mcpServers.pandan.env in .mcp.json. "
             "The /api/v1 API is auth-required."
         )
     board_id = _parse_board_id(resolved.get("board_id", ""))
@@ -161,7 +276,7 @@ def load_config(*, require_token: bool = True) -> Config:
 
 def resolve_values() -> dict[str, str]:
     """Merge the sources with env > config-file > ``.mcp.json`` precedence,
-    per value. Exposed (not just inlined in ``load_config``) so ``kan config show``
+    per value. Exposed (not just inlined in ``load_config``) so ``pandan config show``
     can report the effective config without re-implementing the chain."""
     merged: dict[str, str] = {}
     for source in (_from_mcp_json(), _from_config_file(), _from_env()):
@@ -177,7 +292,7 @@ def _parse_board_id(raw: str) -> int | None:
     try:
         return int(raw)
     except ValueError as exc:
-        raise ConfigError(f"KANBAN_BOARD_ID must be an integer, got {raw!r}") from exc
+        raise ConfigError(f"{_ENV_BOARD_ID} must be an integer, got {raw!r}") from exc
 
 
 def write_config_file(
@@ -189,12 +304,13 @@ def write_config_file(
     """Merge the given values into the user config file (``0600``), preserving any
     existing keys not being set, and return its path. Only non-``None`` args are
     written; pass an empty string to clear a key."""
+    migrate_legacy_config_file()
     path = config_file_path()
     current: dict[str, str] = {}
     if path.is_file():
         try:
             data = tomllib.loads(path.read_text(encoding="utf-8"))
-            table = data.get("kan", data)
+            table = _config_table(data)
             if isinstance(table, dict):
                 current = {
                     k: str(table[k])
@@ -219,10 +335,10 @@ def write_config_file(
 
 
 def _render_toml(values: dict[str, str]) -> str:
-    """Render the ``[kan]`` table. ``board_id`` is emitted as a bare integer when
+    """Render the ``[pandan]`` table. ``board_id`` is emitted as a bare integer when
     it parses as one; everything else is a quoted string. The value set is tiny and
-    known (a URL, a ``kanban_pat_…`` token, an int), so hand-rendering is safe."""
-    lines = ["[kan]"]
+    known (a URL, a ``pandan_pat_…`` token, an int), so hand-rendering is safe."""
+    lines = [f"[{_CONFIG_TABLE_NAMES[0]}]"]
     for key in ("api_url", "token", "board_id"):
         if key not in values:
             continue

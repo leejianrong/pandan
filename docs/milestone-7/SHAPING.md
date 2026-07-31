@@ -11,7 +11,7 @@ inbox, and the roadmap board has **no open agent work left**. What remains is no
 1. **The name.** A sister notes app is about to start (`KAN-304`), and "simple-kanban" cannot be half
    of a two-app family. Naming the pair is a prerequisite for the sibling's shaping, not a cosmetic
    pass — the sister app's shared-identity and cross-link contract
-   ([simple-markdown-vision](../simple-markdown-vision.md)) bakes in whatever names exist when it
+   ([kaya-vision](../kaya-vision.md)) bakes in whatever names exist when it
    starts.
 2. **The tools.** This project's whole thesis is that the API is kept clean so *agent clients are
    thin adapters* (ADR 0005). M2–M6 delivered the surface — the `kan` CLI reached full API parity and
@@ -41,9 +41,12 @@ Doing it *before* the AXI work is deliberate: the AXI slices rewrite the CLI's o
 substantially, and every line of that text carries the product name. Rebrand-first means it gets
 written once.
 
-The rebrand is also the riskiest single step in M7 — not the code sweep (mechanical) but the **deploy
-identity**. A Fly app cannot be renamed, and a GitHub OAuth App allows exactly one callback URL, so
-the cutover is a create-migrate-destroy sequence with DNS in the middle. That earns its own slice.
+The rebrand looked like the riskiest single step in M7 — not the code sweep (mechanical) but the
+**deploy identity**. A Fly app cannot be renamed, and a GitHub OAuth App allows exactly one callback
+URL, so the cutover would be a create-migrate-destroy sequence with DNS in the middle. That earned its
+own slice — and then, once V40 landed, **the slice was deferred rather than executed** (see R1.5 and
+part N2 below): the project is moving to a self-hosted k8s homelab (**KAN-439**), so a Fly→Fly cutover
+would pay the same migration twice. The riskiest step turned out to be one worth *not taking yet*.
 
 ### AXI conformance — the honest audit
 
@@ -59,7 +62,7 @@ work — and the real gaps cluster in *what the output tells an agent to do next
 | 3 | Content truncation | ❌ but *not* where first assumed: human `get` prints a **one-line** card summary with **no description at all** (an under-disclosure), while `comment list` and every `--json` payload emit **full bodies untruncated**. No limit, no size hint, no `--full`. |
 | 4 | Pre-computed aggregates | ❌ no list verb prints a total or summary; a count needs a second round trip. |
 | 5 | Definitive empty states | ✅ `(no cards)` — explicit. |
-| 6 | Structured errors & exit codes | ~ exit codes are **already disciplined** (`1` for a runtime error, `2` for an argparse error — better than assumed); ❌ messages go to **stderr**, not stdout, and are prose with no machine-readable code. `login` prompts unconditionally. |
+| 6 | Structured errors & exit codes | ~ **richer than AXI asks, and inconsistent in one place.** The scheme is **six** codes, not the `0`/`1`/`2` first written here: `0` ok, `1` general/config, `2` usage (argparse), `3` `401`, `4` `403`, `5` `404` — all six verified against the deployed API (`403`→`4` against a real foreign board; a nonexistent board id is `5`). ❌ The actual defect: **the same failure returned different codes depending on the identifier form** — `pandan get 999999` (numeric, `404` server-side) exited `5` while `pandan get KAN-999999` (ticket, resolved client-side) exited `1`, so an agent branching on the code got a different answer for "no such card" depending on how it addressed it. ❌ Messages went to **stderr** as prose with no machine-readable code. (`login` prompting unconditionally was **wrong** — `_cmd_login` has always gated `getpass` on `sys.stdin.isatty()`; what it lacked was a structured failure when no token arrived.) |
 | 7 | Ambient context | ~ a distributable skill exists; nothing installs board state into a session before the agent acts. |
 | 8 | Content first | ❌ bare `kan` prints usage + `error: the following arguments are required` and exits 2. |
 | 9 | Contextual disclosure | ❌ no next-step hints on any result. |
@@ -118,7 +121,7 @@ legitimate reason to keep breadth). The decision needs a measurement and an ADR,
 | R1.2 | CLI renamed (`kan` → `pandan`, with a short `pdn` alias); MCP server renamed | Must-have |
 | R1.3 | Config renamed (`PANDAN_*` env vars) **with the `KANBAN_*` names honoured as a deprecated fallback**, so a live `.mcp.json` / CLI config keeps working through the cutover | Must-have |
 | R1.4 | Skills renamed (`simple-kanban` → `pandan`, `project-manager-kanban` → `pandan-pm`) | Must-have |
-| R1.5 | Deploy identity moved: Fly app, ghcr image path, GitHub OAuth App(s), CI + keep-alive | Must-have |
+| R1.5 | ⏸️ **Deferred.** Deploy identity moved: Fly app, ghcr image path, GitHub OAuth App(s), CI + keep-alive. Deferred to the k8s homelab migration (**KAN-439**) so the cutover is paid once, not twice — **KAN-424** is `blocked-by` it. The origin, Fly app name, prod OAuth App and `AUTH_SECRET` all stay as they are. The subset that *can* rename in place — GitHub repo, OAuth App display name, ghcr image path, CI job display names — is carved out as **KAN-437** | Must-have → **deferred** |
 | R1.6 | **Ticket prefixes `KAN-` / `EPIC-` are NOT renamed** — ticket numbers are immutable by construction (ADR 0006/0009); a prefix change would split the board's own history | Must-have (non-goal) |
 | **R2** | **AXI conformance for the CLI** | |
 | R2.1 | **Identifier round-trip** stays working — already implemented (KAN-285); M7 adds the **per-verb regression test** that currently doesn't exist | Must-have |
@@ -162,12 +165,21 @@ legitimate reason to keep breadth). The decision needs a measurement and an ADR,
 - **Ticket prefixes stay `KAN-` / `EPIC-`.** Ticket numbers are atomic, immutable and never reused by
   construction (per-table sequences + `server_default`). Renaming the prefix would leave `KAN-1…432`
   and `PAN-433…` on one board — worse than a legacy prefix. `KAN` is retconned as just "kanban".
-- **The PAT mint prefix *can* safely change** (`kanban_pat_` → `pandan_pat_`): verification is a hash
-  lookup over the whole raw token with **no `startswith` guard** anywhere, so existing tokens keep
-  authenticating while newly minted ones carry the new marker. Verified in the code, not assumed.
-- **Fly cutover is create-migrate-destroy, in its own slice.** Fly apps cannot be renamed and a GitHub
-  OAuth App permits one callback URL, so this is a sequenced ops task with DNS in the middle — not
-  something to bury in a code-sweep PR.
+- **The PAT mint prefix can safely change** (`kanban_pat_` → `pandan_pat_`) — **but not on its own.**
+  This note originally claimed verification was "a hash lookup over the whole raw token with **no
+  `startswith` guard** anywhere", and said it was "verified in the code, not assumed". **It was
+  neither.** The guard is at [`backend/app/authz.py:85`](../../backend/app/authz.py) in `_resolve_pat`,
+  a deliberate no-DB-round-trip-for-a-stray-bearer optimisation, and a bare prefix flip would have
+  `401`'d every already-issued token. V40 shipped the prefix change *plus* a
+  `LEGACY_TOKEN_PREFIXES` tuple honoured by that guard. Convention adopted as a result: **a claim
+  about the code cites the `file:line` it inspected**, which forces the grep to be repo-wide rather
+  than confined to the file you happened to open. Full correction in ADR 0018 §"The PAT prefix".
+- **Fly cutover is create-migrate-destroy — and was therefore deferred.** Fly apps cannot be renamed
+  and a GitHub OAuth App permits one callback URL, so it is a sequenced ops task with DNS in the
+  middle, never something to bury in a code-sweep PR. Once V40 landed, the k8s homelab migration
+  (**KAN-439**) made a Fly→Fly cutover a migration paid twice, so **KAN-424 was deferred behind it**
+  and the origin stays `simple-kanban-jian.fly.dev`. The lesson worth keeping: isolating the ops step
+  in its own slice is what made deferring it a one-line decision instead of an unpick.
 - **TOON is adopted where it pays, not everywhere.** TSV list output is already key-free; TOON
   replaces JSON for *nested* payloads only. Rubric conformance is not a reason to make an efficient
   path less efficient.
@@ -209,7 +221,7 @@ Parts are vertical slices (mechanism + its surface), traced to the R's they sati
 | Part | Mechanism | Wave |
 |------|-----------|:----:|
 | **N1** | **Rebrand sweep.** Packages, UI, docs, board name, CLI console script (`pandan` + `pdn`), MCP server name, `PANDAN_*` config with `KANBAN_*` fallback, PAT mint prefix, skills. (R1.1–R1.4, R1.6) | 1 |
-| **N2** | **Deploy identity.** New Fly app + secrets + cert/DNS cutover + destroy old; new OAuth App(s); ghcr image path; CI + keep-alive retarget. (R1.5) | 1 |
+| **N2** | ⏸️ **Deferred. Deploy identity.** Was: new Fly app + secrets + cert/DNS cutover + destroy old; new OAuth App(s); ghcr image path; CI + keep-alive retarget. (R1.5) Now folded into the k8s homelab migration (**KAN-439**), with the in-place renames carved out as **KAN-437**. | 1 |
 | **A0** | **Release discipline.** Version-bump-on-fix + a discriminating `--version` (embed the build's git describe/sha), so a stale build is detectable. (R2.11) | 2 |
 | **A1** | **`--fields` + round-trip regression tests.** Widen the minimal schema on demand; pin the shipped `KAN-`/`EPIC-` ref handling with a per-verb test. (R2.1, R2.5) | 2 |
 | **A2** | **Error contract.** Structured errors on stdout, documented exit codes, non-interactive guarantee. (R2.2) | 2 |
@@ -228,7 +240,7 @@ Parts are vertical slices (mechanism + its surface), traced to the R's they sati
 | R1.2 | CLI + MCP renamed | Must | ✅ N1 |
 | R1.3 | `PANDAN_*` config + `KANBAN_*` fallback | Must | ✅ N1 |
 | R1.4 | Skills renamed | Must | ✅ N1 |
-| R1.5 | Deploy identity moved | Must | ✅ N2 |
+| R1.5 | Deploy identity moved | Must → **deferred** | ⏸️ N2 — deferred to KAN-439 (k8s homelab); in-place subset = KAN-437 |
 | R1.6 | Ticket prefixes unchanged | Must | ✅ N1 (explicit non-goal) |
 | R2.1 | Identifier round-trip (shipped; pin it) | Must | ✅ A1 |
 | R2.2 | Structured errors + exit codes | Must | ✅ A2 |

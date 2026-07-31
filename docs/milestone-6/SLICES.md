@@ -211,5 +211,5 @@ this epic** since the palette builds on U2's Bits UI Command primitive.
 > **Board mapping.** Tracked on the *Simple Kanban Roadmap* board (dogfooding, as always) as the
 > `M6:` epics **EPIC-46…EPIC-50** with cards **KAN-290…KAN-303**; each V-slice above is one card.
 > The **simple-markdown** sister app is recorded in
-> [docs/simple-markdown-vision.md](../simple-markdown-vision.md) with a human-owned kickoff card
+> [docs/kaya-vision.md](../kaya-vision.md) with a human-owned kickoff card
 > (**KAN-304**) — it is a *separate* repo/project, not an M6 build slice.

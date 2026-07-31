@@ -1,10 +1,10 @@
-"""Thin synchronous httpx client over the Simple Kanban REST API (`/api/v1`).
+"""Thin synchronous httpx client over the Pandan REST API (`/api/v1`).
 
 Shared single source of truth for talking to the API: the MCP server and the
-CLI both import ``KanbanClient`` from here so the two thin adapters never drift
+CLI both import ``PandanClient`` from here so the two thin adapters never drift
 (DRY; API-first, ADR 0005). One method per API endpoint. The transport is
 injectable so unit tests can drive every method against an ``httpx.MockTransport``
-with no real server. Non-2xx responses become a ``KanbanApiError`` carrying the
+with no real server. Non-2xx responses become a ``PandanApiError`` carrying the
 API's own ``detail`` string, so the caller sees a useful message (e.g. a 401 when
 a token is required).
 
@@ -15,7 +15,7 @@ owns its own env parsing.
 Cold-start resilience (KAN-25): the Fly free tier scales to zero, so the first
 request after idle fails while the machine wakes. The request path uses a
 generous read timeout plus a single automatic retry to ride that out; see
-``KanbanClient._send_with_retry`` for the exact policy.
+``PandanClient._send_with_retry`` for the exact policy.
 """
 from __future__ import annotations
 
@@ -48,13 +48,13 @@ _RETRY_ALWAYS_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemotePr
 # expired token vs. a board the caller's user doesn't own. The raw server detail
 # is preserved on ``.detail``; the hint just frames it usefully for the agent.
 _FRIENDLY_HINTS = {
-    401: "bad or expired token — set KANBAN_TOKEN to a valid PAT (create one in the Tokens UI)",
+    401: "bad or expired token — set PANDAN_TOKEN to a valid PAT (create one in the Tokens UI)",
     403: "that board isn't yours — call list_boards to see the boards you can use",
 }
 
 
-class KanbanApiError(RuntimeError):
-    """A non-2xx response from the Kanban API (status + server-provided detail)."""
+class PandanApiError(RuntimeError):
+    """A non-2xx response from the Pandan API (status + server-provided detail)."""
 
     def __init__(self, status_code: int, detail: str) -> None:
         hint = _FRIENDLY_HINTS.get(status_code)
@@ -81,7 +81,7 @@ def _clean(fields: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in fields.items() if value is not None}
 
 
-class KanbanClient:
+class PandanClient:
     def __init__(
         self,
         base_url: str,
@@ -106,7 +106,7 @@ class KanbanClient:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "KanbanClient":
+    def __enter__(self) -> "PandanClient":
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -117,7 +117,7 @@ class KanbanClient:
         if not response.is_success:
             # An HTTP error *response* (4xx/5xx) is not a cold start — never
             # retried; the existing error mapping is unchanged.
-            raise KanbanApiError(response.status_code, _detail(response))
+            raise PandanApiError(response.status_code, _detail(response))
         return response
 
     def _send_with_retry(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
@@ -197,7 +197,7 @@ class KanbanClient:
     def health(self) -> dict[str, Any]:
         """GET the **unversioned** ``/api/health`` (it lives at the origin, not
         under ``/api/v1``). Rides a cold start via the shared retry/timeout and
-        raises ``KanbanApiError`` on a non-2xx response; returns the parsed body
+        raises ``PandanApiError`` on a non-2xx response; returns the parsed body
         (``{"status": "ok"}``)."""
         # base_url is ``<origin>/api/v1/``; joining an absolute path swaps the
         # whole path (RFC 3986) so we reach ``<origin>/api/health`` without the
@@ -223,7 +223,7 @@ class KanbanClient:
                 "status": "waking",
                 "detail": f"server not ready yet ({exc.__class__.__name__}); retry shortly",
             }
-        except KanbanApiError as exc:
+        except PandanApiError as exc:
             return {"status": "error", "detail": str(exc)}
         return {"status": "ok", "health": body}
 

@@ -30,5 +30,5 @@ WORKDIR /app/mcp
 RUN uv sync --frozen --no-dev
 
 # The MCP server speaks over stdio, so an agent launches it with `docker run -i`.
-# It needs only KANBAN_API_URL / KANBAN_TOKEN / KANBAN_BOARD_ID at runtime.
+# It needs only PANDAN_API_URL / PANDAN_TOKEN / PANDAN_BOARD_ID at runtime.
 ENTRYPOINT ["python", "-m", "pandan_mcp"]
