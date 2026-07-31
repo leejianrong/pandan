@@ -55,6 +55,19 @@ PACKAGE_DIRS = ("backend", "frontend", "mcp", "pandan-client", "pandan-cli")
 
 NOOP = "#!/bin/sh\nexit 0\n"
 
+# The only GIT_* names `_clean_env` is allowed to hand to git: config discovery
+# pinned away from real files, plus a fixed identity so no `git config` is needed.
+_ALLOWED_GIT_ENV = frozenset(
+    {
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+    }
+)
+
 
 def _clean_env(**extra: str) -> dict[str, str]:
     """A subprocess env with git's ambient state stripped.
@@ -73,10 +86,19 @@ def _clean_env(**extra: str) -> dict[str, str]:
     Strip the whole `GIT_*` namespace rather than a denylist of the vars that bit
     us, and pin config discovery at `/dev/null` so ambient user/system git config
     (`core.hooksPath`, templates, signing) can't perturb a fixture either.
+
+    The commit identity is supplied here as environment too, so the fixture never
+    runs `git config` at all. That is deliberate: **linked worktrees share the main
+    repository's `.git/config`**, so a `git config user.email …` that looks
+    worktree-local is repository-global. During KAN-484 exactly that happened — the
+    test identity landed in the real repo's config and authored two commits as
+    `KAN-484 test <test@example.invalid>`. Nothing here may write git config.
     """
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_SYSTEM"] = os.devnull
+    env["GIT_AUTHOR_NAME"] = env["GIT_COMMITTER_NAME"] = "KAN-484 test"
+    env["GIT_AUTHOR_EMAIL"] = env["GIT_COMMITTER_EMAIL"] = "test@example.invalid"
     env.update(extra)
     return env
 
@@ -102,9 +124,18 @@ class Scratch:
         return result.stdout.strip()
 
     def git_raw(self, *args: str):
-        """Like `git` but tolerates a non-zero exit (for probing refs)."""
+        """Like `git` but tolerates a non-zero exit (for probing refs).
+
+        `-C self.path` is belt-and-braces on top of `cwd` and `_clean_env`: it
+        names the target repo explicitly, so a stray `git config` can never land
+        in a shared config file. That is not paranoia either — linked worktrees
+        share the main repository's `.git/config`, so during KAN-484 the fixture's
+        `git config user.email …` wrote the test identity into the real repo (two
+        commits got authored as `KAN-484 test`), and `git init` with an inherited
+        `GIT_DIR` set `core.bare = true` there, breaking an unrelated checkout.
+        """
         return subprocess.run(
-            ["git", *args],
+            ["git", "-C", str(self.path), *args],
             cwd=self.path,
             env=_clean_env(),
             capture_output=True,
@@ -170,9 +201,8 @@ def scratch(tmp_path):
         "ambient GIT_* environment is leaking; refusing to touch a real repo"
     )
 
-    s.git("config", "user.email", "test@example.invalid")
-    s.git("config", "user.name", "KAN-484 test")
-    s.git("config", "commit.gpgsign", "false")
+    # No `git config` here on purpose — identity comes from `_clean_env`, and
+    # signing can't engage because config discovery is pinned at /dev/null.
 
     files = {
         "docs/notes.md": "notes\n",
@@ -187,6 +217,32 @@ def scratch(tmp_path):
     s.set_origin_main(base)
     s.base = base
     return s
+
+
+def test_the_fixture_is_isolated_from_the_real_repository(scratch):
+    """The containment invariant, pinned as a test rather than a comment.
+
+    A linked worktree shares the main repository's `.git/config` and object store,
+    so a fixture that leaks is not a test-hygiene nit — it edits the developer's
+    repo. This asserts the two properties that keep it contained.
+    """
+    # 1. Every git call targets the scratch repo, whatever GIT_* is ambient.
+    assert Path(scratch.git("rev-parse", "--absolute-git-dir")) == (
+        scratch.path / ".git"
+    ).resolve()
+
+    # 2. The env handed to git carries no inherited GIT_DIR/GIT_WORK_TREE/etc, and
+    #    pins config discovery away from any real file.
+    env = _clean_env()
+    leaked = [k for k in env if k.startswith("GIT_") and k not in _ALLOWED_GIT_ENV]
+    assert not leaked, f"unexpected GIT_* passed to git: {leaked}"
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["GIT_CONFIG_SYSTEM"] == os.devnull
+
+    # 3. The fixture wrote no repo config at all (identity comes from the env), so
+    #    it cannot scribble on a shared .git/config.
+    config = scratch.path / ".git" / "config"
+    assert "test@example.invalid" not in config.read_text()
 
 
 def assert_passed(result):
