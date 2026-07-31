@@ -1237,6 +1237,8 @@ def test_board_update_sends_only_the_flags_passed(monkeypatch, env):
         ("update_board", {
             "board_id": 5,
             "name": "Pandan Roadmap",
+            "autosync_enabled": None,
+            "autosync_advance_to_done": None,
             "outbound_webhook_url": None,
             "outbound_webhook_secret": None,
             "outbound_webhook_enabled": None,
@@ -1257,6 +1259,8 @@ def test_board_update_carries_the_whole_outbound_webhook_trio(monkeypatch, env):
         ("update_board", {
             "board_id": 5,
             "name": None,
+            "autosync_enabled": None,
+            "autosync_advance_to_done": None,
             "outbound_webhook_url": "https://hooks.example/pandan",
             "outbound_webhook_secret": FAKE_WEBHOOK_KEY,
             "outbound_webhook_enabled": True,
@@ -1278,6 +1282,106 @@ def test_board_update_enabled_is_a_tri_state(monkeypatch, env, argv, expected):
     fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
     assert cli.run(["board", "update", "5", *argv]) == 0
     assert fake.calls[0][1]["outbound_webhook_enabled"] is expected
+
+
+# --- KAN-529: the autosync pair, reachable from NEITHER adapter before this -----
+# An API-coverage gap rather than a parity gap: `autosync_enabled` and
+# `autosync_advance_to_done` are two of the six `BoardUpdate` fields
+# (backend/app/schemas.py:436-443) and KAN-502 shipped only four, so the documented way
+# to opt a board into EPIC-10 / ADR 0016 auto-sync stayed a raw `curl` — the exact state
+# `pandan board update` was created to end. Landed on both surfaces in one PR so parity
+# never goes one-directional in the *other* direction (CLI ⊃ MCP).
+
+
+@pytest.mark.parametrize(
+    ("argv", "field", "expected"),
+    [
+        (["--autosync-enabled"], "autosync_enabled", True),
+        (["--autosync-disabled"], "autosync_enabled", False),
+        (["--autosync-advance-to-done"], "autosync_advance_to_done", True),
+        (["--no-autosync-advance-to-done"], "autosync_advance_to_done", False),
+        # The third state, and the one with teeth: an unrelated update must not carry an
+        # opinion about either flag. `store_const(default=None)`, never `store_true` —
+        # a default of False would silently DISABLE auto-sync on every board rename.
+        (["--name", "x"], "autosync_enabled", None),
+        (["--name", "x"], "autosync_advance_to_done", None),
+    ],
+)
+def test_board_update_autosync_flags_are_tri_states(monkeypatch, env, argv, field, expected):
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    assert cli.run(["board", "update", "5", *argv]) == 0
+    assert fake.calls[0][1][field] is expected
+
+
+def test_board_update_autosync_flags_are_independent_of_each_other(monkeypatch, env):
+    """The two switches are separate by design (ADR 0016): `advance_to_done` is the
+    human-in-the-loop safeguard, so turning the master switch on must not imply it, and
+    naming one must leave the other unsent."""
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    assert cli.run(["board", "update", "5", "--autosync-enabled"]) == 0
+    call = fake.calls[0][1]
+    assert call["autosync_enabled"] is True
+    assert call["autosync_advance_to_done"] is None
+
+
+def test_board_update_autosync_does_not_disturb_the_webhook_trio(monkeypatch, env):
+    """Opting into auto-sync must not touch the V38 outbound webhook — including its
+    `enabled` flag, whose own tri-state is the KAN-502 property this mirrors."""
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    argv = ["board", "update", "5", "--autosync-enabled", "--autosync-advance-to-done"]
+    assert cli.run(argv) == 0
+    assert fake.calls == [
+        ("update_board", {
+            "board_id": 5,
+            "name": None,
+            "autosync_enabled": True,
+            "autosync_advance_to_done": True,
+            "outbound_webhook_url": None,
+            "outbound_webhook_secret": None,
+            "outbound_webhook_enabled": None,
+        }),
+    ]
+
+
+def test_board_update_covers_every_boardupdate_field(monkeypatch, env):
+    """The card's claim, asserted: `BoardUpdate` has **six** fields
+    (backend/app/schemas.py:436-443) and `pandan board update` now reaches all six in one
+    invocation. Counts on this project have been wrong before, so this pins the set by
+    name rather than by a number in a docstring."""
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    code = cli.run([
+        "board", "update", "5",
+        "--name", "Pandan Roadmap",
+        "--autosync-enabled",
+        "--autosync-advance-to-done",
+        "--outbound-webhook-url", "https://hooks.example/pandan",
+        "--outbound-webhook-secret", FAKE_WEBHOOK_KEY,
+        "--outbound-webhook-enabled",
+    ])
+    assert code == 0
+    sent = fake.calls[0][1]
+    assert set(sent) - {"board_id"} == {
+        "name",
+        "autosync_enabled",
+        "autosync_advance_to_done",
+        "outbound_webhook_url",
+        "outbound_webhook_secret",
+        "outbound_webhook_enabled",
+    }
+    assert not any(value is None for value in sent.values())
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--autosync-enabled", "--autosync-disabled"],
+        ["--autosync-advance-to-done", "--no-autosync-advance-to-done"],
+    ],
+)
+def test_board_update_autosync_on_and_off_are_mutually_exclusive(monkeypatch, env, argv):
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["board", "update", "5", *argv])
+    assert exc.value.code == cli.EXIT_USAGE
 
 
 def test_board_update_reads_the_secret_from_stdin(monkeypatch, env):

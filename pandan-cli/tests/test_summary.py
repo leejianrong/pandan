@@ -89,6 +89,15 @@ POPULATED: dict[str, tuple[list[str], dict, str]] = {
         ]},
         "3 cards · 2 todo · 1 in_progress · 0 done",
     ),
+    # `batch-update` (KAN-519) returns `update_cards`' own {"updated": [...]} envelope —
+    # `PATCH /cards/batch`, `response_model=list[CardRead]`, so the rows are cards and it
+    # totals like `list`. It reached this table late: the key was unrecognised, so the
+    # verb printed raw `json.dumps` and no aggregate at all.
+    "batch-update": (
+        ["batch-update", '[{"id": 21, "assignee": "a"}, {"id": 22, "assignee": "a"}]'],
+        {"updated": [_card("KAN-21", "in_progress"), _card("KAN-22", "done")]},
+        "2 cards · 0 todo · 1 in_progress · 1 done",
+    ),
     "board list": (
         ["board", "list"],
         {"boards": [{"id": 5, "name": "Roadmap", "owner_id": 1}]},
@@ -183,6 +192,12 @@ EMPTY: dict[str, tuple[list[str], dict, str]] = {
         ["batch-create", "[]", "--board", "5"],
         {"created": []},
         "(no created)\n0 cards · 0 todo · 0 in_progress · 0 done\n",
+    ),
+    # Same rule, same envelope name kept verbatim: `(no updated)`, not `(no cards)`.
+    "batch-update": (
+        ["batch-update", "[]"],
+        {"updated": []},
+        "(no updated)\n0 cards · 0 todo · 0 in_progress · 0 done\n",
     ),
     "board list": (["board", "list"], {"boards": []}, "(no boards)\n0 boards\n"),
     "epic list": (

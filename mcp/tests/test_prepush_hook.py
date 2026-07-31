@@ -1,4 +1,5 @@
-"""Regression tests for the pre-push hook's diff ranges (KAN-484).
+"""Regression tests for the pre-push hook's diff ranges (KAN-484) and its
+behaviour in a hostile / degraded git environment (KAN-523).
 
 `scripts/git-hooks/pre-push` answers two different questions from one diff:
 *what changed* (which package checks to run) and *does this branch bump the CLI
@@ -13,12 +14,12 @@ guard still bites a branch that genuinely skips the bump.
 Why these live here, in the MCP suite: `mcp/tests/test_image_provenance_gate.py`
 is this repo's existing precedent for exercising a shell script from a Python
 suite, and the `mcp` CI job needs no DB, no Docker and no network — the same
-shape this needs. **Caveat worth knowing (reported with KAN-484):** CI's
-`changes` job path-filters the `mcp` job on `mcp/**`, and the hook lives at
-`scripts/git-hooks/pre-push`, which matches no filter at all. So a future PR that
-edits *only* the hook will not run these tests. Adding `scripts/git-hooks/**` to
-the `mcp` filter in `.github/workflows/ci.yml` closes that hole; it was outside
-KAN-484's fence.
+shape this needs. **The watcher question, settled:** KAN-484 shipped these tests
+while CI's `changes` job path-filtered the `mcp` job on `mcp/**` only, so a
+hook-only PR ran none of them — a guard with no watcher. That hole is now closed:
+`.github/workflows/ci.yml` lists `scripts/git-hooks/**` under the `mcp` filter
+(verified again for KAN-523), and the `mcp` job gates on that filter, so editing
+only the hook does run this file.
 
 Nothing here touches the real repository. Each test builds a throwaway git repo
 in `tmp_path`, fabricates the `<local-ref> <local-sha> <remote-ref> <remote-sha>`
@@ -158,6 +159,33 @@ class Scratch:
     def set_origin_main(self, sha: str) -> None:
         """Fake a remote-tracking ref — no network, no second repo."""
         self.git("update-ref", "refs/remotes/origin/main", sha)
+
+    def set_core_bare(self, value: bool) -> None:
+        """Set `core.bare` by WRITING THE CONFIG FILE, never via `git config`.
+
+        This is the KAN-523 condition, and the mechanism is the point. `git config`
+        is banned outright in this fixture (see `_clean_env`): linked worktrees
+        share the main repository's `.git/config`, so a `git config` that looks
+        worktree-local is repository-global, and during KAN-484 exactly this key —
+        `core.bare = true` — got written into the REAL repo from inside a scratch
+        fixture and broke every git command in an unrelated checkout until it was
+        reset by hand. A plain file append to a path under `tmp_path` cannot do
+        that no matter how badly `GIT_*` scrubbing regresses.
+
+        Appending a second `[core]` section is valid git ini: the last value of a
+        repeated key wins.
+        """
+        config = self.path / ".git" / "config"
+        assert config.is_file(), f"no scratch config at {config} — refusing to write"
+        config.write_text(config.read_text() + f"[core]\n\tbare = {str(value).lower()}\n")
+
+    def set_origin_head(self, ref: str) -> None:
+        """Point `refs/remotes/origin/HEAD` at a branch, as `git clone` does.
+
+        `git symbolic-ref`, not `git config` — this lives in the ref store, and the
+        ref store is per-repository, so `-C self.path` fully contains it.
+        """
+        self.git("symbolic-ref", "refs/remotes/origin/HEAD", ref)
 
     # --- the hook itself --------------------------------------------------
     def push(self, local_sha: str, remote_sha: str, ref: str = BRANCH):
@@ -477,3 +505,159 @@ def test_a_tip_already_merged_into_the_base_is_not_policed(scratch):
     result = scratch.push(tip, first)
     assert_passed(result)
     assert "the version did not" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# KAN-523: a hostile or degraded git environment. A pre-push hook is the one
+# guard that runs on a machine whose configuration nobody controls — worktrees,
+# treehouse pool trees, agent sandboxes, shallow CI clones — and linked worktrees
+# SHARE .git/config, so one stray value reaches every checkout of the clone.
+# ---------------------------------------------------------------------------
+
+
+def test_a_bare_context_skips_loudly_instead_of_aborting_with_a_naked_git_fatal(scratch):
+    """`core.bare = true` must not silently block every push in the clone.
+
+    This is not hypothetical: during KAN-484 a fixture running git inside a
+    pre-push hook context inherited the exported `GIT_DIR`, retargeted the real
+    repository and set `core.bare = true` there. Before the fix,
+    `repo_root="$(git rev-parse --show-toplevel)"` under `set -e` aborted the
+    hook at its FIRST line — measured exit 128, empty stdout, and the single line
+    `fatal: this operation must be run in a work tree` on stderr. Nothing named
+    the hook, the cause, or the fix.
+    """
+    scratch.git("switch", "-q", "-c", BRANCH)
+    tip = scratch.commit("docs: notes", {"docs/notes.md": "more notes\n"})
+    scratch.set_core_bare(True)
+
+    # Pin the precondition rather than trusting it: git really does refuse here.
+    probe = scratch.git_raw("rev-parse", "--show-toplevel")
+    assert probe.returncode != 0, "core.bare did not take effect — the test proves nothing"
+    assert "must be run in a work tree" in probe.stderr, probe.stderr
+
+    result = scratch.push(tip, scratch.base)
+
+    # 1. The push is allowed. CI is the enforcing gate; blocking here buys no
+    #    correctness and its only escape hatch is the `--no-verify` habit.
+    assert result.returncode == 0, (
+        "expected a skip, not a hard fail:\n" + result.stdout + result.stderr
+    )
+    # 2. It NAMES the cause. Assert on the specific words, not merely that stderr
+    #    is non-empty — the pre-fix behaviour also wrote to stderr, so a laxer
+    #    assertion would pass against the very bug this pins.
+    assert "pre-push" in result.stderr, result.stderr
+    assert "no work tree" in result.stderr, result.stderr
+    assert "core.bare" in result.stderr, result.stderr
+
+
+def test_the_bare_skip_does_not_pretend_the_checks_ran(scratch):
+    """A skip must be distinguishable from a pass.
+
+    The sibling risk of "don't hard-fail" is announcing success for work nothing
+    inspected — the KAN-484 / KAN-505 confidently-wrong-output family. So the
+    skip path must not emit the `OK` line, and must not claim any package check
+    was run or even deliberately skipped.
+    """
+    scratch.git("switch", "-q", "-c", BRANCH)
+    tip = scratch.commit(
+        "feat: cli change, no bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n"},
+    )
+    scratch.set_core_bare(True)
+
+    result = scratch.push(tip, scratch.base)
+    assert result.returncode == 0
+    assert "pre-push ▸ OK" not in result.stdout + result.stderr
+    assert "ruff" not in result.stdout
+    assert "SKIPPED" in result.stderr, result.stderr
+
+
+def test_the_incremental_fallback_announces_itself(scratch):
+    """The fallback is correct; the SILENCE was the defect.
+
+    With no base ref the branch range is empty and the policy falls back to the
+    push range (pinned by `test_policy_falls_back_to_the_push_when_no_base_ref_exists`,
+    which is the fail-safe half). What was missing is any signal that a weaker
+    range is being policed — so the guard could be quietly evaluating the wrong
+    thing with nobody the wiser.
+    """
+    scratch.git("switch", "-q", "-c", BRANCH)
+    scratch.git("update-ref", "-d", "refs/remotes/origin/main")
+    scratch.git("branch", "-q", "-D", "main")
+    for ref in ("refs/heads/main", "refs/remotes/origin/main", "refs/remotes/origin/HEAD"):
+        probe = scratch.git_raw("rev-parse", "--verify", "-q", ref)
+        assert probe.returncode != 0, f"{ref} still exists: {probe.stdout}"
+
+    first = scratch.commit("docs: notes", {"docs/notes.md": "more notes\n"})
+    tip = scratch.commit("docs: more", {"docs/notes.md": "even more notes\n"})
+    result = scratch.push(tip, first)
+
+    assert_passed(result)
+    assert "no branch baseline" in result.stderr, result.stderr
+    assert "NARROWER than what CI evaluates" in result.stderr, result.stderr
+
+
+def test_a_resolved_baseline_stays_quiet(scratch):
+    """The negative control. Notices only fire when something is degraded.
+
+    Without this, every assertion above could be satisfied by a hook that shouts
+    on every single push, which would be noise nobody reads — and an always-on
+    warning is functionally the same as no warning.
+    """
+    scratch.git("switch", "-q", "-c", BRANCH)
+    tip = scratch.commit("docs: notes", {"docs/notes.md": "more notes\n"})
+    result = scratch.push(tip, scratch.base)
+
+    assert_passed(result)
+    assert result.stderr == "", f"unexpected stderr on a healthy push: {result.stderr!r}"
+
+
+def test_the_local_main_baseline_announces_itself(scratch):
+    """origin/main missing but a local `main` present: a different base than CI's."""
+    scratch.git("switch", "-q", "-c", BRANCH)
+    scratch.git("update-ref", "-d", "refs/remotes/origin/main")
+    tip = scratch.commit("docs: notes", {"docs/notes.md": "more notes\n"})
+
+    result = scratch.push(tip, scratch.base)
+    assert_passed(result)
+    assert "LOCAL main" in result.stderr, result.stderr
+    assert "git fetch origin" in result.stderr, result.stderr
+
+
+def test_origin_head_supplies_the_baseline_when_the_default_is_not_named_main(scratch):
+    """A fork / renamed default (`master`) is a resolvable base, not a dead end.
+
+    Sharp on purpose: the bump lives in an EARLIER push, so the incremental range
+    carries CLI code and no version file. Resolve the baseline and the branch
+    range shows the bump and the guard is satisfied; fail to resolve it and the
+    hook falls back to the incremental range and fires a false positive — exactly
+    the KAN-484 failure, re-entered through a differently-named default branch.
+    """
+    scratch.git("branch", "-q", "-m", "main", "master")
+    scratch.git("update-ref", "refs/remotes/origin/master", scratch.base)
+    scratch.git("update-ref", "-d", "refs/remotes/origin/main")
+    scratch.set_origin_head("refs/remotes/origin/master")
+    # Neither of the two refs the old code knew about exists any more.
+    for ref in ("refs/heads/main", "refs/remotes/origin/main"):
+        probe = scratch.git_raw("rev-parse", "--verify", "-q", ref)
+        assert probe.returncode != 0, f"{ref} still exists: {probe.stdout}"
+
+    scratch.git("switch", "-q", "-c", BRANCH)
+    first = scratch.commit(
+        "feat: cli change + bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n", **_init_version("0.10.0")},
+    )
+    tip = scratch.commit(
+        "feat: more of the same slice, same version",
+        {"pandan-cli/pandan_cli/context.py": "CONTEXT = 2\n"},
+    )
+    # Pin the shape: the incremental range really does lack the version files, so
+    # this can only pass by resolving the branch baseline.
+    incremental = scratch.git("diff", "--name-only", first, tip).splitlines()
+    assert "pandan-cli/pandan_cli/context.py" in incremental
+    assert "pandan-cli/pandan_cli/__init__.py" not in incremental
+
+    result = scratch.push(tip, first)
+    assert_passed(result)
+    assert "version bump present" in result.stdout
+    assert "origin/master" in result.stderr, result.stderr

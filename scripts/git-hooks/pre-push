@@ -21,23 +21,81 @@
 # branch (merge-base vs the default branch, matching CI). See the long note at the
 # range computation below — that split is the whole point and not incidental.
 #
+# Hostile-environment behaviour (KAN-523): this is the one guard that runs on a
+# machine nobody controls the config of — worktrees, treehouse pool trees, agent
+# sandboxes, shallow CI clones — and linked worktrees SHARE .git/config, so one
+# stray value reaches the whole clone. So: no work tree → skip loudly rather than
+# block every push, and any degraded baseline announces itself on stderr.
+#
 # Install (from repo root):
 #   ln -sf ../../scripts/git-hooks/pre-push .git/hooks/pre-push
 # Bypass for a one-off (use sparingly):  git push --no-verify
 set -euo pipefail
 
-repo_root="$(git rev-parse --show-toplevel)"
+# Resolve the work tree WITHOUT letting `set -e` kill the hook first (KAN-523).
+# `git rev-parse --show-toplevel` exits 128 with `fatal: this operation must be
+# run in a work tree` when there is no work tree — a genuinely bare repo, or (the
+# case that actually bit us) a normal checkout whose `core.bare` got set to true
+# by accident. As a bare `repo_root="$(…)"` under `set -e` that aborted the hook
+# before it printed a single word, so every push in the affected clone died with
+# a naked git fatal naming neither the hook nor the cause.
+#
+# SKIP, don't fail. Deliberate, and the reasoning matters because a silent skip
+# is the KAN-484 / KAN-505 "confidently wrong output" family this hook is trying
+# to stay out of:
+#   * The hook genuinely CANNOT do its job here — there is no work tree to lint,
+#     no package dirs to cd into. Blocking the push buys no correctness, only
+#     unavailability.
+#   * CI is the enforcing gate for everything this hook mirrors, and `main` is
+#     protected, so a skipped hook cannot let anything reach main unevaluated.
+#     This hook's value is latency, not authority.
+#   * The only escape from a hard fail would be `--no-verify`, which is exactly
+#     the habit KAN-484 records as fatal to a guard's credibility — and unlike a
+#     real guard failure there is nothing in the user's CHANGE to fix.
+#   * The defect was never the exit code; it was the silence about WHY. A skip
+#     that names the cause on stderr is the opposite of that family.
+if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || [ -z "$repo_root" ]; then
+  echo "pre-push ▸ SKIPPED: git reports no work tree, so this hook cannot run." >&2
+  echo "         Likely cause: the repository is bare, or core.bare is true on a" >&2
+  echo "         checkout that DOES have a work tree (check: git config --get core.bare)." >&2
+  echo "         Note linked worktrees SHARE the main repository's .git/config, so a" >&2
+  echo "         stray value set from any one worktree reaches every checkout of the clone." >&2
+  echo "         Allowing the push — CI is the enforcing gate and main is protected." >&2
+  exit 0
+fi
+
 zero="0000000000000000000000000000000000000000"
 
 # Resolve a stable base ref for new branches / stdin-less fallbacks. Track
 # whether it resolved at all: an unresolvable base and a branch that simply adds
 # nothing beyond the base both yield an empty branch range, and they need
 # opposite treatment (KAN-484 — see the fail-safe note below).
+#
+# THREE candidates, not one (KAN-523), and each non-default one announces itself:
+#   1. `origin/main` — what CI actually diffs a PR against in this repo.
+#   2. `refs/remotes/origin/HEAD` — origin's own idea of its default branch, set
+#      by `git clone` and repairable with `git remote set-head origin -a`. This is
+#      the fork / renamed-default case (`master`, `develop`), where neither
+#      `origin/main` nor a local `main` exists and the old code went straight to
+#      unresolvable — silently policing the narrower push range instead.
+#   3. a local `main` — a clone that has never fetched.
+# Using anything but (1) means the hook is evaluating a DIFFERENT baseline than
+# CI will. That is still fail-safe (a stale or wider base only widens the branch
+# range; it never hides a missing bump), but an unannounced baseline swap is the
+# same confidently-wrong-output family as KAN-484/KAN-505 — so say which one.
 base_resolved=1
 if git rev-parse --verify -q origin/main >/dev/null; then
   base_ref="origin/main"
+elif origin_head="$(git symbolic-ref --short -q refs/remotes/origin/HEAD)" &&
+  [ -n "$origin_head" ] &&
+  git rev-parse --verify -q "$origin_head" >/dev/null; then
+  base_ref="$origin_head"
+  echo "pre-push ▸ NOTE: no origin/main — using $base_ref (origin's default branch) as the" >&2
+  echo "         branch baseline for policy checks. CI diffs against the PR base instead." >&2
 elif git rev-parse --verify -q main >/dev/null; then
   base_ref="main"
+  echo "pre-push ▸ NOTE: no origin/main — using the LOCAL main as the branch baseline, which" >&2
+  echo "         may be stale. Run \`git fetch origin\` for the baseline CI actually uses." >&2
 else
   base_ref="main"
   base_resolved=0
@@ -130,8 +188,18 @@ branch_changed="$(printf '%s\n' "$branch_changed" | sed '/^$/d' | sort -u)"
 # the branch adds nothing to police, and CI would compute the same empty diff and
 # skip its step too. Falling back there would re-open exactly the KAN-484 bug in
 # that corner, so don't.
+#
+# And SAY SO when it happens (KAN-523). The fallback is correct; the silence was
+# the defect. A degraded baseline that announces nothing is how the version-bump
+# guard ends up quietly evaluating the weaker range with no signal at all — the
+# same confidently-wrong-output family as KAN-484 and KAN-505.
 if [ "$base_resolved" -eq 0 ] && [ -z "$branch_changed" ]; then
   branch_changed="$changed"
+  echo "pre-push ▸ NOTE: no branch baseline — neither origin/main, origin's default HEAD, nor" >&2
+  echo "         a local main resolves (shallow/partial clone, never-fetched worktree, or a" >&2
+  echo "         differently-named default). Policy checks fall back to THIS PUSH's range," >&2
+  echo "         which is NARROWER than what CI evaluates. Fix with \`git fetch origin\`" >&2
+  echo "         (or \`git remote set-head origin -a\`)." >&2
 fi
 
 if [ -z "$changed" ] && [ -z "$branch_changed" ]; then

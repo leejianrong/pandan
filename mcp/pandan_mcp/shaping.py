@@ -86,7 +86,17 @@ FIELD_ALIASES = {
 #: bare API array in exactly one of these). Detection is *shape*-checked as well as
 #: name-checked — see :func:`_envelope`, and the card-carrying-``labels`` trap it
 #: exists to avoid.
-_ROW_ENVELOPES = frozenset({"cards", "epics", "activity", "comments"})
+#:
+#: **This set is not "every list the API returns" — it is exactly the envelopes a
+#: tool passes to** :func:`shape`. A name in here that no shaped tool produces is a
+#: name that can only ever *mis*-classify some other payload, so KAN-517 added
+#: exactly two — ``notifications`` (a 127-row unpaginated inbox: ~14.3k tokens) and
+#: ``boards`` (1,157 → 181) — and stopped there: ``labels``/``views``/``templates``/
+#: ``cycles`` measured 7–68 tokens against the real account, which no amount of
+#: resident schema is worth.
+_ROW_ENVELOPES = frozenset(
+    {"cards", "epics", "activity", "comments", "notifications", "boards"}
+)
 
 #: Keys that may sit beside an envelope's row list without it stopping being an
 #: envelope. Preserved verbatim through a projection: ``next_cursor`` is how the
