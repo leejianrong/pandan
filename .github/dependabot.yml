@@ -7,6 +7,24 @@
 # pyproject.toml + uv.lock). If a `uv` entry is ever rejected by the config
 # validator, fall back to `package-ecosystem: "pip"` (still reads pyproject.toml,
 # but won't refresh uv.lock's hashes) and note it here.
+#
+# THERE IS DELIBERATELY NO `docker` ECOSYSTEM (KAN-475). Don't add one expecting
+# it to keep the Dockerfiles' base images fresh — it can only do half the job, and
+# the half it can't do is the half that matters:
+#
+#   * `FROM python:3.12-slim` — Dependabot CAN bump this, but only if the ref is
+#     pinned. Ours floats on purpose, and a floating tag already tracks upstream
+#     patches, so there is nothing to bump.
+#   * `COPY --from=ghcr.io/astral-sh/uv:latest` — Dependabot CANNOT bump this at
+#     all: its Docker updater ignores image refs in COPY instructions
+#     (dependabot/dependabot-core#5103, open since 2022; Renovate does support it).
+#
+# So pinning `uv` here and adding a `docker` entry to "let Dependabot handle it"
+# would silently produce an UNWATCHED pin — which looks maintained and isn't. The
+# MCP image instead resolves both inputs to digests at release time and records
+# them as labels its release gate asserts; see the KAN-475 section of
+# mcp/README.md. The repo-root Dockerfile floats the same inputs and is tracked
+# separately as KAN-513.
 version: 2
 updates:
   # --- Python (uv projects) ----------------------------------------------------

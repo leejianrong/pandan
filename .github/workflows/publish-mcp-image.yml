@@ -11,6 +11,13 @@ name: Publish MCP image
 # doesn't name this commit — the container mirror of release-cli.yml's
 # `--version` smoke test. See mcp/scripts/assert-image-provenance.sh.
 #
+# BUILD-INPUT PROVENANCE (KAN-475): "which commit?" is not "which toolchain?".
+# The Dockerfile's inputs float, so this workflow resolves them to immutable
+# digests, builds against those, and records them as labels the same gate then
+# asserts. The image is NOT byte-reproducible from the commit alone — it is
+# auditable: it says exactly which interpreter and uv it got. See the KAN-475
+# section of mcp/README.md for the scope statement and the rebuild recipe.
+#
 # TRIGGER: version tags only (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
 # Never runs on a PR or a branch push — publishing is a deliberate, tag-gated ops
 # action (mirrors the repo's tag convention; v0.1.0 already exists).
@@ -65,6 +72,60 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4
 
+      # BUILD-INPUT PROVENANCE (KAN-475). mcp/Dockerfile's inputs float by design
+      # (`python:3.12-slim`, `ghcr.io/astral-sh/uv:latest`) so a plain local
+      # `docker build` needs no arguments. Floating inputs mean two builds of the
+      # SAME commit can embed a different interpreter and a different uv, which
+      # makes the `.revision` label above true but weaker than it looks — the gate
+      # only compares label values, so it cannot see a toolchain difference.
+      #
+      # Resolve each tag to its immutable index digest ONCE here, then feed the
+      # result to every build below as a build-arg AND record it as a label. Two
+      # things follow: the release's builds are input-identical (which also closes
+      # the "two separate invocations" caveat noted below — they can no longer
+      # resolve different base images), and the published image self-reports the
+      # exact toolchain it got, so two same-revision images are distinguishable.
+      #
+      # We resolve here rather than committing digest pins to the Dockerfile
+      # because a committed pin would have NO WATCHER: Dependabot's docker
+      # ecosystem ignores `COPY --from` refs entirely
+      # (dependabot/dependabot-core#5103, open since 2022), so the uv pin could
+      # never be bumped automatically. See the KAN-475 note in mcp/README.md.
+      #
+      # `imagetools inspect --format` is not honoured by the buildx in the runner
+      # image (v0.31.x prints its default report and ignores the flag), so parse
+      # the `Digest:` line — that is the multi-arch index digest, which is the
+      # right one to pin (it preserves multi-arch resolution).
+      - name: Resolve the floating build inputs to digests
+        id: inputs
+        run: |
+          set -euo pipefail
+          resolve() {
+            local ref="$1" repo digest
+            repo="${ref%:*}"
+            digest="$(docker buildx imagetools inspect "$ref" | awk '/^Digest:/ {print $2; exit}')"
+            case "$digest" in
+              sha256:*) : ;;
+              *) echo "::error::could not resolve '$ref' to a digest (got '$digest')"; exit 1 ;;
+            esac
+            printf '%s@%s' "$repo" "$digest"
+          }
+          python_base="$(resolve python:3.12-slim)"
+          uv_source="$(resolve ghcr.io/astral-sh/uv:latest)"
+          echo "Resolved build inputs for this release:"
+          echo "  python base: $python_base"
+          echo "  uv source:   $uv_source"
+          {
+            echo "python_base=$python_base"
+            echo "uv_source=$uv_source"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "toolchain_labels<<EOF"
+            echo "io.github.leejianrong.pandan.build.python=$python_base"
+            echo "io.github.leejianrong.pandan.build.uv=$uv_source"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       # BUILD TWICE, ON PURPOSE (KAN-452). The provenance gate must run BEFORE
       # anything reaches ghcr.io — mirroring release-cli.yml, where the
       # `--version` smoke test runs before "Attach binary to the Release" — so
@@ -76,7 +137,9 @@ jobs:
       # (Honest limitation: the two builds are separate invocations, so a cache
       # miss could in principle produce different *bytes*. It cannot produce
       # different *provenance* — both are handed the same `steps.meta.outputs.labels`
-      # — and the labels are what the gate asserts, so the claim stays true.)
+      # — and the labels are what the gate asserts, so the claim stays true.
+      # Since KAN-475 both are also handed the same resolved base-image DIGESTS,
+      # so they can no longer differ in interpreter or uv either.)
       - name: Build for the provenance gate (local, not pushed)
         uses: docker/build-push-action@v7
         with:
@@ -86,7 +149,12 @@ jobs:
           file: mcp/Dockerfile
           load: true
           tags: pandan-mcp:provenance-gate
-          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PYTHON_BASE=${{ steps.inputs.outputs.python_base }}
+            UV_SOURCE=${{ steps.inputs.outputs.uv_source }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            ${{ steps.inputs.outputs.toolchain_labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -111,7 +179,12 @@ jobs:
           file: mcp/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PYTHON_BASE=${{ steps.inputs.outputs.python_base }}
+            UV_SOURCE=${{ steps.inputs.outputs.uv_source }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            ${{ steps.inputs.outputs.toolchain_labels }}
           cache-from: type=gha
 
       # Print the immutable reference a consumer should pin, so the release log
@@ -129,4 +202,10 @@ jobs:
             echo "- commit: \`$GITHUB_SHA\`"
             echo "- digest: \`${{ steps.push.outputs.digest }}\`"
             echo "- pin: \`${{ env.IMAGE }}@${{ steps.push.outputs.digest }}\`"
+            echo ""
+            echo "Build inputs (KAN-475) — pass these back as build-args to rebuild"
+            echo "this image from the same toolchain:"
+            echo ""
+            echo "- python base: \`${{ steps.inputs.outputs.python_base }}\`"
+            echo "- uv source: \`${{ steps.inputs.outputs.uv_source }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
