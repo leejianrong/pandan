@@ -180,9 +180,11 @@ pandan epic list --fields ticket,name,lead,target_date
   An empty `--fields ""` is argparse's business, so it's a usage error, exit `2`.
 - **`--fields` shapes the human row only — it never changes the structured formats**
   (matching the flag's own help text: *"Affects human output only, never --format
-  json/toon"*). Their **rows** are a verbatim passthrough of the full payload (see
-  below), so there is nothing to project; combining the flags is allowed and the
-  `json`/`toon` output is identical either way.
+  json/toon"*). Their **rows** are a passthrough of the full payload (see below), so
+  there is nothing to project; combining the flags is allowed and the `json`/`toon`
+  output is identical either way. Note a projected cell is still subject to
+  [truncation](#content-truncation-v45-kan-428) — `--fields description` gives you the
+  shortened body unless you add `--full`.
 - The **empty state** (`(no cards)`) and the pagination hint
   (`(more — next cursor: …)`) print unchanged under a projection.
 - Not to be confused with `--sort`'s **sort keys**, which order the rows rather than
@@ -218,7 +220,7 @@ varies by verb, so pick the right key from this table:
 | `warmup` | `{"status": "ok"\|"waking"\|"error", …}` |
 | **single-entity verbs** — `get`, `create`, `update`, `move`, `needs-human`, `resolve`, `comment add`, `notify read`, `board create`, `epic create`, `epic update`, `label create`, `view create`, `template create`, `cycle create` | the **bare entity object** (`{"id": …, "ticket_number": "KAN-7", …}`) — no envelope |
 | `metrics`, `cycle metrics` | the **bare metrics object** (`board_id`, `throughput`, `cycle_time`, `aging_wip`, `by_assignee`; the cycle one is `committed`/`completed`/`velocity`/`burndown`) |
-| `config show` | the bare local-config object (`api_url`, `token` *(redacted)*, `board_id`, `config_file`, `mcp_json`) |
+| `config show` | the bare local-config object (`api_url`, `token` *(redacted)*, `board_id`, `max_text_chars`, `config_file`, `mcp_json`) |
 
 Worked `jq` one-liners (`jq` wants JSON, so these use `--json`, not `toon`):
 
@@ -246,6 +248,13 @@ V44, and silently change a working contract for every existing consumer.
 > no `summary` at all — so anything reading `.cards[]`, `.card` or a bare object is
 > unaffected. This was planned, not incidental: the envelope exists precisely so a key
 > like `summary` has somewhere to go.
+>
+> **A second qualification, added by V45.** Long free-text values may arrive
+> **shortened**, with the character total stated inline — see
+> [Content truncation](#content-truncation-v45-kan-428). Only four keys are ever
+> shortened (`description`, `body`, `attention_note`, `summary`), a shortened value is
+> still a `str` (no key is added, removed or retyped), and `--full` restores every
+> byte. Identifiers, cursors and URLs are **never** touched.
 
 ### Aggregates on every list verb (V44, KAN-427)
 
@@ -284,6 +293,44 @@ The `summary` shape per verb:
 `· N needs-human` appears on card lists only when non-zero. The card-list buckets are
 derived from the board's column vocabulary, so a row with an unrecognised column still
 counts in `count` while landing in no bucket — the buckets need not sum to `count`.
+
+### Content truncation (V45, KAN-428)
+
+Long free-text fields are **shortened to a character budget with the true total stated
+inline**, so one `get` on a heavily-documented card can't blow an agent's context:
+
+```
+$ pandan get KAN-478
+KAN-478	todo	template create renders its cards as rows with '?' tickets…	pts=1
+description:
+Found by the KAN-427 (V44) agent and deliberately NOT fixed there, because …
+(truncated, 3431 chars total — use --full to see complete body)
+```
+
+**`--full` restores every byte**, on any verb, in any format. Measured on that card:
+`get --json` is **4070 → 1154 bytes** (−72%), and `comment list --json` on a card with a
+long thread **6053 → 796** (−87%).
+
+The budget is `PANDAN_MAX_TEXT_CHARS` (env) / `max_text_chars` (config file), **default
+500**; `0` disables truncation globally, which is exactly what `--full` does for a single
+command. `pandan config show` reports the effective value.
+
+**Two properties worth relying on:**
+
+- **Under-limit text is byte-identical to before this feature existed.** Truncation is
+  strictly additive — if a value fits, nothing about it changes.
+- **The stated total is the *character* count of the original**, not of the truncated
+  copy and not a byte count. Text is sliced by code point, so a multi-byte character can
+  never split and the output is always valid UTF-8. (Grapheme *clusters* — an emoji with
+  a modifier, say — can still be divided; splitting one still yields valid UTF-8, and the
+  stdlib can't segment them, so that's documented rather than solved.)
+
+**It's an allow-list, not a size heuristic**, and that distinction is load-bearing. Only
+`description`, `body`, `attention_note` and `summary` are ever shortened. A rule like
+"truncate any long string" would eventually cut a keyset `next_cursor` — silently
+breaking pagination — or a link `url`, producing a value that looks fine and doesn't
+work. Both cases are pinned by tests. V44's aggregate is attached *after* truncation, so
+its counts are structurally out of reach.
 
 ### When to reach for `--format toon` (V47, KAN-430)
 
@@ -477,6 +524,7 @@ source wins:
 | API origin | `PANDAN_API_URL` | `http://localhost:8000` | The `/api/v1` prefix is added for you |
 | Token | `PANDAN_TOKEN` | *(unset)* | **Required.** A per-user **PAT** (`pandan_pat_…`, from the SPA top-bar **Tokens** tab, V9/ADR 0014). Unresolved from every source → a clean error before any request |
 | Default board | `PANDAN_BOARD_ID` | *(unset)* | Optional default for board-scoped commands (`list`/`create`, `epic list`/`epic create`) when they omit `--board`. Unset → the API's fallback (list = all your boards; create = your earliest) |
+| Long-text limit | `PANDAN_MAX_TEXT_CHARS` | `500` | Character budget for long free-text fields before they truncate with a hint (V45, below). `0` disables truncation entirely — the same thing `--full` does for one command. Config-file key: `max_text_chars` |
 
 > **Deprecated fallback (V40, [ADR 0018](../docs/adr/0018-pandan-rebrand.md)).** The pre-rebrand
 > `KANBAN_API_URL` / `KANBAN_TOKEN` / `KANBAN_BOARD_ID` still resolve — each key is read under its
