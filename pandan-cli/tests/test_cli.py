@@ -108,6 +108,24 @@ class FakeClient:
     def create_board(self, name):
         return self._call("create_board", name=name)
 
+    def get_board(self, board_id):
+        return self._call("get_board", board_id=board_id)
+
+    def update_board(self, board_id, **kw):
+        return self._call("update_board", board_id=board_id, **kw)
+
+    def delete_board(self, board_id):
+        return self._call("delete_board", board_id=board_id)
+
+    def get_epic(self, epic_id):
+        return self._call("get_epic", epic_id=epic_id)
+
+    def create_cards(self, cards):
+        return self._call("create_cards", cards=cards)
+
+    def claim_card(self, card_id, assignee):
+        return self._call("claim_card", card_id=card_id, assignee=assignee)
+
     def list_epics(self, **kw):
         return self._call("list_epics", **kw)
 
@@ -1132,6 +1150,404 @@ def test_board_list_json(monkeypatch, env, capsys):
         "boards": [BOARD],
         "summary": {"count": 1},
     }
+
+
+# --- KAN-502: the four CLI↔MCP parity gaps ----------------------------------
+# ADR 0019 verified that parity ran one way only — every `pandan` verb had an MCP twin,
+# not the reverse — and rejected "let the CLI be the surface" on exactly these four:
+# `update_board` / `delete_board` (no CLI verb at all), `claim_card` (a chosen card
+# needed `move` + `update`) and `create_cards` (N invocations). These close them.
+#
+# The mechanical both-directions assertion lives in `tests/test_parity.py`; this section
+# is the behaviour of each new verb.
+
+# A realistic ``BoardRead``: the outbound-webhook **url + flag are readable, the secret
+# is not** (backend/app/schemas.py:478-483 — write-only, like a password). The fixture
+# omits it for the same reason the API does, so a test that finds the secret in output
+# has found the CLI putting it there.
+BOARD_WITH_WEBHOOK = {
+    "id": 5,
+    "name": "Roadmap",
+    "owner_id": None,
+    "autosync_enabled": False,
+    "autosync_advance_to_done": False,
+    "outbound_webhook_url": "https://hooks.example/pandan",
+    "outbound_webhook_enabled": True,
+    "role": "owner",
+    "created_at": "2026-07-31T00:00:00Z",
+    "updated_at": "2026-07-31T00:00:00Z",
+}
+
+# The literal used by every secret-leak assertion below. Distinctive on purpose — a
+# substring search for it cannot accidentally match anything else the CLI prints —
+# but built from dictionary words, and NOT bound to a name like ``FAKE_WEBHOOK_KEY``/``TOKEN``.
+# The first draft was a high-entropy ``FAKE_WEBHOOK_KEY = "…"`` and CI's gitleaks scan flagged it
+# as a ``generic-api-key``, correctly: a random-looking string assigned to a name that
+# says "secret" is indistinguishable from the real thing, and this repo's rule is to fix
+# such a finding at the source rather than allowlist it (ci.yml:419-420). Low entropy is
+# the point, so keep it prose.
+FAKE_WEBHOOK_KEY = "not-a-real-webhook-signing-key-for-tests-only"
+
+
+def test_the_verbs_this_slice_did_not_touch_are_byte_identical(monkeypatch, env, capsys):
+    """The identity invariant, asserted BEFORE the new behaviour (and the reason this
+    test sits first): adding `get`/`update`/`delete` to the `board` group, a `claim`
+    verb and `batch-create` must not have moved a single byte of what the pre-existing
+    verbs print. `board list`, `board create` and `create` are the three the new code
+    sits closest to — `_humanize`'s board branch and its card-envelope branch, which
+    KAN-502 widened to cover `created`."""
+    patch_client(monkeypatch, FakeClient(result={"boards": [BOARD]}))
+    cli.run(["board", "list"])
+    assert capsys.readouterr().out == "2\tRoadmap\n1 board\n"
+
+    patch_client(monkeypatch, FakeClient(result=BOARD))
+    cli.run(["board", "create", "Roadmap"])
+    assert data_out(capsys) == "2\tRoadmap"
+
+    patch_client(monkeypatch, FakeClient(result=CARD))
+    cli.run(["create", "Ship it"])
+    assert data_out(capsys) == "KAN-1\ttodo\tShip it\tpts=-"
+
+
+# --- gap 1a: `board get` ----------------------------------------------------
+
+
+def test_board_get_calls_client_with_the_numeric_id(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    assert cli.run(["board", "get", "5"]) == 0
+    assert fake.calls == [("get_board", {"board_id": 5})]
+
+
+def test_board_get_human_output_is_the_board_line(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    cli.run(["board", "get", "5"])
+    assert capsys.readouterr().out == "5\tRoadmap\n"
+
+
+# --- gap 1b: `board update` -------------------------------------------------
+
+
+def test_board_update_sends_only_the_flags_passed(monkeypatch, env):
+    """The rename case — the one the packaged skill handed out a `curl` for. Every
+    field the caller didn't name must arrive as ``None`` so the client's ``_clean``
+    drops it and the PATCH leaves it untouched."""
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    assert cli.run(["board", "update", "5", "--name", "Pandan Roadmap"]) == 0
+    assert fake.calls == [
+        ("update_board", {
+            "board_id": 5,
+            "name": "Pandan Roadmap",
+            "outbound_webhook_url": None,
+            "outbound_webhook_secret": None,
+            "outbound_webhook_enabled": None,
+        }),
+    ]
+
+
+def test_board_update_carries_the_whole_outbound_webhook_trio(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    code = cli.run([
+        "board", "update", "5",
+        "--outbound-webhook-url", "https://hooks.example/pandan",
+        "--outbound-webhook-secret", FAKE_WEBHOOK_KEY,
+        "--outbound-webhook-enabled",
+    ])
+    assert code == 0
+    assert fake.calls == [
+        ("update_board", {
+            "board_id": 5,
+            "name": None,
+            "outbound_webhook_url": "https://hooks.example/pandan",
+            "outbound_webhook_secret": FAKE_WEBHOOK_KEY,
+            "outbound_webhook_enabled": True,
+        }),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["--outbound-webhook-enabled"], True),
+        (["--outbound-webhook-disabled"], False),
+        (["--name", "x"], None),  # neither flag → leave the setting alone
+    ],
+)
+def test_board_update_enabled_is_a_tri_state(monkeypatch, env, argv, expected):
+    """``store_const`` with ``default=None``, not ``store_true``: "off" and "don't
+    touch it" are different PATCHes, and a rename must not silently disable delivery."""
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    assert cli.run(["board", "update", "5", *argv]) == 0
+    assert fake.calls[0][1]["outbound_webhook_enabled"] is expected
+
+
+def test_board_update_reads_the_secret_from_stdin(monkeypatch, env):
+    """The documented path: argv is visible in ``ps`` and lands in shell history, so the
+    secret goes over stdin exactly like ``config set --token-stdin``."""
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{FAKE_WEBHOOK_KEY}\n"))
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    argv = ["board", "update", "5", "--outbound-webhook-secret-stdin"]
+    assert cli.run(argv) == 0
+    assert fake.calls[0][1]["outbound_webhook_secret"] == FAKE_WEBHOOK_KEY
+    # The value reached the client without ever being an argument.
+    assert not any(FAKE_WEBHOOK_KEY in token for token in argv)
+
+
+def test_board_update_empty_stdin_secret_is_an_error_not_a_no_op(monkeypatch, env, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    assert cli.run(["board", "update", "5", "--outbound-webhook-secret-stdin"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "invalid_input"
+    assert err.arg == "--outbound-webhook-secret-stdin"
+    assert fake.calls == []  # nothing was PATCHed
+
+
+def test_board_update_secret_flag_and_stdin_are_mutually_exclusive(monkeypatch, env):
+    with pytest.raises(SystemExit) as exc:
+        cli.run([
+            "board", "update", "5",
+            "--outbound-webhook-secret", FAKE_WEBHOOK_KEY,
+            "--outbound-webhook-secret-stdin",
+        ])
+    assert exc.value.code == cli.EXIT_USAGE
+
+
+def test_board_update_with_no_fields_is_a_structured_error(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    assert cli.run(["board", "update", "5"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "invalid_input"
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("fmt", [[], ["--format", "json"], ["--format", "toon"]])
+def test_board_update_never_prints_the_webhook_secret(monkeypatch, env, capsys, fmt):
+    """**The guard that matters most in this slice.** The secret is write-only: the API
+    accepts it on PATCH and never returns it (``BoardRead`` omits the field entirely).
+    stdout is this CLI's machine channel — piped, redirected, and routinely captured
+    into agent transcripts and CI logs — so echoing a credential there is the one
+    failure here with consequences beyond ergonomics.
+
+    Checked on **all three** formats, because human output happens to render a board as
+    id+name (which would hide a leak by luck, not by design) while ``json``/``toon``
+    serialize the whole payload.
+
+    Written so it cannot pass for the wrong reason: it first asserts the secret
+    genuinely **reached the client**. Without that, a `board update` that silently
+    dropped the flag would satisfy "the secret isn't in the output" perfectly.
+
+    **Mutation record, because one half of it is weaker than it looks.** Making the
+    handler merge the secret into its result reddens ``json`` and ``toon`` immediately —
+    but leaves ``human`` GREEN, because ``_board_line`` prints a fixed id+name projection
+    and drops the extra key. So the human parametrization does not guard the
+    result-payload route on its own; it needs the *renderer* to widen too. Both mutations
+    applied together redden all three, and the read-side companion test below covers the
+    renderer alone. Kept as three cases rather than collapsed to two: a leak added to the
+    human branch (a stray print, an error echoing the value) is a real route the
+    structured formats would not catch."""
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    code = cli.run([
+        "board", "update", "5", "--outbound-webhook-secret", FAKE_WEBHOOK_KEY, *fmt
+    ])
+    assert code == 0
+    # Not blind: the flag is wired, so the absence below is a real property.
+    assert fake.calls[0][1]["outbound_webhook_secret"] == FAKE_WEBHOOK_KEY
+    captured = capsys.readouterr()
+    assert FAKE_WEBHOOK_KEY not in captured.out
+    assert FAKE_WEBHOOK_KEY not in captured.err
+    # And the CLI did print something, so "no output" isn't what passed the test.
+    assert captured.out.strip()
+
+
+def test_board_get_never_prints_a_secret_even_if_the_api_returned_one(monkeypatch, env, capsys):
+    """Belt-and-braces on the read side. ``BoardRead`` has no ``outbound_webhook_secret``
+    today, so this asserts the CLI's *human* row is a fixed projection (id + name) rather
+    than a dump of whatever arrived — the property that keeps a future API field from
+    becoming a leak by default. ``--format json`` is deliberately NOT covered: it is
+    documented as the client's raw dict, so a server that echoed a secret would show it
+    there, and pretending otherwise would be the CLI lying about its own contract."""
+    patch_client(
+        monkeypatch,
+        FakeClient(result={**BOARD_WITH_WEBHOOK, "outbound_webhook_secret": FAKE_WEBHOOK_KEY}),
+    )
+    assert cli.run(["board", "get", "5"]) == 0
+    assert capsys.readouterr().out == "5\tRoadmap\n"
+
+
+# --- gap 1c: `board delete` -------------------------------------------------
+
+
+def test_board_delete_refuses_without_yes(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result={"deleted": 5}))
+    assert cli.run(["board", "delete", "5"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "confirmation_required"
+    assert fake.calls == []
+
+
+def test_board_delete_with_yes_reports_the_board_noun(monkeypatch, env, capsys):
+    """``noun="board"`` matters: the delete receipt is shape-identical across entities
+    (``{"deleted": id}``), so only the noun distinguishes "deleted board 5" from
+    "deleted card 5" — and one of those is very much worse to misread."""
+    fake = patch_client(monkeypatch, FakeClient(result={"deleted": 5}))
+    assert cli.run(["board", "delete", "5", "--yes"]) == 0
+    assert fake.calls == [("delete_board", {"board_id": 5})]
+    assert capsys.readouterr().out == "deleted board 5\n"
+
+
+# --- gap 2: `claim` — an atomic claim of a CHOSEN card ----------------------
+
+
+def test_claim_calls_claim_card_in_one_invocation(monkeypatch, env):
+    """One invocation, not `move` + `update`. That pairing is what the CLI required
+    before this verb, and nothing made a reader aware they had to run both."""
+    fake = patch_client(monkeypatch, FakeClient(result=CARD))
+    assert cli.run(["claim", "7", "--assignee", "agent-a"]) == 0
+    assert fake.calls == [("claim_card", {"card_id": 7, "assignee": "agent-a"})]
+
+
+def test_claim_resolves_a_ticket(monkeypatch, env):
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(results={"list_cards": {"cards": [CARD]}, "claim_card": CARD}),
+    )
+    assert cli.run(["claim", "KAN-1", "--assignee", "agent-a"]) == 0
+    assert ("claim_card", {"card_id": 1, "assignee": "agent-a"}) in fake.calls
+
+
+def test_claim_requires_an_assignee(monkeypatch, env):
+    """Required, exactly as on the MCP ``claim_card`` tool: the client's ``claim_card``
+    PATCHes the assignee it is handed and there is no "the caller" default on that path
+    (only ``dispatch``, which ``next --claim`` uses, has one). Failing at argparse is
+    better than silently moving the card and assigning it to nobody."""
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["claim", "7"])
+    assert exc.value.code == cli.EXIT_USAGE
+
+
+def test_claim_prints_the_card_block(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=CARD))
+    cli.run(["claim", "7", "--assignee", "agent-a"])
+    assert data_out(capsys) == cli._card_block(CARD)
+
+
+# --- gap 3: `batch-create` — N creates in one round trip --------------------
+
+
+def _created(n: int) -> dict:
+    return {"created": [
+        {**CARD, "id": i, "ticket_number": f"KAN-{i}", "title": f"c{i}"}
+        for i in range(1, n + 1)
+    ]}
+
+
+def test_batch_create_passes_the_array_through(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=_created(2)))
+    payload = '[{"title": "a", "board_id": 5}, {"title": "b", "board_id": 5}]'
+    assert cli.run(["batch-create", payload]) == 0
+    assert fake.calls == [
+        ("create_cards", {"cards": [
+            {"title": "a", "board_id": 5},
+            {"title": "b", "board_id": 5},
+        ]}),
+    ]
+
+
+def test_batch_create_fills_the_board_into_objects_that_omit_it(monkeypatch, env):
+    """A card dict with no ``board_id`` lands on your **earliest** board — the exact
+    footgun `--board` / PANDAN_BOARD_ID resolution exists to prevent everywhere else.
+    An object that names its own board keeps it, so one batch can still span boards."""
+    fake = patch_client(monkeypatch, FakeClient(result=_created(2)))
+    payload = '[{"title": "a"}, {"title": "b", "board_id": 9}]'
+    assert cli.run(["batch-create", payload, "--board", "5"]) == 0
+    assert fake.calls[0][1]["cards"] == [
+        {"title": "a", "board_id": 5},
+        {"title": "b", "board_id": 9},
+    ]
+
+
+def test_batch_create_uses_the_configured_board(monkeypatch, env):
+    monkeypatch.setenv("PANDAN_BOARD_ID", "4")
+    fake = patch_client(monkeypatch, FakeClient(result=_created(1)))
+    assert cli.run(["batch-create", '[{"title": "a"}]']) == 0
+    assert fake.calls[0][1]["cards"] == [{"title": "a", "board_id": 4}]
+
+
+def test_batch_create_reads_stdin_so_a_plan_can_come_from_a_file(monkeypatch, env):
+    monkeypatch.setattr("sys.stdin", io.StringIO('[{"title": "from a file", "board_id": 5}]'))
+    fake = patch_client(monkeypatch, FakeClient(result=_created(1)))
+    assert cli.run(["batch-create", "-"]) == 0
+    assert fake.calls[0][1]["cards"] == [{"title": "from a file", "board_id": 5}]
+
+
+def test_batch_create_prints_one_row_per_created_card_and_an_aggregate(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=_created(2)))
+    assert cli.run(["batch-create", '[{"title": "c1"}, {"title": "c2"}]', "--board", "5"]) == 0
+    out = capsys.readouterr().out
+    assert out == (
+        "KAN-1\ttodo\tc1\tpts=-\n"
+        "KAN-2\ttodo\tc2\tpts=-\n"
+        "2 cards · 2 todo · 0 in_progress · 0 done\n"
+    )
+
+
+def test_batch_create_json_keeps_the_clients_own_created_envelope(monkeypatch, env, capsys):
+    """``--format json`` is documented as the client's raw dict, so the envelope stays
+    ``created`` rather than being re-labelled ``cards`` for rendering convenience."""
+    patch_client(monkeypatch, FakeClient(result=_created(1)))
+    assert cli.run(["batch-create", '[{"title": "c1"}]', "--board", "5", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert list(payload["created"][0]["ticket_number"]) == list("KAN-1")
+    assert payload["summary"]["count"] == 1
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ['{"title": "a"}', '[["title", "a"]]', '[{"description": "no title"}]', '[{"title": ""}]'],
+)
+def test_batch_create_rejects_a_payload_it_cannot_use(monkeypatch, env, capsys, payload):
+    """Shape errors are caught before the first request, because the verb is fail-fast:
+    a bad third object must not leave the first two created."""
+    fake = patch_client(monkeypatch, FakeClient(result=_created(1)))
+    assert cli.run(["batch-create", payload, "--board", "5"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "invalid_input"
+    assert fake.calls == []
+
+
+def test_batch_create_help_says_it_is_not_atomic(monkeypatch, capsys):
+    """The card asks the CLI to *say* that `create_cards` is fail-fast rather than
+    transactional, and `--help` is where a caller reads it. `batch-update` promises
+    "atomically" two lines below, so the contrast has to be legible."""
+    monkeypatch.setenv("COLUMNS", "100")
+    with pytest.raises(SystemExit):
+        cli.run(["--help"])
+    top = capsys.readouterr().out
+    assert "NOT" in top and "atomic" in top
+    with pytest.raises(SystemExit):
+        cli.run(["batch-create", "--help"])
+    detail = capsys.readouterr().out
+    assert "NOT atomic" in detail
+
+
+# --- gap 4 (optional in the card): `epic get` ------------------------------
+
+
+def test_epic_get_calls_client(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=EPIC))
+    assert cli.run(["epic", "get", "1"]) == 0
+    assert fake.calls == [("get_epic", {"epic_id": 1})]
+
+
+def test_epic_get_resolves_a_ticket(monkeypatch, env):
+    fake = patch_client(
+        monkeypatch, FakeClient(results={"list_epics": {"epics": [EPIC]}, "get_epic": EPIC})
+    )
+    assert cli.run(["epic", "get", "EPIC-1"]) == 0
+    assert ("get_epic", {"epic_id": 1}) in fake.calls
+
+
+def test_epic_get_rejects_a_card_ticket(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=EPIC))
+    assert cli.run(["epic", "get", "KAN-1"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "invalid_ref"
 
 
 # --- epic subcommands -------------------------------------------------------

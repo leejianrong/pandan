@@ -18,14 +18,22 @@ fallback**, for when the CLI isn't installed or errors. Cards, boards, epics, la
 card templates, dependencies, work-links, comments, dispatch/claim, needs-human handoff, metrics and
 the activity feed are all reachable from either.
 
-> **Not quite full parity — the relationship is MCP ⊇ CLI.** This section previously claimed "full
-> parity as of v0.3.0" while the *same file* documented a `curl` workaround for a missing CLI verb
-> forty lines below. Verified 2026-07-31 (KAN-432, ADR 0019): `pandan board` has only `list` and
-> `create`, so **`update_board` and `delete_board` are MCP-only**; `create_cards` (batch) has no CLI
-> verb; and `pandan next --claim` claims whatever is *next* rather than a chosen card, so it is not an
-> exact substitute for `claim_card`. Everything else is reachable from both. Don't repeat the "full
-> parity" shorthand — it was inherited into a roadmap card and nearly justified deleting the MCP
-> surface. Closing these four gaps is tracked as **KAN-502**.
+> **Parity now holds in both directions as of `pandan 0.19.0` — and it is a test, not a claim.**
+> This section used to assert "full parity as of v0.3.0" while the *same file* documented a `curl`
+> workaround for a missing CLI verb forty lines below. KAN-432 / ADR 0019 verified the relationship was
+> **MCP ⊇ CLI** and named four gaps; **KAN-502 closed all four** — `pandan board get/update/delete`,
+> `pandan claim <id> --assignee X` (an atomic claim of a *chosen* card), and `pandan batch-create`
+> (N creates in one invocation), plus `pandan epic get`.
+>
+> What makes this different from the claim it replaces: `pandan-cli/tests/test_parity.py` enumerates the
+> MCP tool surface out of `mcp/pandan_mcp/server.py` and the CLI verb surface out of the real argparse
+> parser, and asserts the mapping **mechanically** in both directions — including
+> `MCP_ONLY == {}`. If a future tool or verb breaks parity, that test fails; nobody has to
+> notice a stale paragraph. The only CLI verbs with no MCP twin are the local ones
+> (`login`, `config`, `context`, the bare `overview`), which touch your installation, not the board.
+>
+> Still don't repeat "full parity" as bare prose: the old shorthand was inherited into a roadmap card
+> and nearly justified deleting the MCP surface. Cite the test.
 
 Prefer `pandan`. Drop to MCP only when you have to, and say why when you do.
 
@@ -171,12 +179,12 @@ differs per verb:
 | `activity` | `{"activity": [...]}` + `next_cursor` |
 | `board list` / `epic list` / `label list` / `view list` / `template list` / `comment list` / `cycle list` / `notify list` | `{"boards"}` / `{"epics"}` / `{"labels"}` / `{"views"}` / `{"templates"}` / `{"comments"}` / `{"cycles"}` / `{"notifications"}` |
 | `next`, `next --claim` | `{"card": {...}}` — `{"card": null}` when nothing is ready |
-| `batch-update` / `template apply` | `{"updated": [...]}` / `{"created": [...]}` |
+| `batch-update` / `batch-create` / `template apply` | `{"updated": [...]}` / `{"created": [...]}` / `{"created": [...]}` |
 | `dep add`/`rm`/`list` | `{"card_id", "blocked_by", "blocks"}` |
 | `link add`/`rm` | `{"card_id", "links"}` |
 | any `delete` | `{"deleted": <id>}` |
 | `warmup` | `{"status", "health"}` |
-| `get`, `create`, `update`, `move`, `needs-human`, `resolve`, `comment add`, `notify read`, and every `<group> create/update` | **bare entity object** — no envelope |
+| `get`, `create`, `update`, `move`, `claim`, `needs-human`, `resolve`, `comment add`, `notify read`, and every `<group> get/create/update` (incl. `board get`/`board update`, `epic get`) | **bare entity object** — no envelope |
 | `metrics`, `cycle metrics`, `config show` | **bare object** — no envelope |
 
 ```bash
@@ -216,6 +224,18 @@ Cards:
 - `pandan delete <card_id> --yes` — `--yes` is required as a guard.
 - `pandan batch-update '<JSON array of {id, ...fields}>'` (or `-` for stdin) — atomically PATCH several
   cards in one call (all-or-nothing).
+- `pandan batch-create '<JSON array of card objects>' [--board N]` (or `-` for stdin, so
+  `pandan batch-create - < cards.json` files a whole plan) — create several cards in one invocation.
+  **Fail-fast, NOT atomic**, unlike `batch-update`: there is no batch-create endpoint, so this loops one
+  POST per card and the cards created *before* a rejection stay created. On failure re-run with the
+  remainder, not the whole array. Object fields use the API's own names (`title` required, then
+  `description`/`column`/`story_points`/`assignee`/`epic_id`/`cycle_id`/`priority`/`due_date`/
+  `label_ids`/`board_id`); `--board` (or `PANDAN_BOARD_ID`) fills in `board_id` for objects that omit
+  it, so a batch can't silently land on your earliest board.
+- `pandan claim <card_id> --assignee A [--json]` — claim a **chosen** card in one call: move it to
+  `in_progress` **and** set its assignee. Use this when you already know which card you want;
+  `next --claim` is the one that picks the card for you. `--assignee` is required (this path has no
+  server-side "the caller" default — only `next --claim`'s dispatch endpoint has one).
 
 Agent operating verbs (the write side of the human↔agent surface):
 
@@ -234,8 +254,18 @@ Dependencies, work-links, comments (nested groups):
 
 Boards, epics, labels, saved views, templates:
 
-- `pandan board list [--json]` · `pandan board create "<name>" [--json]`
-- `pandan epic list [--board N] [--json]` · `pandan epic create "<name>" [--board N] [--description D] [--json]`
+- `pandan board list [--json]` · `pandan board get <board_id> [--json]` · `pandan board create "<name>" [--json]`
+- `pandan board update <board_id> [--name N] [--outbound-webhook-url URL]
+  [--outbound-webhook-secret S | --outbound-webhook-secret-stdin]
+  [--outbound-webhook-enabled | --outbound-webhook-disabled] [--json]` — **this is how you rename a
+  board** (it used to need a raw `curl`), and how you configure the V38 signed outbound webhook. Only
+  the flags you pass are sent. The secret is **write-only**: the API accepts it and never returns it, so
+  no read can show you what is set. Pass it over `--outbound-webhook-secret-stdin`
+  (`printf '%s' "$SECRET" | pandan board update 5 --outbound-webhook-secret-stdin`) — an argv value is
+  visible in `ps` and lands in your shell history. `--outbound-webhook-enabled`/`-disabled` is a
+  tri-state: omit both to leave the setting alone.
+- `pandan board delete <board_id> --yes [--json]` — its cards and epics cascade away. `--yes` required.
+- `pandan epic list [--board N] [--json]` · `pandan epic get <epic_id> [--json]` · `pandan epic create "<name>" [--board N] [--description D] [--json]`
 - `pandan epic update <epic_id> [--name N] [--description D] [--json]` · `pandan epic delete <epic_id> --yes [--json]`
 - `pandan label list [--board N] [--json]` · `pandan label create "<name>" [--color C] [--board N] [--json]` · `pandan label delete <label_id> --yes [--json]`
 - `pandan view list|create|delete …` — saved named filter/sort views.
@@ -309,8 +339,10 @@ pandan move 42 done
 ## When to fall back to MCP
 
 Use the `mcp__pandan__*` tools instead of `pandan` when the CLI isn't installed / not on PATH, or a
-`pandan` command errors for an environment reason (not a 4xx from the API). The CLI and MCP are at **full
-parity**, so every `pandan` verb has an MCP twin:
+`pandan` command errors for an environment reason (not a 4xx from the API). **Every one of the 49 MCP
+tools has a CLI verb and every board-touching CLI verb has an MCP tool** — asserted by
+`pandan-cli/tests/test_parity.py`, not by this sentence (see the note at the top of this file, and
+ADR 0019 for why the surface is frozen at 49 rather than trimmed):
 
 - **Cards:** `list_cards`, `get_card`, `create_card`, `create_cards` / `update_cards` (batch),
   `update_card`, `move_card`, `claim_card`, `delete_card`.
@@ -347,14 +379,10 @@ missing command, or a CLI↔MCP parity gap while driving the board, open an issu
 Keep it short and reproducible: include `pandan --version`, the exact command and its error, and the
 workaround you used if any. Mention you were using the `pandan` skill.
 
-Known gap (as of `pandan 0.3.0`): the `pandan board` group has only `list` and `create` — no
-`get`/`update`/`delete` — so **renaming or editing a board isn't possible from the CLI**. This is one of
-the gaps the MCP ⊇ CLI note at the top of this file records; it is *why* that note exists. Use the MCP
-`update_board` tool, or a raw REST call, until it lands
-(tracked in <https://github.com/leejianrong/pandan/issues/172>):
+**No known parity gaps.** The four this file used to list — including a raw-`curl` workaround for
+renaming a board — closed in `pandan 0.19.0` (KAN-502). If your `pandan` is older than that, check
+`pandan --version` before concluding a verb doesn't exist:
 
 ```bash
-curl -X PATCH "$PANDAN_API_URL/api/v1/boards/<id>" \
-  -H "Authorization: Bearer $PANDAN_TOKEN" -H "Content-Type: application/json" \
-  -d '{"name":"New name"}'
+pandan board update <id> --name "New name"   # was: curl -X PATCH …/api/v1/boards/<id>
 ```

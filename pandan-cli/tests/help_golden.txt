@@ -13,6 +13,8 @@ positional arguments:
     move          move a card to a column
     delete        delete a card
     next          show the next ready card (--claim to atomically dispatch it)
+    claim         claim a named card (move to in_progress + assign) in one
+                  call
     needs-human   flag a card as needing a human
     resolve       clear a card's needs-human flag
     metrics       derived flow metrics for a board (throughput / cycle time /
@@ -20,11 +22,13 @@ positional arguments:
     activity      a board's activity feed, newest-first (filter by --actor /
                   --action)
     notify        your notification inbox (list / read)
-    board         manage boards (list / create)
-    epic          manage epics (list / create / update / delete)
+    board         manage boards (list / get / create / update / delete)
+    epic          manage epics (list / get / create / update / delete)
     label         manage labels (list / create / delete)
     view          manage saved views (list / create / delete)
     cycle         manage cycles / iterations (list / create / delete)
+    batch-create  create several cards in one call (JSON array; fail-fast, NOT
+                  atomic)
     batch-update  atomically PATCH several cards (JSON array of {id,
                   ...fields})
     template      manage card templates (list / create / delete / apply)
