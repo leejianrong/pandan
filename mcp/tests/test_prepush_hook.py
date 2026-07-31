@@ -1,0 +1,329 @@
+"""Regression tests for the pre-push hook's diff ranges (KAN-484).
+
+`scripts/git-hooks/pre-push` answers two different questions from one diff:
+*what changed* (which package checks to run) and *does this branch bump the CLI
+version* (the V50 / KAN-435 bump-on-fix policy). KAN-484 is the bug that came
+from answering both over the same incremental `remote_sha..local_sha` range: the
+version-bump policy false-positived on a merge commit, so a compliant branch got
+told to bump a version it had already bumped — and two agents pushed with
+`--no-verify` rather than argue with it. A guard that cries wolf gets routed
+around, so these tests pin both halves: the false positive stays fixed, and the
+guard still bites a branch that genuinely skips the bump.
+
+Why these live here, in the MCP suite: `mcp/tests/test_image_provenance_gate.py`
+is this repo's existing precedent for exercising a shell script from a Python
+suite, and the `mcp` CI job needs no DB, no Docker and no network — the same
+shape this needs. **Caveat worth knowing (reported with KAN-484):** CI's
+`changes` job path-filters the `mcp` job on `mcp/**`, and the hook lives at
+`scripts/git-hooks/pre-push`, which matches no filter at all. So a future PR that
+edits *only* the hook will not run these tests. Adding `scripts/git-hooks/**` to
+the `mcp` filter in `.github/workflows/ci.yml` closes that hole; it was outside
+KAN-484's fence.
+
+Nothing here touches the real repository. Each test builds a throwaway git repo
+in `tmp_path`, fabricates the `<local-ref> <local-sha> <remote-ref> <remote-sha>`
+lines git feeds a pre-push hook on stdin, and stubs `uv`/`npm` with shims on
+`PATH` so the hook's package checks are no-ops and only its range logic is under
+test.
+
+Mutation-testing note (the trap this project already documented): switching
+branches swaps the hook itself, so point `PREPUSH_HOOK` at a version extracted
+with `git show <ref>:scripts/git-hooks/pre-push` instead of checking anything out.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# Overridable so a mutated / historical copy can be tested without checking it
+# out — see the module docstring.
+HOOK = Path(os.environ.get("PREPUSH_HOOK") or REPO_ROOT / "scripts" / "git-hooks" / "pre-push")
+
+ZERO = "0" * 40
+BRANCH = "feat/slice"
+
+# Every package dir the hook may `cd` into, so a scratch repo is a valid target.
+PACKAGE_DIRS = ("backend", "frontend", "mcp", "pandan-client", "pandan-cli")
+
+NOOP = "#!/bin/sh\nexit 0\n"
+
+
+def _init_version(version: str) -> dict[str, str]:
+    return {
+        "pandan-cli/pyproject.toml": f'[project]\nname = "pandan"\nversion = "{version}"\n',
+        "pandan-cli/pandan_cli/__init__.py": f'__version__ = "{version}"\n',
+    }
+
+
+class Scratch:
+    """A throwaway git repo the hook can be run against."""
+
+    def __init__(self, path: Path, bin_dir: Path):
+        self.path = path
+        self.bin_dir = bin_dir
+
+    # --- git plumbing -----------------------------------------------------
+    def git(self, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=self.path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"git {args} failed:\n{result.stdout}{result.stderr}"
+        return result.stdout.strip()
+
+    def write(self, files: dict[str, str]) -> None:
+        for rel, text in files.items():
+            target = self.path / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
+
+    def commit(self, message: str, files: dict[str, str] | None = None) -> str:
+        if files:
+            self.write(files)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", message)
+        return self.git("rev-parse", "HEAD")
+
+    def set_origin_main(self, sha: str) -> None:
+        """Fake a remote-tracking ref — no network, no second repo."""
+        self.git("update-ref", "refs/remotes/origin/main", sha)
+
+    # --- the hook itself --------------------------------------------------
+    def push(self, local_sha: str, remote_sha: str, ref: str = BRANCH):
+        """Run the hook exactly as git would for one pushed ref."""
+        env = dict(os.environ)
+        env["PATH"] = f"{self.bin_dir}{os.pathsep}{env['PATH']}"
+        # Don't let an ambient PREPUSH_HOOK leak into the hook's own environment.
+        env.pop("PREPUSH_HOOK", None)
+        return subprocess.run(
+            [str(HOOK)],
+            cwd=self.path,
+            input=f"refs/heads/{ref} {local_sha} refs/heads/{ref} {remote_sha}\n",
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+
+@pytest.fixture
+def scratch(tmp_path):
+    """A scratch repo on `main` with a CLI at 0.9.0, plus stubbed uv/npm."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("uv", "npm"):
+        shim = bin_dir / tool
+        shim.write_text(NOOP)
+        shim.chmod(0o755)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    s = Scratch(repo, bin_dir)
+    s.git("init", "-q", "-b", "main")
+    s.git("config", "user.email", "test@example.invalid")
+    s.git("config", "user.name", "KAN-484 test")
+    s.git("config", "commit.gpgsign", "false")
+
+    files = {
+        "docs/notes.md": "notes\n",
+        "pandan-cli/pandan_cli/cli.py": "def main():\n    return 0\n",
+        "pandan-cli/pandan_cli/context.py": "CONTEXT = 1\n",
+        "backend/app/main.py": "app = None\n",
+        **_init_version("0.9.0"),
+    }
+    for pkg in PACKAGE_DIRS:
+        files.setdefault(f"{pkg}/.keep", "")
+    base = s.commit("initial", files)
+    s.set_origin_main(base)
+    s.base = base
+    return s
+
+
+def assert_passed(result):
+    assert result.returncode == 0, (
+        "expected the hook to pass, got:\n" + result.stdout + result.stderr
+    )
+    assert "pre-push ▸ OK" in result.stdout
+
+
+def assert_version_guard_fired(result):
+    assert result.returncode == 1, (
+        "expected the version-bump guard to FAIL, got:\n" + result.stdout + result.stderr
+    )
+    assert "changed in this branch but the version did not" in result.stdout, result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Baseline: the guard's two original outcomes on a brand-new branch, which the
+# hook already got right. If these break, the fix broke the easy case.
+# ---------------------------------------------------------------------------
+
+
+def test_new_branch_with_a_bump_passes(scratch):
+    scratch.git("switch", "-q", "-c", BRANCH)
+    tip = scratch.commit(
+        "feat: cli change + bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n", **_init_version("0.10.0")},
+    )
+    result = scratch.push(tip, ZERO)
+    assert_passed(result)
+    assert "version bump present" in result.stdout
+
+
+def test_new_branch_without_a_bump_fails(scratch):
+    scratch.git("switch", "-q", "-c", BRANCH)
+    tip = scratch.commit(
+        "feat: cli change, no bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n"},
+    )
+    assert_version_guard_fired(scratch.push(tip, ZERO))
+
+
+# ---------------------------------------------------------------------------
+# KAN-484: the false positive. Both of these are a SECOND push on a branch that
+# already carries its bump, and both fired before the fix.
+# ---------------------------------------------------------------------------
+
+
+def test_second_push_of_a_merge_commit_passes(scratch):
+    """The reported bug, replaying the real shape of commit 608e2f3.
+
+    Branch bumps to 0.11.0 and pushes. main independently lands a CLI slice that
+    bumps to 0.10.0. Merging main in conflicts on the version line; resolving it
+    the *correct* way — keep the branch's already-higher 0.11.0 — leaves the
+    version files byte-identical on both ends of `remote_sha..local_sha`, so they
+    vanish from the incremental diff while main's pandan_cli/ files stay in it.
+    Incremental range: CLI code changed, version didn't → guard fires. Branch
+    range (what CI evaluates): version bumped → passes.
+    """
+    scratch.git("switch", "-q", "-c", BRANCH)
+    first = scratch.commit(
+        "feat: cli change + bump to 0.11.0",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n", **_init_version("0.11.0")},
+    )
+    assert_passed(scratch.push(first, ZERO))
+
+    # main lands its own CLI slice with its own (lower) bump.
+    scratch.git("switch", "-q", "main")
+    landed = scratch.commit(
+        "feat: another cli slice + bump to 0.10.0",
+        {"pandan-cli/pandan_cli/context.py": "CONTEXT = 2\n", **_init_version("0.10.0")},
+    )
+    scratch.set_origin_main(landed)
+
+    # Merge main into the branch, keeping our higher version on conflict.
+    scratch.git("switch", "-q", BRANCH)
+    merge = subprocess.run(
+        ["git", "merge", "--no-ff", "-m", "Merge origin/main into the branch", landed],
+        cwd=scratch.path,
+        capture_output=True,
+        text=True,
+    )
+    assert merge.returncode != 0, "expected the version line to conflict"
+    scratch.write(_init_version("0.11.0"))
+    scratch.git("add", "-A")
+    scratch.git("commit", "-q", "--no-edit")
+    tip = scratch.git("rev-parse", "HEAD")
+
+    # Pin the shape this test exists for: the incremental range really does show
+    # CLI code and no version file. Without this the test could pass for the
+    # wrong reason (e.g. a merge that never brought CLI code in at all).
+    incremental = scratch.git("diff", "--name-only", first, tip).splitlines()
+    assert "pandan-cli/pandan_cli/context.py" in incremental
+    assert "pandan-cli/pandan_cli/__init__.py" not in incremental
+    assert "pandan-cli/pyproject.toml" not in incremental
+
+    assert_passed(scratch.push(tip, first))
+
+
+def test_second_push_when_the_bump_was_in_an_earlier_push_passes(scratch):
+    """No merge needed: the bump is simply outside the incremental range."""
+    scratch.git("switch", "-q", "-c", BRANCH)
+    first = scratch.commit(
+        "feat: cli change + bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n", **_init_version("0.10.0")},
+    )
+    assert_passed(scratch.push(first, ZERO))
+
+    tip = scratch.commit(
+        "feat: more of the same slice, same version",
+        {"pandan-cli/pandan_cli/context.py": "CONTEXT = 2\n"},
+    )
+    assert_passed(scratch.push(tip, first))
+
+
+# ---------------------------------------------------------------------------
+# Not weakened. These are the assertions a careless fix silently loses.
+# ---------------------------------------------------------------------------
+
+
+def test_second_push_that_adds_cli_code_with_no_bump_anywhere_fails(scratch):
+    """An incremental push must not be a hole in the policy."""
+    scratch.git("switch", "-q", "-c", BRANCH)
+    first = scratch.commit("docs: notes", {"docs/notes.md": "more notes\n"})
+    assert_passed(scratch.push(first, ZERO))
+
+    tip = scratch.commit(
+        "feat: cli change, still no bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n"},
+    )
+    assert_version_guard_fired(scratch.push(tip, first))
+
+
+def test_a_bump_undone_later_in_the_branch_fails(scratch):
+    """Strictly stronger than the old range: the branch, not the last push.
+
+    Push 1 bumps; push 2 puts the version back. The incremental range shows a
+    version file *changed*, so the old logic passed this — but the branch as CI
+    sees it carries CLI changes and no bump, and now so does the hook.
+    """
+    scratch.git("switch", "-q", "-c", BRANCH)
+    first = scratch.commit(
+        "feat: cli change + bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n", **_init_version("0.10.0")},
+    )
+    assert_passed(scratch.push(first, ZERO))
+
+    tip = scratch.commit("oops: revert the bump", _init_version("0.9.0"))
+    assert_version_guard_fired(scratch.push(tip, first))
+
+
+def test_a_branch_that_never_touches_the_cli_is_not_asked_for_a_bump(scratch):
+    scratch.git("switch", "-q", "-c", BRANCH)
+    tip = scratch.commit("feat: backend only", {"backend/app/main.py": "app = 1\n"})
+    result = scratch.push(tip, ZERO)
+    assert_passed(result)
+    assert "version" not in result.stdout.lower()
+
+
+# ---------------------------------------------------------------------------
+# The range/speed decision, pinned: test selection stays incremental while the
+# policy goes branch-wide. If someone "simplifies" the hook to one range, this
+# is the test that says which half they broke.
+# ---------------------------------------------------------------------------
+
+
+def test_test_selection_stays_incremental_while_the_policy_goes_branch_wide(scratch):
+    scratch.git("switch", "-q", "-c", BRANCH)
+    first = scratch.commit(
+        "feat: cli change + bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n", **_init_version("0.10.0")},
+    )
+    assert_passed(scratch.push(first, ZERO))
+
+    tip = scratch.commit("feat: backend only", {"backend/app/main.py": "app = 1\n"})
+    result = scratch.push(tip, first)
+    assert_passed(result)
+    # Test selection: incremental — the CLI suite is NOT re-run for a push that
+    # changed no CLI file, even though the branch touched pandan-cli/.
+    assert "pandan-cli: skipped (no pandan-cli/ changes)" in result.stdout
+    assert "pandan-cli: ruff + tests" not in result.stdout
+    assert "backend: ruff + unit tests" in result.stdout
+    # Policy: branch-wide — still evaluated, and satisfied by the earlier bump.
+    assert "version bump present" in result.stdout
