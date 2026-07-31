@@ -134,10 +134,10 @@ Manage Pandan cards, boards, and epics from the command line. `pandan --help` fo
 https://simple-kanban-jian.fly.dev · board 5 · open cards (todo, in_progress):
 KAN-305	todo	(human) Cloudflare edge setup for prod…	pts=-
 …
-12 cards · 10 todo · 2 in_progress · 0 done · 2 needs-human
 help: pandan list --column todo
 help: pandan next --claim
 help: pandan get <id>
+13 cards · 11 todo · 2 in_progress · 0 done · 1 needs-human
 ```
 
 `--help` still prints the usage text, unchanged. With **no board configured** you get the
@@ -151,6 +151,18 @@ carried forward, runtime values are left for you. They're suppressed under `--js
 `--format toon`, since a structured consumer wants data, not advice. Every hint is tested
 to actually parse against the real parser, which is how a long-standing invalid example
 (`comment add <id> "…"` — the body is `--body`) was caught.
+
+> **Hints print *above* the aggregate, so `tail -1` still gets the aggregate** (KAN-492).
+> V46 originally printed them last, which forced it to withhold hints from **every** list
+> verb — the epilog promises "Every list verb ends with a pre-computed aggregate", and a
+> trailing hint would have broken that. Reversing the order preserves the contract
+> word-for-word *and* lets `pandan list` carry the most useful hint in the tool
+> (`pandan move <id> in_progress`). Two consequences worth knowing: the ordering rule is
+> **forced**, not a preference (above the rows would bury the content, below the aggregate
+> breaks the contract); and `pandan overview` now conforms to the epilog for the first
+> time, since under V46's order it ended on a hint rather than its own aggregate.
+> Hints are still per-verb rather than universal — `label list` / `view list` suggest
+> nothing a caller isn't about to type — so only `list` gained them.
 
 Because a bare invocation makes a network call and this project's backend scales to zero,
 the overview runs on a tighter budget than other verbs (~40 s ceiling rather than the
@@ -419,6 +431,26 @@ carried into the release binary too. **That repo copy is the source of truth** �
 there and re-run `pandan context install --force-skill`, rather than editing
 `~/.claude/skills/…` directly. A locally-modified skill is never overwritten without
 `--force-skill`, and `uninstall` never deletes it.
+
+**`context status` compares against *this build*, and says so honestly** (KAN-505). It used
+to report only two states, which meant an untouched skill was called `locally modified`
+whenever the `pandan` you invoked was simply a release *behind* the copy on disk — and that
+was the damaging direction, because `locally modified` is the state that invites
+`--force-skill`, which would then have **downgraded** the skill to the older packaged copy.
+Now `install` writes an inert build stamp into the installed file (a trailing HTML comment,
+not frontmatter — frontmatter is the harness's metadata contract), and `status` reports:
+
+| state | meaning |
+|---|---|
+| `matches this build` | bodies identical, stamp ignored |
+| installed copy is **newer** | your binary is stale — re-download the release. **Does not** offer `--force-skill` |
+| `locally modified` | same version *and* same commit, body differs — the only case that **proves** a hand edit |
+| no build stamp / ambiguous | says so, and claims **no** direction |
+
+That last row is permanent, not transitional: a stamp can't be retrofitted, so any copy
+installed before this landed stays unstamped forever and honestly reports that local edits
+and a different build are indistinguishable. `--force-skill` still exists as an escape
+hatch, but a downgrade is now **announced** rather than silent.
 
 ### When to reach for `--format toon` (V47, KAN-430)
 
