@@ -11,6 +11,11 @@ Every behavioural test drives the **production tool function** through a mocked
 transport, not the helper in isolation. A test that only exercises
 ``shaping.project`` proves the helper works, not that ``list_cards`` calls it — and
 the seam is where this slice could silently fail.
+
+**KAN-517 (§3b) is the second pass**, over the nine reads KAN-501 documented as
+deliberately left raw. It measured all nine against the real board and extended
+three; the other six are pinned as *still unshaped*, because "shape everything for
+symmetry" is the trade ADR 0019 explicitly rejected.
 """
 from __future__ import annotations
 
@@ -350,13 +355,169 @@ def test_full_defeats_truncation_on_a_narrowed_read(monkeypatch):
     assert out == {"cards": [{"description": CARD["description"]}]}
 
 
+# --- 3b. KAN-517: the second pass over the reads KAN-501 left alone ----------
+
+#: An epic whose description is over the 500-char cut, so the two reads below have
+#: something to disagree about. 651 chars is the real length of EPIC-8 on board 5.
+EPIC = {
+    "id": 8,
+    "ticket_number": "EPIC-8",
+    "name": "M4: Board as an Agent-PM Surface",
+    "description": "d" * 651,
+    "board_id": 5,
+    "health": "on_track",
+    "progress": {"done": 3, "total": 9},
+    "created_at": "2026-07-01T00:00:00Z",
+    "updated_at": "2026-07-02T00:00:00Z",
+}
+
+#: A notification exactly as the inbox returns one. The inbox has no ``limit`` and
+#: no cursor (backend/app/routers/notifications.py:32-44 takes only ``unread``), so
+#: it returns the caller's whole history — 127 rows / ~14,300 tokens when measured,
+#: and only ever growing. That, not its row width, is why it is shaped.
+NOTIFICATION = {
+    "id": 128,
+    "user_id": "c5e6f334-e548-4719-8f43-8460fe1940c9",
+    "board_id": 18,
+    "card_id": 570,
+    "kind": "blocked",
+    "body": "KAN-570 is now blocked by KAN-569",
+    "read_at": None,
+    "created_at": "2026-07-31T18:04:03.968852Z",
+}
+
+BOARD = {
+    "id": 5,
+    "name": "Pandan Roadmap",
+    "owner_id": "c5e6f334-e548-4719-8f43-8460fe1940c9",
+    "autosync_enabled": False,
+    "autosync_advance_to_done": False,
+    "outbound_webhook_url": None,
+    "outbound_webhook_enabled": False,
+    "role": "owner",
+    "created_at": "2026-07-09T08:39:42.126980Z",
+    "updated_at": "2026-07-30T19:50:43.403347Z",
+}
+
+
+def test_get_epic_and_list_epics_agree_about_the_same_epic(monkeypatch):
+    """**The asymmetry KAN-517 exists to fix, pinned as an equality.**
+
+    Before this slice ``list_epics`` truncated an epic's description and ``get_epic``
+    did not: the cheap listing was bounded and the targeted read was not, which is
+    backwards. Asserted as *the two reads return the same string*, not as "get_epic
+    truncates" — an equality cannot drift back apart in either direction, and it is
+    the same internal-consistency shape that made KAN-485 a bug rather than a taste.
+    """
+    _client(monkeypatch, httpx.Response(200, json=[EPIC]))
+    listed = server.list_epics()["epics"][0]["description"]
+
+    _client(monkeypatch, httpx.Response(200, json=EPIC))
+    fetched = server.get_epic(8)["description"]
+
+    assert fetched == listed
+    # …and that the agreed-on value is really the truncated one, so the equality
+    # cannot be satisfied by both reads quietly going back to returning it whole.
+    assert fetched != EPIC["description"]
+    assert f"{len(EPIC['description'])} chars total" in fetched
+
+
+def test_get_epic_full_returns_the_epic_completely_untouched(monkeypatch):
+    """Truncation is only safe because there is a way back to the whole text."""
+    _client(monkeypatch, httpx.Response(200, json=EPIC))
+    assert server.get_epic(8, full=True) == EPIC
+
+
+def test_a_default_get_epic_is_unchanged_key_for_key(monkeypatch):
+    _client(monkeypatch, httpx.Response(200, json=EPIC))
+    assert _keyshape(server.get_epic(8)) == _keyshape(EPIC)
+
+
+def test_the_inbox_narrows_and_keeps_its_envelope(monkeypatch):
+    _client(monkeypatch, httpx.Response(200, json=[NOTIFICATION, {**NOTIFICATION, "id": 129}]))
+    out = server.list_notifications(fields=["id", "kind", "body"])
+    assert out == {
+        "notifications": [
+            {"id": 128, "kind": "blocked", "body": NOTIFICATION["body"]},
+            {"id": 129, "kind": "blocked", "body": NOTIFICATION["body"]},
+        ]
+    }
+
+
+def test_the_inbox_truncates_a_long_body_and_full_restores_it(monkeypatch):
+    """``body`` is an unbounded ``Text`` column (backend/app/models.py:693) even though
+    today's generated one-liners never reach the cut — so the escape hatch is not
+    decoration."""
+    long_body = {**NOTIFICATION, "body": "n" * 900}
+    _client(monkeypatch, httpx.Response(200, json=[long_body]))
+    assert "900 chars total" in server.list_notifications()["notifications"][0]["body"]
+    _client(monkeypatch, httpx.Response(200, json=[long_body]))
+    assert server.list_notifications(full=True) == {"notifications": [long_body]}
+
+
+def test_a_default_inbox_read_is_unchanged_key_for_key(monkeypatch):
+    _client(monkeypatch, httpx.Response(200, json=[NOTIFICATION]))
+    assert server.list_notifications() == {"notifications": [NOTIFICATION]}
+
+
+def test_the_board_list_narrows(monkeypatch):
+    """8 real boards cost 1,157 tokens; ``["id","name"]`` costs 181. Six of a board
+    row's ten keys are autosync/webhook settings a discovery call never reads."""
+    _client(monkeypatch, httpx.Response(200, json=[BOARD, {**BOARD, "id": 6}]))
+    assert server.list_boards(fields=["id", "name"]) == {
+        "boards": [{"id": 5, "name": "Pandan Roadmap"}, {"id": 6, "name": "Pandan Roadmap"}]
+    }
+
+
+def test_a_default_board_list_is_unchanged_key_for_key(monkeypatch):
+    _client(monkeypatch, httpx.Response(200, json=[BOARD]))
+    assert server.list_boards() == {"boards": [BOARD]}
+
+
+def test_the_two_new_envelope_names_are_shape_checked_like_the_others(monkeypatch):
+    """Adding a name to ``_ROW_ENVELOPES`` is not free: any payload carrying that key
+    now *could* be read as a page of rows. The sibling-key check is what stops it, so
+    assert it for the new names specifically — a single object that merely mentions
+    ``boards``/``notifications`` must still be a single object."""
+    assert shaping._envelope({"notifications": [NOTIFICATION]}) == "notifications"
+    assert shaping._envelope({"boards": [BOARD]}) == "boards"
+    assert shaping._envelope({"id": 1, "name": "u", "notifications": [NOTIFICATION]}) is None
+    assert shaping._envelope({"id": 1, "name": "u", "boards": [BOARD]}) is None
+    assert shaping._envelope({"boards": "not-a-list"}) is None
+
+
+def test_the_envelope_set_is_exactly_the_envelopes_a_shaped_tool_returns():
+    """A decision guard, not a correctness one — the sibling of the V49 tool freeze.
+
+    ``_ROW_ENVELOPES`` is a *name* rule, so an entry no shaped tool ever produces can
+    only mis-classify somebody else's payload. KAN-517 measured the nine reads
+    KAN-501 left raw and added exactly two; ``labels``/``views``/``templates``/
+    ``cycles`` measured 7–68 tokens against the real account and were deliberately
+    left out. If you are adding one, measure the payload first.
+    """
+    assert shaping._ROW_ENVELOPES == {
+        "cards", "epics", "activity", "comments", "notifications", "boards",
+    }
+
+
 # --- 4. the advertised schema -----------------------------------------------
 
 #: The reads KAN-501 shapes. ``metrics``/``cycle_metrics`` get ``fields`` but not
 #: ``full``: they carry no free-text field, so a truncation escape hatch there would
 #: be resident tokens advertising a no-op.
-SHAPED_WITH_FULL = ("list_cards", "get_card", "list_epics", "activity", "list_comments")
-SHAPED_FIELDS_ONLY = ("metrics", "cycle_metrics")
+#:
+#: KAN-517 measured the nine reads left raw and extended exactly three of them, each
+#: with the *smallest* argument set that pays for itself: ``list_notifications``
+#: (14,326 tokens, unpaginated) gets both, ``list_boards`` (1,157 → 181) gets
+#: ``fields`` only — a board has no free text — and ``get_epic`` gets ``full`` only,
+#: because its payload is ~200 tokens and the thing wrong with it was never breadth,
+#: it was that it disagreed with ``list_epics`` about truncation.
+SHAPED_WITH_FULL = (
+    "list_cards", "get_card", "list_epics", "activity", "list_comments",
+    "list_notifications",
+)
+SHAPED_FIELDS_ONLY = ("metrics", "cycle_metrics", "list_boards")
+SHAPED_TRUNCATION_ONLY = ("get_epic",)
 
 
 def _schema(name):
@@ -379,15 +540,43 @@ def test_the_shaped_tools_advertise_fields_and_full():
         properties = _schema(name)["properties"]
         assert "fields" in properties
         assert "full" not in properties, f"{name} has no free text — `full` is dead weight"
+    for name in SHAPED_TRUNCATION_ONLY:
+        properties = _schema(name)["properties"]
+        assert properties["full"] == {"default": False, "type": "boolean"}
+        assert "fields" not in properties, (
+            f"{name} was given `fields`; KAN-517 measured its payload at ~200 tokens, "
+            "which does not pay for the resident schema. Measure before you widen it."
+        )
+
+
+def test_the_unshaped_reads_stay_unshaped():
+    """The other side of the same decision. KAN-517's answer for these six was *no*,
+    on measured payloads of 7–474 tokens against a real board — an argument each
+    would cost ~+60 resident to bound a payload that is not expensive, which is the
+    opposite of the trade ADR 0019 endorsed. Shaping one is a decision; make it with
+    numbers, not for symmetry.
+    """
+    unshaped = ("next", "dispatch", "list_labels", "list_views", "list_templates",
+                "list_cycles")
+    # The loop below is a claim about a set, so prove the set is the one measured
+    # before believing what it says: six names, each of which must resolve to a real
+    # tool (``_schema`` raises otherwise).
+    assert len(unshaped) == 6
+    for name in unshaped:
+        properties = _schema(name)["properties"]
+        assert "fields" not in properties and "full" not in properties, (
+            f"{name} grew a shaping argument — measure its payload first "
+            "(scripts/measure_read_payload_tokens.py) and say what it saves."
+        )
 
 
 def test_the_new_arguments_are_optional_everywhere():
     """KAN-501 adds arguments; it must not make an existing call newly invalid."""
-    for name in SHAPED_WITH_FULL + SHAPED_FIELDS_ONLY:
+    for name in SHAPED_WITH_FULL + SHAPED_FIELDS_ONLY + SHAPED_TRUNCATION_ONLY:
         required = _schema(name).get("required", [])
         assert "fields" not in required and "full" not in required
 
 
 def test_the_shaped_schemas_are_still_valid_json():
-    for name in SHAPED_WITH_FULL + SHAPED_FIELDS_ONLY:
+    for name in SHAPED_WITH_FULL + SHAPED_FIELDS_ONLY + SHAPED_TRUNCATION_ONLY:
         json.dumps(_schema(name))

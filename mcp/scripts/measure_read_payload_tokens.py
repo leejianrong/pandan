@@ -67,6 +67,12 @@ NARROW_FIELDS: dict[str, list[str]] = {
     "list_epics": ["ticket_number", "name", "progress", "health"],
     "activity": ["ts", "actor_label", "action", "summary"],
     "metrics": ["throughput", "cycle_time"],
+    # KAN-517's two additions. `list_notifications` is the one that mattered: the
+    # inbox takes no `limit` and returns no cursor (backend/app/routers/
+    # notifications.py:32-44), so it hands back the caller's entire history and only
+    # grows — 127 rows measured at 14,326 tokens, 1.8× the whole resident surface.
+    "list_notifications": ["id", "kind", "body"],
+    "list_boards": ["id", "name"],
 }
 
 #: Envelope key each captured read must carry, so a capture that silently returned
@@ -78,6 +84,8 @@ EXPECTED_ENVELOPE: dict[str, str | None] = {
     "list_epics": "epics",
     "activity": "activity",
     "metrics": None,
+    "list_notifications": "notifications",
+    "list_boards": "boards",
 }
 
 
@@ -144,6 +152,11 @@ def capture(out: Path, board_id: int, credentials: Path | None) -> None:
         "list_epics": lambda: client.list_epics(board_id=board_id),
         "activity": lambda: client.list_activity(board_id, limit=20),
         "metrics": lambda: client.board_metrics(board_id),
+        # Neither of these is board-scoped: the inbox is per-user and the board list
+        # is the account's. Captured here anyway because they are read tools whose
+        # payload this measures, and the ``--board`` argument simply does not apply.
+        "list_notifications": lambda: client.list_notifications(),
+        "list_boards": lambda: client.list_boards(),
     }
     captured: dict[str, Any] = {}
     for name, call in reads.items():
@@ -191,7 +204,7 @@ def measure(fixture: dict[str, Any], enc) -> None:
     reads = fixture["reads"]
     print(f"MCP read-result cost, o200k_base tokens (board {fixture['board_id']})")
     header = (
-        f"{'read':12s} {'rows':>5s} {'BEFORE':>9s} {'default':>9s} "
+        f"{'read':19s} {'rows':>5s} {'BEFORE':>9s} {'default':>9s} "
         f"{'narrowed':>9s} {'saving':>8s}"
     )
     print(header)
@@ -215,13 +228,13 @@ def measure(fixture: dict[str, Any], enc) -> None:
         totals["narrowed"] += narrowed
         pct = (narrowed - before) / before * 100
         print(
-            f"{name:12s} {_rows(payload, name):5d} {before:9d} {default:9d} "
+            f"{name:19s} {_rows(payload, name):5d} {before:9d} {default:9d} "
             f"{narrowed:9d} {pct:7.0f}%"
         )
     pct = (totals["narrowed"] - totals["before"]) / totals["before"] * 100
     print("-" * len(header))
     print(
-        f"{'TOTAL':12s} {'':5s} {totals['before']:9d} {totals['default']:9d} "
+        f"{'TOTAL':19s} {'':5s} {totals['before']:9d} {totals['default']:9d} "
         f"{totals['narrowed']:9d} {pct:7.0f}%"
     )
 
