@@ -4,7 +4,7 @@
   document) have both landed. Nothing was removed and no tool was renamed.
 - **Date:** 2026-07-31 · **amended 2026-08-01 (KAN-518)** — the resident measurement omitted
   `outputSchema` silently; it is now measured as its own bracketed row, deliberately kept out of the
-  headline, and deliberately **not** compacted. See [*The third field*](#the-third-field-outputschema-kan-518).
+  headline, and deliberately **not** compacted. See [*The fourth field*](#the-fourth-field-outputschema-kan-518).
   Superseded figures below are annotated, not deleted.
 - **Context source:** Milestone 7 ("Name & Sharpen the Tools"), slice **V49** / **KAN-432**, shaped
   requirement **R3.1** (measure the schema token cost of the tool surface and of each alternative) and
@@ -67,7 +67,7 @@ Pydantic→JSON-Schema serializer and any per-tool framing overhead is counted t
 > **Amended 2026-08-01 (KAN-518): this unit counts three of a `tools/list` entry's four fields, not
 > all of them.** A tool definition also carries an **`outputSchema`**, which every figure in this
 > section excludes. That is a defensible choice and it is now an explicit one — see
-> [*The third field*](#the-third-field-outputschema-kan-518) below for the measurement, the bracket,
+> [*The fourth field*](#the-fourth-field-outputschema-kan-518) below for the measurement, the bracket,
 > and why it stays out of the headline. Before KAN-518 a reader had no way to know the field existed.
 
 > **Amended 2026-08-01 (KAN-518): the two rows below are a V49-era snapshot, and re-running the
@@ -112,7 +112,7 @@ saving is available under **any** option and requires no surface change, no rena
 migration — it is measured as its own row above precisely to separate *hygiene* savings from *surface*
 savings.
 
-### The third field: `outputSchema` (KAN-518)
+### The fourth field: `outputSchema` (KAN-518)
 
 *Added 2026-08-01. Measured at `6c87260`, the tip of `main` after KAN-517.*
 
@@ -129,7 +129,7 @@ return annotation. All 49 are the identical three-key object:
 
 **The measurement, as its own bracketed row — deliberately not folded into the headline:**
 
-| surface | tools | `outputSchema` alone, compact | alone, `indent=2` | all three fields, compact | all three, `indent=2` |
+| surface | tools | `outputSchema` alone, compact | alone, `indent=2` | all four fields, compact | all four, `indent=2` |
 |---|---:|---:|---:|---:|---:|
 | **49 typed tools, as shipped** | **49** | **836** | **1,277** | **9,145** | **12,919** |
 | (a) one tool per entity + `action` | 11 | 179 | 278 | 4,550 | 7,027 |
@@ -412,7 +412,7 @@ be superseded by one that takes it.
   > stale — re-run `mcp/scripts/measure_tool_schema_tokens.py` rather than copying a number forward.
   >
   > **And this figure is `input_schema`-only** — a client that also forwards `outputSchema` pays
-  > **9,145** compact. See [*The third field*](#the-third-field-outputschema-kan-518).
+  > **9,145** compact. See [*The fourth field*](#the-fourth-field-outputschema-kan-518).
 - **Negative / deferred:** the expensive problem is *named but not fixed* by this slice. Until the
   `fields` follow-up lands, an agent that calls `mcp__pandan__list_cards` on a busy board still burns
   ~45k tokens in one result, and the mitigation is advice ("prefer the CLI") rather than a mechanism.

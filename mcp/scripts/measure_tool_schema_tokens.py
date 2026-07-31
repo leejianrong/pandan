@@ -21,15 +21,16 @@ Method
   number, and at ``indent=2`` as an upper bracket, because the client's exact
   framing is not observable from here and pretty-printing costs ~46% more.
 * **What is counted SEPARATELY, and why** (KAN-518). A ``tools/list`` entry has a
-  *third* schema field, ``outputSchema``, which the headline unit above does not
-  include. That omission is deliberate but was undocumented until KAN-518: the
-  headline unit is "what a client puts in the **model's context**", and whether
+  *fourth* field, ``outputSchema`` — the second of its two schemas — which the
+  headline unit above does not include. That omission is deliberate but went
+  undocumented until KAN-518: the headline unit is "what a client puts in the
+  **model's context**", and whether
   ``outputSchema`` lands there is not observable from inside the server — the
   Anthropic Messages API tool definition has no ``output_schema`` field at all, so
   a bridging client has nowhere to put it, while an MCP-native client may well
   forward it. Rather than guess, :func:`measure_output_schemas` reports it as its
-  own bracketed row: alone, and as the ceiling where a client forwards all three
-  fields. Do **not** fold it into the headline — see ADR 0019, *The third field*.
+  own bracketed row: alone, and as the ceiling where a client forwards all four
+  fields. Do **not** fold it into the headline — see ADR 0019, *The fourth field*.
 * **The alternatives are built with FastMCP too**, not hand-written JSON, so
   options (a) and (b) go through the identical Pydantic→JSON-Schema serializer
   as the live surface. Any per-tool framing overhead is therefore counted the
@@ -105,7 +106,7 @@ def measure(payloads: list[dict[str, Any]], enc) -> dict[str, int]:
 
 
 def output_schemas(server: FastMCP) -> list[dict[str, Any] | None]:
-    """Each tool's ``outputSchema`` — the third field of a ``tools/list`` entry.
+    """Each tool's ``outputSchema`` — the fourth field of a ``tools/list`` entry.
 
     FastMCP generates one from the return annotation; for every pandan tool
     (``-> dict[str, Any]``) that is the same three-key object with a Pydantic
@@ -131,7 +132,7 @@ def measure_output_schemas(
     * ``alone_*`` — the ``outputSchema`` objects on their own, i.e. what a client
       that forwards them adds on top of the headline.
     * ``combined_*`` — the headline payload with ``output_schema`` spliced in as a
-      fourth key, i.e. the ceiling for a client that forwards all three fields
+      fourth key, i.e. the ceiling for a client that forwards all four keys
       (this is slightly more than ``headline + alone``, because the extra key name
       and separators are counted too).
     """
@@ -512,13 +513,13 @@ def main() -> None:
     print(f"  tool names           {cur['names']:6d}")
 
     print()
-    print("outputSchema — the THIRD field of a tools/list entry, NOT in the table above.")
+    print("outputSchema — the FOURTH field of a tools/list entry, NOT in the table above.")
     print("Whether a client forwards it into the model's context is not observable from")
     print("here (the Anthropic Messages API tool definition has no output_schema field),")
     print("so it is bracketed on its own rather than folded into the headline. KAN-518.")
     print(
         f"{'surface':38s} {'n':>3s} {'alone-c':>8s} {'alone-i2':>8s} "
-        f"{'all3-c':>8s} {'all3-i2':>8s}"
+        f"{'all4-c':>8s} {'all4-i2':>8s}"
     )
     print("-" * 78)
     for name, row in output_rows.items():

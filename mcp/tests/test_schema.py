@@ -362,7 +362,7 @@ def test_the_advertised_output_schema_is_the_object_the_server_validates_against
     for tool in mcp._tool_manager.list_tools():
         assert tool.output_schema is tool.fn_metadata.output_schema, (
             f"{tool.name}: the advertised and validating output schemas are no "
-            "longer the same object — re-read ADR 0019 § The third field (KAN-518)"
+            "longer the same object — re-read ADR 0019 § The fourth field (KAN-518)"
         )
 
 
@@ -380,7 +380,7 @@ def test_compaction_leaves_output_schemas_untouched():
     for tool in _tools():
         assert "title" in tool.outputSchema, (
             f"{tool.name}: its outputSchema title was stripped. ADR 0019 § The "
-            "third field (KAN-518) decided NOT to compact outputSchema — reversing "
+            "fourth field (KAN-518) decided NOT to compact outputSchema — reversing "
             "that is an ADR amendment, not a cleanup."
         )
         # ...and the assertion above is not vacuous: the compaction rule *would*
