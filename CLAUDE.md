@@ -30,9 +30,19 @@ schema per session, shipped at **7,388** (compact; 10,307 pretty-printed) after
 [ADR 0019](docs/adr/0019-mcp-surface-right-sizing.md) — **keep the breadth, freeze its growth** —
 because the resident cost turned out to be the *small* half of the problem: one un-narrowed
 `list_cards` against the real board returns ~45k tokens, 5× the whole schema surface, and per task the
-CLI was ~11× cheaper. **That gap is now largely closed from the MCP side** (KAN-501): every read tool
-takes `fields` + `full`, worth **−82% across five real reads** for **+552 resident tokens** (so the
-resident figure is now **7,940**). Both measurements are re-runnable —
+CLI was ~11× cheaper. **That gap is now largely closed from the MCP side** (KAN-501): the reads where
+the tokens measurably were take `fields` + `full`, worth **−82% across five real reads** for **+552
+resident tokens**. **KAN-517** then measured the nine reads KAN-501 left raw and extended exactly three
+more — `list_notifications` (an unpaginated inbox: 14,326 tokens over 127 rows), `list_boards` and
+`get_epic` — for a further +222, so the resident figure is now **8,162**. The other six stay raw *on
+measurement*, at 7–474 tokens each: shaping a small payload is the opposite of the trade ADR 0019
+endorsed, and a test pins them that way. That figure counts `{name, description, input_schema}` per
+tool; a `tools/list` entry also carries an **`outputSchema`** worth a further **836** compact if your
+client forwards it — measured and bracketed separately in
+[ADR 0019](docs/adr/0019-mcp-surface-right-sizing.md) § *The fourth field* (KAN-518), deliberately not
+folded into the headline and deliberately **not** compacted, because unlike `inputSchema` the advertised
+`outputSchema` is the very object the SDK validates every tool result against.
+Both measurements are re-runnable —
 `mcp/scripts/measure_tool_schema_tokens.py` for the resident schema,
 `mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The 49-tool surface is pinned by
 `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit** (adding an
