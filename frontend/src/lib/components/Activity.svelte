@@ -4,7 +4,10 @@
   // write path via GET /api/v1/boards/{id}/activity. Board-scoped: it (re)loads
   // whenever the active board changes. Modelled on the Members / Tokens views.
   import {
+    AlertTriangle,
     ArrowLeftRight,
+    Check,
+    Flame,
     Plus,
     Pencil,
     RefreshCw,
@@ -27,14 +30,22 @@
     refetchActivity();
   });
 
-  // Per-action icon + colour token, so the feed is scannable at a glance.
-  const ICONS = {
+  // Per-action icon + colour token, so the feed is scannable at a glance. Covers
+  // the full backend vocabulary (models.py VALID_ACTIVITY_ACTIONS) — the Record
+  // type keeps this exhaustive, so a new action can't slip through as a blank chip.
+  // attention/resolved reuse Dashboard.svelte's icons; purged (permanent
+  // destruction) gets Flame + a filled-danger chip, reading as more final than the
+  // soft-danger `deleted`.
+  const ICONS: Record<ActivityAction, typeof Plus> = {
     created: Plus,
     updated: Pencil,
     moved: ArrowLeftRight,
     deleted: Trash2,
     restored: RotateCcw,
-  } as const;
+    attention: AlertTriangle,
+    resolved: Check,
+    purged: Flame,
+  };
 
   function actorInitial(label: string | null): string {
     return (label?.trim()?.charAt(0) ?? "?").toUpperCase();
@@ -163,10 +174,22 @@
     flex: none;
     margin-top: 0.05rem;
   }
-  /* Colour the chip by action, staying inside the Graphite / Zinc & Teal palette. */
-  .feed-icon[data-action="deleted"] {
+  /* Colour the chip by action, staying inside the Graphite / Zinc & Teal palette.
+     Matches Dashboard.svelte's feed so the two surfaces read the same. */
+  .feed-icon[data-action="deleted"],
+  .feed-icon[data-action="attention"] {
     background: var(--danger-soft);
     color: var(--danger);
+  }
+  /* purged = permanent destruction: a filled-danger chip, more final than the
+     soft-danger `deleted`. */
+  .feed-icon[data-action="purged"] {
+    background: var(--danger);
+    color: #fff;
+  }
+  .feed-icon[data-action="resolved"] {
+    background: color-mix(in srgb, var(--success) 16%, transparent);
+    color: var(--success);
   }
   .feed-icon[data-action="created"],
   .feed-icon[data-action="restored"] {

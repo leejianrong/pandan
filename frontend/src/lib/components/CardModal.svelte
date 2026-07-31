@@ -25,12 +25,56 @@
     removeCardLink,
   } from "../board.svelte";
   import { session } from "../session.svelte";
+  import { marked } from "marked";
+  import DOMPurify from "dompurify";
   import Modal from "./Modal.svelte";
+  import { Select } from "./ui";
+
+  // --- Markdown description (render sanitized; edit raw) -------------------
+  // We {@html} user-authored text, so sanitizing is MANDATORY (XSS). marked
+  // turns the raw markdown into HTML; DOMPurify then strips anything outside a
+  // deliberately narrow allow-list — no <script>, no event handlers, no raw
+  // HTML passthrough — which also keeps us clean under the report-only CSP.
+  marked.setOptions({ gfm: true, breaks: true });
+
+  // Force every surviving link to open isolated in a new tab; DOMPurify already
+  // blocks javascript:/data: URIs, and ALLOWED_URI_REGEXP below double-locks the
+  // scheme to http(s)/mailto/in-page anchors.
+  DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+    if (node.tagName === "A") {
+      node.setAttribute("target", "_blank");
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+
+  const MD_SANITIZE = {
+    ALLOWED_TAGS: [
+      "p", "br", "hr", "strong", "em", "del", "a",
+      "ul", "ol", "li", "code", "pre", "blockquote",
+      "h1", "h2", "h3", "h4", "h5", "h6",
+    ],
+    ALLOWED_ATTR: ["href", "title", "target", "rel"],
+    ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|#)/i,
+  };
+
+  function renderMarkdown(src: string): string {
+    const html = marked.parse(src, { async: false }) as string;
+    return DOMPurify.sanitize(html, MD_SANITIZE);
+  }
 
   // The card is read live from the store by id (not a snapshot): every mutation
   // refetches board state, and this modal must reflect the fresh card without
   // being reopened. If the card vanishes (deleted elsewhere), close.
-  let { cardId, onclose }: { cardId: number; onclose: () => void } = $props();
+  // `editFocus` (V36, KAN-300): when opened via the `e` keyboard shortcut, focus +
+  // select the title input on mount so the card lands ready to edit (vs. `o`/Enter,
+  // which open it with focus on the Close button, the Modal's default).
+  let {
+    cardId,
+    onclose,
+    editFocus = false,
+  }: { cardId: number; onclose: () => void; editFocus?: boolean } = $props();
+
+  let titleInput = $state<HTMLInputElement | undefined>();
 
   const card = $derived(cardById(cardId));
   $effect(() => {
@@ -75,8 +119,34 @@
   let submitting = $state(false);
   let error = $state<string | null>(null);
 
+  // Description shows rendered markdown by default when there's something to
+  // read, dropping into the raw editor on demand (or immediately for a blank
+  // card). The raw `description` string is what's bound + submitted; the toggle
+  // only changes how it's presented.
+  let descMode = $state<"edit" | "preview">(
+    initial.desc.trim() ? "preview" : "edit",
+  );
+
   const epicOptions = $derived(epicStore.epics);
   const labelOptions = $derived(labelStore.labels);
+
+  // Option lists for the standardized Select primitives.
+  const statusOptions = COLUMNS.map((c) => ({ value: c.key, label: c.label }));
+  const pointOptions = [
+    { value: "", label: "— unestimated" },
+    ...STORY_POINTS.map((p) => ({ value: String(p), label: String(p) })),
+  ];
+  const priorityOptions = PRIORITIES.map((p) => ({
+    value: p,
+    label: p === "none" ? "— none" : p,
+  }));
+  const epicSelectOptions = $derived([
+    { value: "", label: "— no epic" },
+    ...epicOptions.map((e) => ({
+      value: String(e.id),
+      label: `${e.ticket_number} · ${e.name}`,
+    })),
+  ]);
 
   function toggleLabel(id: number) {
     labelIds = labelIds.includes(id)
@@ -91,12 +161,11 @@
 
   // --- Status → move (dedicated endpoint, immediate) ----------------------
   let moving = $state(false);
-  async function onStatusChange(e: Event) {
-    const next = (e.currentTarget as HTMLSelectElement).value as Column;
+  async function onStatusChange(next: string) {
     if (!card || next === card.column) return;
     moving = true;
     try {
-      await moveCard(card.id, { column: next });
+      await moveCard(card.id, { column: next as Column });
     } finally {
       moving = false;
     }
@@ -116,7 +185,16 @@
   const blocks = $derived(
     card ? card.blocks.map((id) => cardById(id)) : [],
   );
-  let addBlockerId = $state<string>("");
+  const blockerOptions = $derived([
+    {
+      value: "",
+      label: blockerCandidates.length === 0 ? "— no cards to add" : "— add a blocker",
+    },
+    ...blockerCandidates.map((c) => ({
+      value: String(c.id),
+      label: `${c.ticket_number} · ${c.title}`,
+    })),
+  ]);
   let depBusy = $state(false);
   let depError = $state<string | null>(null);
 
@@ -129,7 +207,6 @@
     } catch (e) {
       depError = e instanceof Error ? e.message : "Failed to add blocker";
     } finally {
-      addBlockerId = "";
       depBusy = false;
     }
   }
@@ -199,6 +276,12 @@
     }
   }
   onMount(loadComments);
+  onMount(() => {
+    if (editFocus) {
+      titleInput?.focus();
+      titleInput?.select();
+    }
+  });
 
   const canPostComment = $derived(newComment.trim().length > 0 && !commentBusy);
   async function onPostComment() {
@@ -333,17 +416,47 @@
               placeholder="Title (required)"
               aria-label="Title"
               bind:value={title}
+              bind:this={titleInput}
             />
-            <span class="field-label">Description</span>
-            <textarea
-              class="desc-input"
-              placeholder="Description (optional)"
-              rows="4"
-              bind:value={description}
-            ></textarea>
+            <div class="desc-head">
+              <span class="field-label">Description</span>
+              <div class="desc-toggle" role="group" aria-label="Description mode">
+                <button
+                  type="button"
+                  class="desc-tab"
+                  class:active={descMode === "edit"}
+                  aria-pressed={descMode === "edit"}
+                  onclick={() => (descMode = "edit")}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  class="desc-tab"
+                  class:active={descMode === "preview"}
+                  aria-pressed={descMode === "preview"}
+                  onclick={() => (descMode = "preview")}
+                >
+                  Preview
+                </button>
+              </div>
+            </div>
+            {#if descMode === "edit"}
+              <textarea
+                class="desc-input"
+                placeholder="Description (optional) — Markdown supported"
+                rows="10"
+                bind:value={description}
+              ></textarea>
+            {:else if description.trim()}
+              <!-- Sanitized markdown: renderMarkdown() runs marked + DOMPurify. -->
+              <div class="desc-rendered markdown-body">{@html renderMarkdown(description)}</div>
+            {:else}
+              <p class="desc-empty">No description yet.</p>
+            {/if}
 
             <div class="notes">
-              <span class="field-label">Notes &amp; activity</span>
+              <span class="field-label">Comments</span>
               {#if commentsLoaded && comments.length > 0}
                 <ul class="comment-list">
                   {#each comments as c (c.id)}
@@ -356,8 +469,8 @@
                             <button
                               type="button"
                               class="icon-btn danger"
-                              title="Delete note"
-                              aria-label="Delete note"
+                              title="Delete comment"
+                              aria-label="Delete comment"
                               disabled={commentBusy}
                               onclick={() => onDeleteComment(c.id)}
                             >
@@ -371,12 +484,12 @@
                   {/each}
                 </ul>
               {:else if commentsLoaded}
-                <p class="comment-empty">No notes yet.</p>
+                <p class="comment-empty">No comments yet.</p>
               {/if}
               <div class="row comment-add">
                 <input
                   type="text"
-                  placeholder="Add a note…"
+                  placeholder="Add a comment…"
                   bind:value={newComment}
                   disabled={commentBusy}
                 />
@@ -391,56 +504,43 @@
           <aside class="modal-rail">
             <div class="rail-field">
               <span class="field-label">Status</span>
-              <select
-                class="rail-select"
+              <Select
                 aria-label="Status"
                 value={card.column}
+                options={statusOptions}
                 disabled={moving}
-                onchange={onStatusChange}
-              >
-                {#each COLUMNS as col (col.key)}
-                  <option value={col.key}>{col.label}</option>
-                {/each}
-              </select>
+                onValueChange={onStatusChange}
+              />
             </div>
 
             <div class="rail-field">
               <span class="field-label">Story points</span>
-              <select class="rail-select" bind:value={storyPoints} aria-label="Story points">
-                <option value="">— unestimated</option>
-                {#each STORY_POINTS as p}
-                  <option value={String(p)}>{p}</option>
-                {/each}
-              </select>
+              <Select bind:value={storyPoints} options={pointOptions} aria-label="Story points" />
             </div>
 
             <div class="rail-field">
               <span class="field-label">Assignee</span>
-              <input type="text" placeholder="Assignee" bind:value={assignee} />
+              <input type="text" class="ui-input" placeholder="Assignee" bind:value={assignee} aria-label="Assignee" />
             </div>
 
             <div class="rail-field">
               <span class="field-label">Epic</span>
-              <select class="rail-select" bind:value={epicId} aria-label="Epic">
-                <option value="">— no epic</option>
-                {#each epicOptions as e (e.id)}
-                  <option value={String(e.id)}>{e.ticket_number} · {e.name}</option>
-                {/each}
-              </select>
+              <Select bind:value={epicId} options={epicSelectOptions} aria-label="Epic" />
             </div>
 
             <div class="rail-field">
               <span class="field-label">Priority</span>
-              <select class="rail-select" bind:value={priority} aria-label="Priority">
-                {#each PRIORITIES as p}
-                  <option value={p}>{p === "none" ? "— none" : p}</option>
-                {/each}
-              </select>
+              <Select
+                value={priority}
+                options={priorityOptions}
+                onValueChange={(v) => (priority = v as Priority)}
+                aria-label="Priority"
+              />
             </div>
 
             <div class="rail-field">
               <span class="field-label">Due date</span>
-              <input type="date" bind:value={dueDate} aria-label="Due date" />
+              <input type="date" class="ui-input" bind:value={dueDate} aria-label="Due date" />
             </div>
 
             <div class="rail-field">
@@ -489,20 +589,15 @@
                   {/each}
                 </ul>
               {/if}
-              <select
-                class="rail-select"
-                bind:value={addBlockerId}
+              <Select
+                value=""
+                options={blockerOptions}
                 aria-label="Add blocker"
                 disabled={depBusy || blockerCandidates.length === 0}
-                onchange={() => onAddBlocker(addBlockerId)}
-              >
-                <option value="">
-                  {blockerCandidates.length === 0 ? "— no cards to add" : "— add a blocker"}
-                </option>
-                {#each blockerCandidates as c (c.id)}
-                  <option value={String(c.id)}>{c.ticket_number} · {c.title}</option>
-                {/each}
-              </select>
+                onValueChange={(v) => {
+                  if (v) onAddBlocker(v);
+                }}
+              />
               {#if depError}
                 <p class="form-error" role="alert">{depError}</p>
               {/if}

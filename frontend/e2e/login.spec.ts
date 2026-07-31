@@ -51,14 +51,19 @@ test("logged out → sign in → board (survives reload) → log out → landing
   // Sign in → back to the app → the board.
   await signIn.click();
   await expect(page.getByRole("heading", { name: "Todo", exact: true })).toBeVisible();
+  // The signed-in email now lives inside the avatar dropdown menu (KAN-319/U4),
+  // not inline in the top bar — open the menu to reveal it, then dismiss it.
+  await page.getByRole("button", { name: "Account menu" }).click();
   await expect(page.getByText(E2E_USER.email)).toBeVisible();
+  await page.keyboard.press("Escape");
 
   // The session survives a full reload.
   await page.reload();
   await expect(page.getByRole("heading", { name: "Todo", exact: true })).toBeVisible();
 
-  // Log out → back to the landing.
-  await page.getByRole("button", { name: "Log out" }).click();
+  // Log out via the avatar menu → back to the landing.
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Log out" }).click();
   await expect(page.getByRole("button", { name: /Sign in with GitHub/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Todo", exact: true })).toHaveCount(0);
 });

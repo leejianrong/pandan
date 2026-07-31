@@ -13,20 +13,23 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Response, status
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Request, Response, status
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db import get_db
 from .observability import add_request_logging, configure_logging, init_error_tracking
+from .ratelimit import install_rate_limiting
 from .routers import (
     boards,
     cards,
+    cycles,
     epics,
     labels,
     members,
+    notifications,
     templates,
     tokens,
     views,
@@ -42,10 +45,119 @@ init_error_tracking()
 
 logger = logging.getLogger("kanban.health")
 
-app = FastAPI(title="Simple Kanban API", version="0.1.0")
+
+# --- Payload hardening: request body-size ceiling (V28, KAN-292) -----------
+# Reject an over-large request by its declared Content-Length *before* the body is
+# read or a route runs, so a giant upload can't buffer into the 256 MB box. String
+# and array caps live in schemas.py (per-field). The ceiling is env-tunable with a
+# generous default — normal JSON payloads are kilobytes, far below it.
+def _max_body_bytes() -> int:
+    try:
+        value = int(os.environ["MAX_REQUEST_BODY_BYTES"])
+    except (KeyError, ValueError):
+        return 2_000_000  # ~2 MB
+    return value if value > 0 else 2_000_000
+
+
+MAX_REQUEST_BODY_BYTES = _max_body_bytes()
+
+
+def install_body_size_limit(app: FastAPI) -> None:
+    """Middleware that 413s a request whose declared ``Content-Length`` exceeds the
+    ceiling. Header-only (no body buffering) so the rejection is cheap and early."""
+
+    @app.middleware("http")
+    async def _limit_body_size(request: Request, call_next):  # pyright: ignore[reportUnusedFunction]
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                declared = int(content_length)
+            except ValueError:
+                declared = None
+            if declared is not None and declared > MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    content={
+                        "detail": (
+                            "Request body too large "
+                            f"(limit {MAX_REQUEST_BODY_BYTES} bytes)."
+                        )
+                    },
+                )
+        return await call_next(request)
+
+
+# --- Security headers (V29, KAN-293) ---------------------------------------
+# Single-origin app (FastAPI serves the SPA + /docs from one host), so the CSP is
+# tractable: everything is 'self' plus the inline scripts/styles the SPA and Swagger
+# UI use.
+#
+# CSP ships as **Content-Security-Policy-Report-Only** first: browsers evaluate it
+# and log violations to the console but do NOT block anything, so it cannot break the
+# SPA or /docs (Swagger UI loads its bundle from a CDN + uses inline script/style).
+# Watch prod consoles for report-only violations; once clean, flip to enforcing by
+# renaming the header to ``Content-Security-Policy`` (and, for /docs, either
+# self-host the Swagger assets or add the CDN host + relax to allow it).
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "object-src 'none'"
+)
+
+
+def install_security_headers(app: FastAPI) -> None:
+    """Set defensive response headers on every response (API, SPA, /docs, and error
+    responses alike). Registered outermost so it also covers a rate-limit 429 and
+    HTTPException responses. ``setdefault`` so a route that sets its own wins."""
+
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):  # pyright: ignore[reportUnusedFunction]
+        response = await call_next(request)
+        headers = response.headers
+        # HTTPS is enforced at the Fly edge (force_https); browsers ignore HSTS over
+        # plain http, so setting it unconditionally is safe for dev/tests.
+        headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+        headers.setdefault("X-Content-Type-Options", "nosniff")
+        headers.setdefault("X-Frame-Options", "DENY")
+        headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        headers.setdefault("Content-Security-Policy-Report-Only", _CSP)
+        return response
+
+
+app = FastAPI(title="Pandan API", version="0.1.0")
+
+# Middleware registration order matters: Starlette runs the *last-registered*
+# middleware outermost. We want security headers outermost (they must decorate every
+# response, including a 429/413/4xx), the access logger just inside it (so those
+# rejections still get logged), then the body-size + rate-limit guards.
+
+# Rate limiting (V27, KAN-291): one classifying middleware over slowapi's in-memory
+# limiter, guarding auth/write/expensive-read/webhook tiers. Off unless
+# RATE_LIMIT_ENABLED is set, so dev + tests are unaffected.
+install_rate_limiting(app)
+
+# Payload hardening (V28, KAN-292): reject an over-large Content-Length with 413,
+# early (before the route reads the body). String/array caps live in schemas.py.
+install_body_size_limit(app)
 
 # One structured access line per request (method/path/status/latency/principal).
+# Registered after the guards above so it stays outermost of them and a 413/429 is
+# still logged.
 add_request_logging(app)
+
+# Security headers (V29, KAN-293): HSTS/CSP(report-only)/nosniff/frame/referrer on
+# every response. Registered last → outermost, so it also decorates rate-limit 429s
+# and HTTPException error responses.
+install_security_headers(app)
 
 # Mount each router under the canonical versioned prefix /api/v1/... (P3,
 # spike-p3-versioning.md). The temporary /api compat alias that eased the V2
@@ -58,7 +170,9 @@ app.include_router(epics.router, prefix="/api/v1")
 app.include_router(labels.router, prefix="/api/v1")  # M5 V11 (KAN-244): card labels
 app.include_router(views.router, prefix="/api/v1")  # M5 V14 (KAN-247): saved views
 app.include_router(templates.router, prefix="/api/v1")  # M5 V19 (KAN-252): card templates
+app.include_router(cycles.router, prefix="/api/v1")  # V33 (KAN-297): cycles / iterations
 app.include_router(tokens.router, prefix="/api/v1")  # M3 V9 (ADR 0014): agent PATs
+app.include_router(notifications.router, prefix="/api/v1")  # V37 (KAN-301): inbox
 # GitHub webhook receiver (KAN-42): standalone — auth is the HMAC signature, NOT
 # the cookie/PAT principal resolver, so it is intentionally not owner-gated.
 app.include_router(webhooks.router, prefix="/api/v1")

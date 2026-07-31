@@ -4,6 +4,7 @@ import {
   cleanupE2eBoards,
   createCard,
   openFreshBoard,
+  pickSelect,
   uniqueTitle,
 } from "./helpers";
 
@@ -36,9 +37,7 @@ test("add a blocker, see the blocked badge, then remove it", async ({ page }) =>
   await blockedCard.getByRole("button", { name: "Edit" }).click();
   const form = page.locator(".card-form");
   await expect(form).toBeVisible();
-  await form
-    .getByLabel("Add blocker")
-    .selectOption({ label: `${blockerTicket} · ${blockerTitle}` });
+  await pickSelect(page, form, "Add blocker", `${blockerTicket} · ${blockerTitle}`);
 
   // The edge takes effect immediately (server-authoritative refetch): the form's
   // blocker list now lists it.

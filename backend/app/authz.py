@@ -33,7 +33,7 @@ from .auth import bearer_scheme
 from .auth_models import PersonalAccessToken, User
 from .db import get_db
 from .models import Board, BoardMember
-from .tokens import TOKEN_PREFIX, hash_token
+from .tokens import ACCEPTED_TOKEN_PREFIXES, hash_token
 from .users import current_optional_user
 
 
@@ -81,8 +81,11 @@ def _resolve_pat(db: Session, raw: str) -> User | None:
     access — a human cookie principal has no such attribute (→ full access).
     """
     # Fast-path skip: only strings minted by us can match, so a stray bearer never
-    # triggers a DB round-trip.
-    if not raw.startswith(TOKEN_PREFIX):
+    # triggers a DB round-trip. The tuple includes prefixes retired by a rebrand
+    # (V40, KAN-423) — a PAT issued as ``kanban_pat_…`` must keep working, and this
+    # guard is the *only* place a prefix change could have invalidated one. The
+    # actual verification below is still a hash lookup over the whole raw token.
+    if not raw.startswith(ACCEPTED_TOKEN_PREFIXES):
         return None
     pat = db.scalars(
         select(PersonalAccessToken).where(

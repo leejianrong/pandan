@@ -16,6 +16,22 @@ primary_region = "iad"
   min_machines_running = 0
   processes = ["app"]
 
+  # Load-shedding for the single 256MB shared-cpu-1x box (V26, KAN-290). Fly's
+  # proxy counts concurrent in-flight requests per machine and queues/503s past
+  # hard_limit BEFORE uvicorn accepts them, so a burst is shed at the edge
+  # instead of piling up connections until the box OOM-kills the process. This
+  # is a coarse machine-level backstop; per-tier/per-IP fairness lives in the
+  # app rate limiter (V27, RATE_LIMIT_*). Conservative numbers for 256MB: the
+  # sync board path holds a bounded DB pool of 10 (DB_POOL_SIZE 5 + overflow 5,
+  # V30), so ~20 concurrent is already past steady-state and 40 is a hard ceiling
+  # that leaves headroom before memory pressure. min_machines_running=0 means
+  # there is only ever one machine to absorb load, so these are per-instance and
+  # deliberately low. Raise them (or add machines) if legitimate concurrency 503s.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 20   # start load-balancing / prefer waking another machine past this
+    hard_limit = 40   # refuse (503) past this — shed before OOM
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"

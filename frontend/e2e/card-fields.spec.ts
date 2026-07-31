@@ -6,6 +6,7 @@ import {
   cleanupE2eBoards,
   column,
   openFreshBoard,
+  pickSelect,
   uniqueTitle,
 } from "./helpers";
 
@@ -41,7 +42,7 @@ test("a card with priority + label + due renders badge, chip, and overdue pill",
   const col = column(page, "Todo");
   await col.getByRole("button", { name: "Add card" }).click();
   await col.getByPlaceholder("Title (required)").fill(title);
-  await col.getByLabel("Priority").selectOption("high");
+  await pickSelect(page, col, "Priority", "high");
   await col.getByLabel("Due date").fill("2020-01-01");
   await col.getByRole("button", { name: labelName }).click(); // toggle the label on
   await col.getByRole("button", { name: "Create" }).click();

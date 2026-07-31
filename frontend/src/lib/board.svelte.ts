@@ -191,19 +191,22 @@ export async function refetch(): Promise<void> {
   }
 }
 
+// Card create/edit/delete can all change an epic's rollup (a new/removed child, or
+// a re-linked epic_id), so refetch epics alongside cards — the Epics view's
+// server-authoritative progress + health (V32, KAN-296) must not go stale.
 export async function addCard(payload: CardCreate): Promise<void> {
   await createCard({ ...payload, board_id: boardStore.activeBoardId ?? undefined });
-  await refetch();
+  await Promise.all([refetch(), refetchEpics()]);
 }
 
 export async function editCard(id: number, payload: CardUpdate): Promise<void> {
   await updateCard(id, payload);
-  await refetch();
+  await Promise.all([refetch(), refetchEpics()]);
 }
 
 export async function removeCard(id: number): Promise<void> {
   await deleteCard(id);
-  await refetch();
+  await Promise.all([refetch(), refetchEpics()]);
 }
 
 // Dependency edits (KAN-30). Like every other mutation these are
@@ -244,7 +247,8 @@ export async function moveCard(id: number, payload: CardMove): Promise<void> {
   // refetch() clears board.error, so set it afterwards (BREADBOARD §7).
   try {
     await apiMoveCard(id, payload);
-    await refetch();
+    // A column change flips the done-count, so refresh the epic rollups too (V32).
+    await Promise.all([refetch(), refetchEpics()]);
   } catch (e) {
     await refetch();
     board.error = e instanceof Error ? e.message : "Failed to move card";

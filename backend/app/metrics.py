@@ -30,7 +30,7 @@ from __future__ import annotations
 import math
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from statistics import mean, median
 from typing import Any
 
@@ -226,4 +226,100 @@ def compute_metrics(
         "cycle_time": _summarize_durations(cycle_seconds),
         "aging_wip": aging_wip,
         "by_assignee": by_assignee,
+    }
+
+
+# --- cycle burndown / velocity (V34, KAN-298) ------------------------------
+#
+# Cycle-scoped derived metrics: committed-vs-completed, velocity, and a
+# per-day burndown of remaining work over the cycle's ``starts_on``..``ends_on``
+# window. Like the board metrics above these are **entirely derived** — from the
+# cycle's current card state (story points + column) plus the ``done`` transition
+# times recovered from the activity feed — so there is no new write and no
+# migration. Pure (no DB, no I/O), so it unit-tests directly.
+
+
+def _day_floor_utc(ts: datetime) -> datetime:
+    """Midnight-UTC at the start of ``ts``'s calendar day (tz-aware)."""
+    ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    ts = ts.astimezone(timezone.utc)
+    return ts.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def compute_cycle_metrics(
+    cards: list[dict[str, Any]],
+    done_times: dict[int, datetime],
+    *,
+    starts_on: datetime | None,
+    ends_on: datetime | None,
+    now: datetime,
+) -> dict[str, Any]:
+    """Compute a cycle's committed/completed totals, velocity and burndown — pure.
+
+    ``cards`` are the (non-deleted) stories assigned to the cycle: dicts with
+    ``id``, ``story_points`` (int | None → treated as 0 points) and ``column``.
+    ``done_times`` maps a card id → the timestamp it *first* reached ``done``
+    (recovered from the activity feed); used only to place a completion along the
+    burndown (a completed card with no recorded transition falls back to ``now``).
+    ``starts_on`` / ``ends_on`` are the cycle's bounds (either ``None`` → no
+    dated window, so ``burndown`` is empty). ``now`` is the reference clock.
+
+    Definitions (a story is *completed* when it is currently in the ``done``
+    column — robust to the activity feed, matching what a human sees on the board):
+
+    - **committed** — ``count`` = stories in the cycle; ``points`` = Σ story points.
+    - **completed** — the subset currently ``done``; ``count`` + ``points``.
+    - **velocity** — completed story points (the classic "points delivered").
+    - **unit** — ``"points"`` when the cycle has any estimated work
+      (``committed.points > 0``), else ``"count"``. The burndown series is in this
+      unit, so an unestimated cycle still burns down by card count.
+    - **burndown** — one point per calendar day across ``[starts_on, ends_on]``:
+      ``remaining`` (committed_total − work completed on/before that day-end),
+      ``completed`` (cumulative), and the linear ``ideal`` line (committed_total →
+      0 across the window). Empty when either bound is unset.
+    """
+    committed_count = len(cards)
+    committed_points = sum((c["story_points"] or 0) for c in cards)
+    done_cards = [c for c in cards if c["column"] == "done"]
+    completed_count = len(done_cards)
+    completed_points = sum((c["story_points"] or 0) for c in done_cards)
+
+    use_points = committed_points > 0
+    unit = "points" if use_points else "count"
+    committed_total = committed_points if use_points else committed_count
+
+    def unit_val(card: dict[str, Any]) -> int:
+        return (card["story_points"] or 0) if use_points else 1
+
+    burndown: list[dict[str, Any]] = []
+    if starts_on is not None and ends_on is not None and ends_on >= starts_on:
+        start_day = _day_floor_utc(starts_on)
+        end_day = _day_floor_utc(ends_on)
+        n = (end_day - start_day).days + 1  # inclusive day count
+        # Each completed card's completion instant (fallback: now), so the final
+        # day's remaining lands at committed_total − completed_total.
+        completions = [
+            (done_times.get(c["id"], now), unit_val(c)) for c in done_cards
+        ]
+        for i in range(n):
+            day = start_day + timedelta(days=i)
+            cutoff = day + timedelta(days=1)  # end of this calendar day (UTC)
+            completed_by = sum(v for ts, v in completions if ts < cutoff)
+            remaining = committed_total - completed_by
+            ideal = committed_total * (1 - i / (n - 1)) if n > 1 else float(committed_total)
+            burndown.append(
+                {
+                    "date": day.date().isoformat(),
+                    "remaining": remaining,
+                    "completed": completed_by,
+                    "ideal": round(ideal, 2),
+                }
+            )
+
+    return {
+        "committed": {"count": committed_count, "points": committed_points},
+        "completed": {"count": completed_count, "points": completed_points},
+        "velocity": completed_points,
+        "unit": unit,
+        "burndown": burndown,
     }

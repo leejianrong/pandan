@@ -114,7 +114,7 @@ Turn auto-sync on for board `1`, keeping merge→done off:
 
 ```bash
 curl -X PATCH https://simple-kanban-jian.fly.dev/api/v1/boards/1 \
-  -H "Authorization: Bearer $KANBAN_TOKEN" \
+  -H "Authorization: Bearer $PANDAN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"autosync_enabled": true}'
 ```
@@ -123,7 +123,7 @@ Later, also let merges close cards out:
 
 ```bash
 curl -X PATCH https://simple-kanban-jian.fly.dev/api/v1/boards/1 \
-  -H "Authorization: Bearer $KANBAN_TOKEN" \
+  -H "Authorization: Bearer $PANDAN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"autosync_advance_to_done": true}'
 ```

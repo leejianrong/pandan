@@ -6,6 +6,7 @@ import {
   createStoryUnder,
   epicItem,
   openFreshBoard,
+  openView,
   uniqueTitle,
 } from "./helpers";
 
@@ -34,7 +35,7 @@ test("create an epic (own view), link a story, tag + rollup persist", async ({ p
   await expect(storyCard.locator(".epic-tag")).toHaveText(epicName);
 
   // The Epics view rolls the story up under its epic.
-  await page.getByRole("button", { name: "Epics", exact: true }).click();
+  await openView(page, "Epics");
   await expect(epicItem(page, epicName).locator(".epic-stories")).toContainText(storyTitle);
 
   // Server-authoritative: the link survives a full reload.

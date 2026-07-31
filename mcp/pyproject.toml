@@ -1,35 +1,35 @@
 [project]
-name = "simple-kanban-mcp"
-version = "0.2.0"
-description = "MCP server exposing the Simple Kanban API (/api/v1) as agent tools"
+name = "pandan-mcp"
+version = "0.4.0"
+description = "MCP server exposing the Pandan API (/api/v1) as agent tools"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.2",
     "httpx>=0.28",
-    "kanban-client",
+    "pandan-client",
 ]
 
 # The shared API client lives in a sibling package; depend on it by path (not a
-# repo-root uv workspace) so backend/, mcp/, and kanban-client/ each stay
+# repo-root uv workspace) so backend/, mcp/, and pandan-client/ each stay
 # independently locked (KAN-21).
 [tool.uv.sources]
-kanban-client = { path = "../kanban-client", editable = true }
+pandan-client = { path = "../pandan-client", editable = true }
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
-    "ruff>=0.15.21",
+    "ruff>=0.16.0",
 ]
 
 [project.scripts]
-kanban-mcp = "kanban_mcp.server:main"
+pandan-mcp = "pandan_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["kanban_mcp"]
+packages = ["pandan_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

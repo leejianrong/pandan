@@ -6,8 +6,8 @@ name: Deploy
 #   2. the merge actually changed something baked into the Fly image.
 # The image contains only `frontend/` (built to static) + `backend/` plus the build
 # config (`Dockerfile`, `fly.toml`) — see the Dockerfile COPY lines. So docs-, CI-,
-# tooling-, or sibling-package-only merges (docs/, docs-tooling/, mcp/, kanban-cli/,
-# kanban-client/, scripts/, *.md, .github/) skip the redeploy instead of rebuilding
+# tooling-, or sibling-package-only merges (docs/, docs-tooling/, mcp/, pandan-cli/,
+# pandan-client/, scripts/, *.md, .github/) skip the redeploy instead of rebuilding
 # an identical image. Detection is fail-safe: if the diff can't be computed, deploy.
 # Auth via the FLY_API_TOKEN repo secret.
 on:

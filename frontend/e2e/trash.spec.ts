@@ -4,6 +4,7 @@ import {
   cleanupE2eBoards,
   createCard,
   openFreshBoard,
+  openView,
   uniqueTitle,
 } from "./helpers";
 
@@ -44,7 +45,7 @@ function trashRow(page: import("@playwright/test").Page, title: string) {
 }
 
 async function openTrash(page: import("@playwright/test").Page) {
-  await page.getByRole("button", { name: "Trash", exact: true }).click();
+  await openView(page, "Trash");
   await expect(page.getByRole("heading", { name: "Trash", exact: true })).toBeVisible();
 }
 

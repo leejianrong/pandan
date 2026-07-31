@@ -7,11 +7,15 @@
 
 import {
   getBoardMetrics,
+  getCycleMetrics,
   listActivity,
   listCards,
+  listCycles,
   type Activity,
   type BoardMetrics,
   type Card,
+  type Cycle,
+  type CycleMetrics,
 } from "./api";
 import { boardStore } from "./board.svelte";
 
@@ -33,6 +37,10 @@ export const dashboardStore = $state<{
   attention: Card[];
   // Derived flow metrics (throughput / cycle time / aging / per-assignee, V17).
   metrics: BoardMetrics | null;
+  // The board's cycles (iterations) + the selected one's burndown/velocity (V34).
+  cycles: Cycle[];
+  activeCycleId: number | null;
+  cycleMetrics: CycleMetrics | null;
   // The deepened activity feed (filterable by actor/action), keyset-paginated.
   activity: Activity[];
   activityCursor: string | null;
@@ -48,6 +56,9 @@ export const dashboardStore = $state<{
   inflight: [],
   attention: [],
   metrics: null,
+  cycles: [],
+  activeCycleId: null,
+  cycleMetrics: null,
   activity: [],
   activityCursor: null,
   actorFilter: "",
@@ -67,16 +78,20 @@ export async function refetchDashboard(): Promise<void> {
     dashboardStore.inflight = [];
     dashboardStore.attention = [];
     dashboardStore.metrics = null;
+    dashboardStore.cycles = [];
+    dashboardStore.activeCycleId = null;
+    dashboardStore.cycleMetrics = null;
     dashboardStore.activity = [];
     dashboardStore.activityCursor = null;
     return;
   }
   dashboardStore.loading = true;
   try {
-    const [inflight, attention, metrics, activityPage] = await Promise.all([
+    const [inflight, attention, metrics, cycles, activityPage] = await Promise.all([
       listCards(boardId, { column: "in_progress" }),
       listCards(boardId, { needs_human: true }),
       getBoardMetrics(boardId, dashboardStore.window ? { window: dashboardStore.window } : {}),
+      listCycles(boardId),
       listActivity(boardId, {
         limit: ACTIVITY_PAGE,
         actor: dashboardStore.actorFilter || undefined,
@@ -86,12 +101,56 @@ export async function refetchDashboard(): Promise<void> {
     dashboardStore.inflight = inflight;
     dashboardStore.attention = attention;
     dashboardStore.metrics = metrics;
+    dashboardStore.cycles = cycles;
     dashboardStore.activity = activityPage.entries;
     dashboardStore.activityCursor = activityPage.nextCursor;
+
+    // Keep the current selection if it still exists; else pick the "active"
+    // cycle (its window contains now) or the most recent one.
+    const stillValid = cycles.some((c) => c.id === dashboardStore.activeCycleId);
+    dashboardStore.activeCycleId = stillValid
+      ? dashboardStore.activeCycleId
+      : pickActiveCycle(cycles);
+    await refetchCycleMetrics();
   } catch (e) {
     dashboardStore.error = e instanceof Error ? e.message : "Failed to load dashboard";
   } finally {
     dashboardStore.loading = false;
+  }
+}
+
+// The "active" cycle: one whose [starts_on, ends_on] window contains now; else
+// the most recently created cycle; else none. Bounds may be null (open-ended).
+function pickActiveCycle(cycles: Cycle[]): number | null {
+  if (cycles.length === 0) return null;
+  const now = Date.now();
+  const current = cycles.find((c) => {
+    const startsOk = !c.starts_on || new Date(c.starts_on).getTime() <= now;
+    const endsOk = !c.ends_on || new Date(c.ends_on).getTime() >= now;
+    return (c.starts_on || c.ends_on) && startsOk && endsOk;
+  });
+  if (current) return current.id;
+  return [...cycles].sort((a, b) => b.id - a.id)[0].id;
+}
+
+// Load the selected cycle's burndown/velocity (or clear it when none selected).
+export async function refetchCycleMetrics(): Promise<void> {
+  const boardId = boardStore.activeBoardId;
+  const cycleId = dashboardStore.activeCycleId;
+  if (boardId == null || cycleId == null) {
+    dashboardStore.cycleMetrics = null;
+    return;
+  }
+  dashboardStore.cycleMetrics = await getCycleMetrics(boardId, cycleId);
+}
+
+// Change the selected cycle and reload just its metrics.
+export async function setActiveCycle(cycleId: number | null): Promise<void> {
+  dashboardStore.activeCycleId = cycleId;
+  try {
+    await refetchCycleMetrics();
+  } catch (e) {
+    dashboardStore.error = e instanceof Error ? e.message : "Failed to load cycle metrics";
   }
 }
 

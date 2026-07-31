@@ -8,7 +8,13 @@ belong to (ADR 0009). Key mechanisms:
   Postgres SEQUENCE via a server_default — ``'KAN-' || nextval('card_ticket_seq')``
   for cards, ``'EPIC-' || nextval('epic_ticket_seq')`` for epics — immutable, never
   reused, and independent (KAN-1 and EPIC-1 can coexist). Ticket sequences stay
-  **global** across boards (D4) — no per-board prefixes.
+  **global** across boards (D4) — no per-board prefixes. The ``KAN-``/``EPIC-``
+  prefixes survived the ``simple-kanban`` → ``pandan`` rebrand **on purpose**
+  (V40, KAN-423, ADR 0018 §"What is deliberately NOT renamed"): because the numbers
+  are immutable and never reused there is no correct way to renumber history, so
+  renaming the prefix would leave ``KAN-1…N`` beside ``PAN-N+1…`` on the board that
+  *is* this project's record. A legacy prefix beats a split one — ``KAN`` is simply
+  retconned as "kanban". Please don't "finish" the rename here.
 - ``column`` is a plain ``varchar`` guarded by a CHECK constraint (not a native PG
   enum) so new column values need no ``ALTER TYPE`` migration (ADR 0008).
 - Every card + epic belongs to exactly one board via a NOT NULL ``board_id`` FK
@@ -28,6 +34,7 @@ from sqlalchemy import (
     Computed,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -74,6 +81,11 @@ VALID_ACTIVITY_ACTIONS = (
     "resolved",
     "purged",
 )
+# Notification kinds (V37, KAN-301) — the four events a human shouldn't miss. A
+# plain varchar guarded by a CHECK constraint (the ``card.column`` pattern) so a
+# new kind needs no ``ALTER TYPE`` migration. Kept in sync with the emit call-sites
+# (``app.notifications`` callers) and ``NotificationKind`` (schemas).
+VALID_NOTIFICATION_KINDS = ("needs_human", "blocked", "ci_failed", "assigned")
 
 
 class Board(Base):
@@ -99,6 +111,22 @@ class Board(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     autosync_advance_to_done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # Outbound signed webhook opt-in (V38, KAN-302) — mirrors the autosync per-board
+    # opt-in above. When ``outbound_webhook_enabled`` is true AND
+    # ``outbound_webhook_url`` is set, creating a notification fires one HMAC-SHA256
+    # signed ``POST`` to the URL — the *same* ``X-Hub-Signature-256: sha256=<hex>``
+    # scheme this app *verifies* on the inbound GitHub webhook (symmetric; see
+    # :mod:`app.webhook_signing`). The delivery is best-effort and fired **after** the
+    # mutation's transaction commits (:mod:`app.outbound`), so a slow/failed POST never
+    # rolls back or blocks the mutation. Default OFF, so it is a no-op until a board
+    # owner turns it on. ``outbound_webhook_secret`` keys the signature and is
+    # **write-only** — accepted on ``PATCH`` but never returned in a board read (like a
+    # password); see ``BoardRead`` (which omits it) vs. ``BoardUpdate`` (which accepts it).
+    outbound_webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outbound_webhook_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outbound_webhook_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -169,6 +197,7 @@ class Epic(Base):
         unique=True,
         nullable=False,
         # Assigned by the DB at INSERT; the sequence is created in the migration.
+        # ``EPIC-`` is deliberately NOT rebranded — see the module docstring.
         server_default=text("'EPIC-' || nextval('epic_ticket_seq')"),
     )
     # The board this epic belongs to (M3 V7). NOT NULL; cascade on board delete.
@@ -177,6 +206,15 @@ class Epic(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Lightweight project fields (V31, KAN-295). ``target_date`` is an optional
+    # target/ship date for the epic; ``lead`` is an optional free-text owner (a
+    # person/agent handle, not an FK to ``user`` — an epic lead can be anyone). Both
+    # nullable + additive: existing epics read NULL. ``lead`` is a plain varchar(255),
+    # capped in the schema (``MAX_LEAD_LEN``) so an over-long value is a clean 422.
+    target_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    lead: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Soft-delete tombstone (KAN-19, R5.2). NULL = live; a timestamp = deleted.
     # DELETE sets this instead of removing the row; default reads filter it out
     # (``deleted_at IS NULL``). The FK from ``card.epic_id`` is intentionally left
@@ -192,6 +230,43 @@ class Epic(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class Cycle(Base):
+    """A board-scoped, time-boxed iteration a story can belong to (V33, KAN-297).
+
+    A cycle groups the stories worked in one iteration (a sprint / week). Unlike an
+    epic it is **not** a first-class ticketed entity — it mirrors the flat,
+    board-owned shape of :class:`SavedView` / :class:`CardTemplate` (no
+    ``ticket_number``, no soft-delete): full CRUD-lite addressed under its board.
+
+    ``board_id`` FK → ``board`` (``ON DELETE CASCADE``): a cycle belongs to a board
+    and is hard-deleted with it (consistent with the app's hard-delete model).
+    ``starts_on`` / ``ends_on`` are optional (nullable) iteration bounds. A story
+    links to zero-or-one cycle via the nullable ``card.cycle_id`` FK, exactly
+    mirroring ``card.epic_id`` (``ON DELETE SET NULL`` — deleting a cycle detaches
+    its stories rather than blocking or cascading). The non-empty ``name`` rule is
+    enforced by the Pydantic schema (:class:`app.schemas.CycleCreate`), not the table.
+    """
+
+    __tablename__ = "cycle"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    board_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("board.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional iteration bounds (nullable + additive). Timestamptz to match the rest
+    # of the schema's date columns (e.g. epic.target_date, card.due_date).
+    starts_on: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ends_on: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
@@ -214,10 +289,10 @@ class CardDependency(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     blocker_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False, index=True
     )
     blocked_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -238,7 +313,7 @@ class CardLink(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     card_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False, index=True
     )
     label: Mapped[str] = mapped_column(String(255), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -264,7 +339,7 @@ class CardComment(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     card_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("card.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # The authoring user (a UUID). Nullable + SET NULL so a deleted author leaves
     # the note in place, unattributed (mirrors Board.owner_id).
@@ -334,6 +409,10 @@ class Card(Base):
             "priority IN ('none', 'low', 'medium', 'high', 'urgent')",
             name="ck_card_priority",
         ),
+        # GIN index over the full-text ``search_vector`` (M5 V15, KAN-248). The DDL
+        # lives in ``0017_card_search_vector``; this declaration must mirror it
+        # (name + ``postgresql_using='gin'``) so autogenerate sees no drift (KAN-307).
+        Index("ix_card_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -342,6 +421,7 @@ class Card(Base):
         unique=True,
         nullable=False,
         # Assigned by the DB at INSERT; the sequence is created in the migration.
+        # ``KAN-`` is deliberately NOT rebranded — see the module docstring.
         server_default=text("'KAN-' || nextval('card_ticket_seq')"),
     )
     # The board this story lives on (M3 V7). NOT NULL; cascade on board delete.
@@ -357,6 +437,12 @@ class Card(Base):
     # the app's hard-delete model.
     epic_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("epic.id", ondelete="SET NULL"), nullable=True
+    )
+    # Optional link to the story's iteration/cycle (V33, KAN-297). Mirrors ``epic_id``
+    # exactly: ON DELETE SET NULL so deleting a cycle detaches (rather than blocks or
+    # cascades) its stories. Validated on POST/PATCH (same board, ``_validate_cycle``).
+    cycle_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("cycle.id", ondelete="SET NULL"), nullable=True
     )
     story_points: Mapped[int | None] = mapped_column(Integer, nullable=True)
     assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -549,6 +635,66 @@ class CardTemplate(Base):
     # The list of card payloads as JSON. Portable ``JSON`` type (maps to Postgres
     # ``json``); always written by the router from a validated ``CardTemplateCreate``.
     cards: Mapped[list] = mapped_column(JSON, nullable=False, server_default=text("'[]'"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Notification(Base):
+    """A poll/pull inbox item for a board owner (V37, KAN-301) — an event a human
+    shouldn't miss: a card flagged ``needs_human``, a card newly ``blocked`` by a
+    dependency, a linked PR's CI failing, or a card being assigned.
+
+    Poll/pull only (ADR 0007 — no websockets, no real-time): rows are written at the
+    board write path (:mod:`app.notifications`, the notification analogue of the
+    activity logger) in the SAME sync transaction as the mutation, and read back via
+    ``GET /api/v1/notifications``.
+
+    Design notes:
+    - ``user_id`` FK → ``user`` (``ON DELETE CASCADE``, NOT NULL): the **recipient**.
+      The MVP recipient is always the **board owner** (``board.owner_id``) — a real
+      ``User``, which makes owner-scoping trivial (you only ever see your own rows).
+      A board with no owner never produces a notification (the emit helper skips it).
+      Cascade: a deleted user's inbox goes with them (unlike ``Activity``, this is
+      not history — it is a personal inbox).
+    - ``board_id`` FK → ``board`` (``ON DELETE CASCADE``): the notification belongs to
+      a board and is hard-deleted with it.
+    - ``card_id`` FK → ``card`` (``ON DELETE SET NULL``, nullable): the card the event
+      is about (all four kinds are card events today, but kept nullable + SET NULL so
+      a purged card leaves the human-readable ``body`` — which names the ticket —
+      standing rather than cascading the inbox item away).
+    - ``kind`` is a varchar guarded by a CHECK constraint (the ``card.column``
+      pattern) rather than a native PG enum.
+    - ``read_at`` NULL = unread; a mark-read (``PATCH``) stamps it once (idempotent).
+    """
+
+    __tablename__ = "notification"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('needs_human', 'blocked', 'ci_failed', 'assigned')",
+            name="ck_notification_kind",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # The recipient (a UUID). NOT NULL — every notification has a real owner.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    board_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("board.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The card the event is about. Nullable + SET NULL: a purged card leaves the row
+    # (its ``body`` names the ticket) rather than cascading the inbox item away.
+    card_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("card.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL = unread; stamped once when the owner marks it read.
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

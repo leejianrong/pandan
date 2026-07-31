@@ -30,7 +30,13 @@ from ..auth_models import User
 from ..authz import Access, authorize_board, get_principal
 from ..db import get_db
 from ..models import Card, CardTemplate
-from ..schemas import CardCreate, CardRead, CardTemplateCreate, CardTemplateRead
+from ..schemas import (
+    MAX_TEMPLATE_CARDS,
+    CardCreate,
+    CardRead,
+    CardTemplateCreate,
+    CardTemplateRead,
+)
 from .cards import _attach_dependencies, _create_card_row
 
 router = APIRouter(tags=["templates"])
@@ -148,6 +154,13 @@ def apply_template(
     the created cards in template order."""
     authorize_board(db, principal, board_id, Access.WRITE)
     template = _get_template_or_404(db, board_id, template_id)
+    # Payload hardening (V28, KAN-292): guard apply too, so a template stored before
+    # the create-time cap existed can't fan out into an unbounded transaction.
+    if len(template.cards) > MAX_TEMPLATE_CARDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"template exceeds the {MAX_TEMPLATE_CARDS}-card apply limit",
+        )
     created: list[Card] = []
     for item in template.cards:
         payload = CardCreate.model_validate({**item, "board_id": board_id})

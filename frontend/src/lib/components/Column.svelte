@@ -4,6 +4,7 @@
   import { dndzone, TRIGGERS, type DndEvent } from "svelte-dnd-action";
   import type { Card as CardType, Column } from "../api";
   import { moveCard } from "../board.svelte";
+  import { kbd } from "../keyboard.svelte";
   import Card from "./Card.svelte";
   import CardForm from "./CardForm.svelte";
 
@@ -14,6 +15,16 @@
   }: { column: Column; label: string; cards: CardType[] } = $props();
 
   let adding = $state(false);
+
+  // The `n`/`c` keyboard shortcut (V36, KAN-300) targets a column via a one-shot
+  // signal on the shared keyboard store; the matching column opens its add-card
+  // form and clears the signal so it fires once.
+  $effect(() => {
+    if (kbd.addToColumn === column) {
+      adding = true;
+      kbd.addToColumn = null;
+    }
+  });
 
   // svelte-dnd-action owns a mutable copy of the list. Re-sync from the
   // server-authoritative `cards` prop whenever it changes (e.g. after refetch).
