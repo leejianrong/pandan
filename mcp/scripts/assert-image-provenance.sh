@@ -15,6 +15,17 @@
 # The CI gate runs this BEFORE the push (the image is built with `load: true`
 # first), so an image that cannot identify itself is never published.
 #
+# Since KAN-475 it ALSO asserts the image records the build inputs it actually
+# got, digest-pinned. "Which commit?" and "which toolchain?" are different
+# questions: mcp/Dockerfile's inputs float, so the same commit can build images
+# with different interpreters. That does not make the build reproducible — it
+# makes it auditable, which is what a label can honestly deliver.
+#
+# NOTE this makes the gate a check on a RELEASE artifact, not on any local build:
+# a plain `docker build -f mcp/Dockerfile .` passes no labels at all, so it fails
+# here (it already did, on .revision). Images published before KAN-475 predate the
+# toolchain labels and will fail on those two lines specifically.
+#
 # Depends on nothing but bash + docker — no jq — so a user can run it against an
 # image they pulled to answer "is my image stale?" (see mcp/README.md).
 #
@@ -33,6 +44,15 @@ set -euo pipefail
 REV_LABEL="org.opencontainers.image.revision"
 VER_LABEL="org.opencontainers.image.version"
 CREATED_LABEL="org.opencontainers.image.created"
+
+# Build-input provenance (KAN-475). The labels above answer "which COMMIT?";
+# these answer "which TOOLCHAIN?". mcp/Dockerfile's inputs float, so two images
+# legitimately carrying the SAME .revision can contain a different interpreter
+# and a different uv — the revision label is then true but weaker than it looks,
+# and the assertions above cannot see the difference. The release workflow
+# resolves both inputs to immutable digests and records them here.
+PYTHON_LABEL="io.github.leejianrong.pandan.build.python"
+UV_LABEL="io.github.leejianrong.pandan.build.uv"
 
 usage() {
   sed -n '/^# Usage:/,/^# Exit:/p' "$0" | sed 's/^# \{0,1\}//' >&2
@@ -122,9 +142,43 @@ else
   echo "OK   $CREATED_LABEL = $created"
 fi
 
+# A recorded build input is only worth something if it is IMMUTABLE. A label
+# reading `python:3.12-slim` would restate the float rather than resolve it — the
+# exact failure this check exists to catch — so require a `@sha256:<64 hex>`
+# digest, not merely a non-empty value.
+assert_digest_pinned() {
+  local key="$1" what="$2" value
+  value="$(label_of "$key")"
+  if [ -z "$value" ]; then
+    echo "::error::$ref carries no $key label — the image cannot say which $what it was built with. Is the 'Resolve the floating build inputs to digests' step still wired into the build's 'labels:'?"
+    failed=1
+    return
+  fi
+  case "$value" in
+    *@sha256:*)
+      local digest="${value##*@sha256:}"
+      if [ ${#digest} -ne 64 ] || [ -n "$(printf '%s' "$digest" | tr -d '0-9a-f')" ]; then
+        echo "::error::$key is '$value' — the digest is not 64 lowercase hex characters"
+        failed=1
+        return
+      fi
+      ;;
+    *)
+      echo "::error::$key is '$value' but must be digest-pinned (…@sha256:…) — a floating tag here records nothing, since it can resolve differently on every build"
+      failed=1
+      return
+      ;;
+  esac
+  echo "OK   $key = $value"
+}
+
+assert_digest_pinned "$PYTHON_LABEL" "interpreter"
+assert_digest_pinned "$UV_LABEL" "uv"
+
 if [ "$failed" -ne 0 ]; then
   echo "::error::build-provenance gate FAILED for $ref — refusing to publish an image that cannot identify itself (KAN-452)"
   exit 1
 fi
 
 echo "build provenance OK — $ref identifies itself as $expected_revision"
+echo "build inputs are recorded and digest-pinned (KAN-475)"
