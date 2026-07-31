@@ -32,7 +32,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 | **V43 · Error contract** ✅ | structured errors, exit codes | A2 | 2 | KAN-426 | A bad flag, a bad value and a missing token each print a parseable error on **stdout** with the documented exit code |
 | **V44 · Aggregates** ✅ | summary on every list verb | A3 | 2 | KAN-427 | `pandan list` ends with `42 cards · 12 todo · 5 in_progress · 25 done`; no second call needed for a count |
 | **V45 · Truncation** ✅ | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
-| **V46 · Content-first + disclosure** | bare command, `help[]` | A5 | 2 | KAN-429 | Bare `pandan` prints live board state and exits 0; results carry `help[]` next-step templates |
+| **V46 · Content-first + disclosure** ✅ | bare command, `help[]` | A5 | 2 | KAN-429 | Bare `pandan` prints live board state and exits 0; results carry `help[]` next-step templates |
 | **V47 · TOON** | `--format toon` for nested payloads | A6 | 2 | KAN-430 | `pandan get KAN-304 --format toon` returns the same data as `--json`, materially cheaper |
 | **V48 · Ambient context** ✅ | session hook + packaged skill | A7 | 2 | KAN-431 | A fresh agent session already knows the open cards without calling anything |
 | **V49 · MCP right-sizing** *(tail)* | measure, decide, ADR, execute | A8 | 3 | KAN-432 | The MCP schema token cost is measured and published; the chosen surface is an ADR and is live |
@@ -333,7 +333,7 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
 - **Only 2 pre-existing assertions needed updating**, not V44's 40: the test fixtures' text is short,
   so under-limit output is byte-identical by construction. That is the slice's first promise working.
 
-### V46 · Content-first bare invocation + `help[]` next-step hints (A5) — KAN-429
+### V46 · Content-first bare invocation + `help[]` next-step hints (A5) — KAN-429 ✅
 - **Build:** AXI 8 + 9.
   - **Content first:** bare `pandan` (no args) prints **live, actionable state** and exits **0** — the
     default board's open cards plus V44's aggregate, prefixed by the executable path and a one-sentence
@@ -348,6 +348,48 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   present and no concrete id was interpolated); hints absent under `--json`; `--help` unchanged
   (AXI 10 regression guard).
 - **Acceptance:** the bare-command demo; suite green. CLI-only — no deploy.
+- **Shipped** as **v0.12.0**, and the card's "prints usage and exits 2 today" claim was **verified from
+  source first** (it held — plus one `error<TAB>usage<TAB>…` row on stdout, which the card omits). Bare
+  `pandan` now prints `pandan <version> (<build>) — <executable>`, the one-line description, then
+  `<api_url> · board <n> · open cards (todo, in_progress):`, the rows, V44's aggregate, and the hints.
+  Live: 12 open cards on board 5, exit 0.
+- **The bare path is an argv rewrite, not an argparse change.** `pandan` with no verb is rewritten to a
+  real but **unlisted** `overview` subcommand. Both halves of that are AXI 10 mechanics: keeping
+  `add_subparsers(required=True)` is what holds the usage line at `<command> ...` (making it optional
+  renders `[<command> ...]`), and registering `overview` with **no `help=` kwarg** keeps it out of the
+  command list (argparse only builds the pseudo-action `if 'help' in kwargs`). `--help` is therefore
+  **byte-identical**, pinned against `pandan-cli/tests/help_golden.txt` — captured from unmodified
+  `main` in a **separate preceding commit**, so the guard cannot be a restatement of the new code.
+  The rewrite is gated by an **allow-list** (`_is_bare_invocation`): only "no verb, at most
+  `--json`/`--full`/`--format`" is rewritten, so every argv that already worked reaches argparse
+  untouched, and `pandan --json`/`--format toon` get a machine-readable overview for free.
+- **The bare call is bounded** (a scale-to-zero deploy is the normal case, not an edge case). The
+  shared client's defaults — 35 s read + one retry after a 1 s backoff
+  ([client.py:36-39](../../pandan-client/pandan_client/client.py)) — are a ~71 s worst case, right for
+  batch work and wrong for the one command a human types to *look*. A new per-verb `_client_options`
+  seam gives the overview `timeout=20, retry_backoff=0`: a ~40 s ceiling that still spans the observed
+  ~30-40 s Fly cold wake across the client's two attempts. Failing *faster* was rejected on the
+  evidence — a transport error on a sleeping board teaches the caller nothing and they just retry — so
+  the affordance is a **tty-only stderr** line naming the API being contacted. Every other verb passes
+  no overrides.
+- **Hints attach to decision-point verbs only — never to a list verb.** A list verb's last stdout line
+  is V44's aggregate, which the parser epilog publishes as a `tail -1` contract ("Every list verb ends
+  with a pre-computed aggregate"); hanging hints there would break it for the verbs whose next step is
+  already visible in the rows. So hints go where the next step is genuinely ambiguous: a single entity,
+  a mutation's receipt, and the bare overview (the one aggregate-bearing verb with hints, and the only
+  one that can afford them — it ships in this slice, so no `tail -1` contract predates it).
+- **Two guards beyond the spec's list, both of which found something.** `help[]` templates are checked
+  to *parse* against the real parser with placeholders filled — which caught
+  `pandan comment add <id> "…"` in the first draft (the body is `--body`), i.e. a hint that would have
+  taught an agent an invalid command. And the table is walked against the parser tree in both
+  directions, so a key matching no verb (dead hint) or a verb wired to an unlisted tuple fails.
+- **11 mutations, all red against the guard they targeted** — including the parameterised-hint guard,
+  where the first mutation (interpolate from `args`) only reached the verbs that *have* a card-id
+  argument, so it was extended to interpolate from the **result** to reach `create`/`overview` too.
+  Notably, leaking hints into `--format json` reddens **29** tests across four suites, not just this
+  slice's: the 15 pre-existing single-entity assertions were updated by stripping `help:` lines **at
+  the assertion site**, never inside a capture helper, precisely so every "stdout still parses as
+  JSON/TOON" check kept its power.
 
 ### V47 · `--format toon` for nested payloads (A6) — KAN-430 ✅
 - **Build:** AXI 1, **scoped deliberately** (see the shaping): the TSV list default is already
