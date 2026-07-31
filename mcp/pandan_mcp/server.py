@@ -130,19 +130,27 @@ def get_board(board_id: int) -> dict[str, Any]:
 def update_board(
     board_id: int,
     name: str | None = None,
+    autosync_enabled: bool | None = None,
+    autosync_advance_to_done: bool | None = None,
     outbound_webhook_url: str | None = None,
     outbound_webhook_secret: str | None = None,
     outbound_webhook_enabled: bool | None = None,
 ) -> dict[str, Any]:
-    """Update a board's settings (only the arguments you pass are changed): ``name``,
-    and the V38 signed outbound webhook opt-in — ``outbound_webhook_url`` (the target),
-    ``outbound_webhook_secret`` (the write-only HMAC-SHA256 key; never read back), and
-    ``outbound_webhook_enabled`` (turn delivery on/off). When enabled with a URL set,
-    every notification is POSTed there, signed like the inbound GitHub webhook.
-    Authorized via the board's own id — you must own it."""
+    """Update a board's settings (only the arguments you pass are changed): ``name``;
+    the GitHub PR auto-sync opt-in — ``autosync_enabled`` (master switch; PRs mentioning
+    a ticket attach links and post CI comments) and ``autosync_advance_to_done``
+    (separately allow a merged PR to move the card to done; effective only while
+    ``autosync_enabled`` is on); and the V38 signed outbound webhook opt-in —
+    ``outbound_webhook_url`` (the target), ``outbound_webhook_secret`` (the write-only
+    HMAC-SHA256 key; never read back), and ``outbound_webhook_enabled`` (turn delivery
+    on/off). When enabled with a URL set, every notification is POSTed there, signed
+    like the inbound GitHub webhook. Authorized via the board's own id — you must own
+    it."""
     return _client_instance().update_board(
         board_id,
         name=name,
+        autosync_enabled=autosync_enabled,
+        autosync_advance_to_done=autosync_advance_to_done,
         outbound_webhook_url=outbound_webhook_url,
         outbound_webhook_secret=outbound_webhook_secret,
         outbound_webhook_enabled=outbound_webhook_enabled,

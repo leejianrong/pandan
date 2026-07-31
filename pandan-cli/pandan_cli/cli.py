@@ -1854,9 +1854,16 @@ def _cmd_board_get(client: PandanClient, config: Config, args: argparse.Namespac
 
 
 def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    """Rename a board and/or configure its V38 signed outbound webhook (KAN-502) —
-    the capability that was MCP-only until this slice, and the reason the packaged
-    skill shipped a raw-``curl`` workaround.
+    """Rename a board and/or configure its two per-board opt-ins: the EPIC-10 GitHub
+    PR auto-sync (KAN-529) and the V38 signed outbound webhook (KAN-502) — the
+    capability that was MCP-only until KAN-502, and the reason the packaged skill
+    shipped a raw-``curl`` workaround.
+
+    These six are exactly the API's ``BoardUpdate`` fields, so ``pandan board update``
+    now reaches all of ``PATCH /api/v1/boards/{id}``. The two ``--autosync-*`` tri-states
+    (KAN-529) close the last hole: they were reachable from *neither* adapter, which made
+    a raw ``curl`` the only way to turn auto-sync on — the exact state this verb exists
+    to end.
 
     Only the flags actually passed are sent; the client's ``_clean`` drops the rest, so
     an omitted field is left untouched. **The secret is write-only**: the API accepts it
@@ -1868,14 +1875,18 @@ def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Names
     secret = _read_secret_arg(args)
     fields = {
         "name": args.name,
+        "autosync_enabled": args.autosync_enabled,
+        "autosync_advance_to_done": args.autosync_advance_to_done,
         "outbound_webhook_url": args.outbound_webhook_url,
         "outbound_webhook_secret": secret,
         "outbound_webhook_enabled": args.outbound_webhook_enabled,
     }
     if all(value is None for value in fields.values()):
         raise CliError(
-            "nothing to update (pass --name / --outbound-webhook-url / "
-            "--outbound-webhook-secret[-stdin] / --outbound-webhook-enabled|-disabled)",
+            "nothing to update (pass --name / --autosync-enabled|-disabled / "
+            "--autosync-advance-to-done|--no-autosync-advance-to-done / "
+            "--outbound-webhook-url / --outbound-webhook-secret[-stdin] / "
+            "--outbound-webhook-enabled|-disabled)",
             code="invalid_input",
         )
     return client.update_board(args.board_id, **fields)
@@ -2851,10 +2862,45 @@ def build_parser() -> argparse.ArgumentParser:
     p_board_update = board_sub.add_parser(
         "update",
         parents=[common],
-        help="rename a board / configure its signed outbound webhook",
+        help="rename a board / configure its auto-sync + signed outbound webhook",
     )
     p_board_update.add_argument("board_id", type=int, metavar="BOARD", help="a board id")
     p_board_update.add_argument("--name", help="rename the board")
+    # EPIC-10 / ADR 0016 GitHub PR auto-sync (KAN-529). Both were reachable from neither
+    # the CLI nor MCP, so `curl` was the only way to opt a board in. Tri-states for the
+    # same reason as the webhook switch below: `--name`-only must not flip them.
+    autosync_group = p_board_update.add_mutually_exclusive_group()
+    autosync_group.add_argument(
+        "--autosync-enabled",
+        dest="autosync_enabled",
+        action="store_const",
+        const=True,
+        default=None,
+        help="turn GitHub PR auto-sync ON for this board (needs WEBHOOK_SECRET server-side)",
+    )
+    autosync_group.add_argument(
+        "--autosync-disabled",
+        dest="autosync_enabled",
+        action="store_const",
+        const=False,
+        help="turn GitHub PR auto-sync OFF for this board",
+    )
+    advance_group = p_board_update.add_mutually_exclusive_group()
+    advance_group.add_argument(
+        "--autosync-advance-to-done",
+        dest="autosync_advance_to_done",
+        action="store_const",
+        const=True,
+        default=None,
+        help="let a merged PR move its card to done (only effective while auto-sync is on)",
+    )
+    advance_group.add_argument(
+        "--no-autosync-advance-to-done",
+        dest="autosync_advance_to_done",
+        action="store_const",
+        const=False,
+        help="keep merge→done off: attach links + comment, but you move the card",
+    )
     p_board_update.add_argument(
         "--outbound-webhook-url",
         dest="outbound_webhook_url",

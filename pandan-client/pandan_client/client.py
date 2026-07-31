@@ -164,19 +164,30 @@ class PandanClient:
         board_id: int,
         *,
         name: str | None = None,
+        autosync_enabled: bool | None = None,
+        autosync_advance_to_done: bool | None = None,
         outbound_webhook_url: str | None = None,
         outbound_webhook_secret: str | None = None,
         outbound_webhook_enabled: bool | None = None,
     ) -> dict[str, Any]:
         """PATCH a board's settings — only the arguments you pass are sent.
 
-        ``name`` renames it; the ``outbound_webhook_*`` trio configures the V38 signed
-        outbound webhook (``_url`` target, ``_secret`` write-only HMAC key, ``_enabled``
-        on/off). ``_clean`` drops unset (None) args, so an omitted field is left
-        untouched (clearing a value needs the raw API, which accepts explicit null)."""
+        ``name`` renames it; the ``autosync_*`` pair is the EPIC-10 / ADR 0016 GitHub
+        PR→board opt-in (``autosync_enabled`` is the master switch, and
+        ``autosync_advance_to_done`` separately gates merge→Done, which only has effect
+        while the master switch is on); the ``outbound_webhook_*`` trio configures the
+        V38 signed outbound webhook (``_url`` target, ``_secret`` write-only HMAC key,
+        ``_enabled`` on/off).
+
+        These are the six fields of the API's ``BoardUpdate``. ``_clean`` drops unset
+        (None) args — and only ``None``, so an explicit ``False`` *is* sent — meaning an
+        omitted field is left untouched (clearing a string value needs the raw API,
+        which accepts explicit null)."""
         payload = _clean(
             {
                 "name": name,
+                "autosync_enabled": autosync_enabled,
+                "autosync_advance_to_done": autosync_advance_to_done,
                 "outbound_webhook_url": outbound_webhook_url,
                 "outbound_webhook_secret": outbound_webhook_secret,
                 "outbound_webhook_enabled": outbound_webhook_enabled,
