@@ -14,7 +14,9 @@ abuse hardening + projects + cycles + design system + notifications.
 **Milestone 7** ("Name & Sharpen the Tools", [docs/milestone-7/](docs/milestone-7/SLICES.md)) is
 **in progress**. Its first slice, **V40 — the `simple-kanban` → `pandan` rebrand**
 ([ADR 0018](docs/adr/0018-pandan-rebrand.md), which also names the `kaya` notes sibling), has landed:
-the product is **pandan**, the CLI is **`pandan`** (with a `pdn` alias), env config is **`PANDAN_*`**,
+the product is **pandan**, the CLI is **`pandan`** (the `pdn` alias was withdrawn in KAN-442 — a
+`--onefile` release can't deliver a console-script alias; symlink one if you want it), env config is
+**`PANDAN_*`**,
 and newly minted PATs carry **`pandan_pat_`**. The rebrand changed no API, schema or migration.
 [AXI](https://axi.md/) conformance for the CLI is well underway — V50 (release provenance), V42
 (`--fields`), V43 (the error contract) and V47 (`--format {human,json,toon}`) have all landed, through
@@ -508,7 +510,7 @@ spec for intended behavior:
   GitHub PR→board auto-sync via a signed webhook (`WEBHOOK_SECRET`, per-board opt-in) (0016),
   observability — DB-readiness health + structured request logging + opt-in Sentry (0017), and the
   **`simple-kanban` → `pandan` rebrand** with `kaya` as the notes sibling (suite: `kayatoast`) —
-  what gets renamed (CLI `kan`→`pandan`+`pdn`, MCP tool namespace, `PANDAN_*` env with a deprecated
+  what gets renamed (CLI `kan`→`pandan`, MCP tool namespace, `PANDAN_*` env with a deprecated
   `KANBAN_*` fallback, PAT mint prefix) and what deliberately does **not** (the immutable `KAN-`/
   `EPIC-` ticket prefixes, the deployed Fly/OAuth identity — deferred, and session/wire/storage
   identifiers) (0018).

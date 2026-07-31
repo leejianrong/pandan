@@ -1,4 +1,4 @@
-"""Runtime config for the ``pandan`` CLI (also available as ``pdn``).
+"""Runtime config for the ``pandan`` CLI.
 
 Each value (``api_url`` / ``token`` / ``board_id`` / ``max_text_chars``) is
 resolved independently through a precedence chain — the first source that
