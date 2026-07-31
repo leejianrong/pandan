@@ -14,6 +14,13 @@ boards, create = your earliest board). Card-id-addressed tools
 (``get_card``/``update_card``/``move_card``/``delete_card``) need no ``board_id``:
 the server authorizes via the card's own board.
 
+**The surface is frozen at 49 tools (V49, ADR 0019).** It was measured against a
+consolidated verb set and a single exec-``pandan`` tool and deliberately kept, as
+the documented fallback for a consumer that cannot run the CLI — but it does not
+grow. New board capability lands in the **CLI** first; adding a tool here means
+amending ADR 0019 and the pin in ``tests/test_schema.py``. See ``README.md``
+(*Why 49 tools, and why that is frozen*) for the reasoning and the numbers.
+
 Run with ``python -m pandan_mcp`` (or the ``pandan-mcp`` script); Claude Code
 launches it over stdio per the .mcp.json snippet in the README.
 """
@@ -25,6 +32,7 @@ from mcp.server.fastmcp import FastMCP
 from pandan_client import PandanClient
 
 from .config import load_config
+from .schema import compact_advertised_schemas
 
 Column = Literal["todo", "in_progress", "done"]
 Priority = Literal["none", "low", "medium", "high", "urgent"]
@@ -762,6 +770,15 @@ def cycle_metrics(cycle_id: int, board_id: int | None = None) -> dict[str, Any]:
     cycle is on that board; authorized via the board (you must be able to read it).
     """
     return _client_instance().cycle_metrics(_require_board(board_id), cycle_id)
+
+
+# --- V49: shrink what every session pays for the schemas above --------------
+
+# Runs once at import, after every ``@mcp.tool()`` above has registered. Drops the
+# Pydantic-generated ``title`` noise and flattens safely collapsible nullable
+# ``anyOf``s in the schemas clients are *shown* — ~16% of the resident cost, for no
+# change in behaviour (the validator is a separate object; see schema.py).
+_COMPACTED_TOOL_COUNT = compact_advertised_schemas(mcp)
 
 
 def main() -> None:
