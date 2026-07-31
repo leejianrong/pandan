@@ -534,9 +534,9 @@ def _humanize(
     # because it keys off the entity's own ``id``/``ticket_number`` rather than
     # naming the offenders. Each falls through to its single-entity branch below.
     envelope, rows = _list_envelope(result) or (None, [])
-    if envelope == "cards":  # list_cards
+    if envelope in _CARD_ENVELOPES:  # list_cards, and create_cards' `created` (KAN-502)
         if not rows:
-            return "(no cards)"
+            return f"(no {envelope})"
         lines = [_card_line(c) for c in rows]
         if result.get("next_cursor"):
             lines.append(f"(more — next cursor: {result['next_cursor']})")
@@ -1003,6 +1003,7 @@ FIELD_ALIASES = {
 # Order mirrors the checks in ``_humanize``; a result carries exactly one of these.
 _LIST_ENVELOPES = (
     "cards",
+    "created",
     "boards",
     "epics",
     "labels",
@@ -1014,9 +1015,16 @@ _LIST_ENVELOPES = (
     "comments",
 )
 
+# The envelopes whose rows are **cards**, so they share one renderer and one
+# aggregate shape (KAN-502). ``created`` is ``create_cards``' own key — ``batch-create``
+# returns ``{"created": [<card>, …]}`` verbatim rather than re-labelling it ``cards``,
+# because ``--format json`` is documented as the client's raw dict.
+_CARD_ENVELOPES = ("cards", "created")
+
 # Envelope key → the singular noun used in the unknown-field error message.
 _ROW_NOUN = {
     "cards": "card",
+    "created": "card",
     "boards": "board",
     "epics": "epic",
     "labels": "label",
@@ -1159,6 +1167,8 @@ def _project_rows(
 # so a new list verb cannot ship a summary line reading "1 cycles".
 _SUMMARY_NOUN: dict[str, tuple[str, str]] = {
     "cards": ("card", "cards"),
+    # ``batch-create``'s envelope holds cards, so it totals like a card list.
+    "created": ("card", "cards"),
     "boards": ("board", "boards"),
     "epics": ("epic", "epics"),
     "labels": ("label", "labels"),
@@ -1279,7 +1289,7 @@ def _summary_for(result: Any) -> tuple[str, dict[str, Any]] | None:
         return None
     key, rows = found
     summary: dict[str, Any] = {"count": len(rows)}
-    if key == "cards":
+    if key in _CARD_ENVELOPES:
         summary.update(_card_summary(rows))
     elif key == "epics":
         summary.update(_epic_summary(rows))
@@ -1300,7 +1310,7 @@ def _summary_line(kind: str, summary: dict[str, Any]) -> str:
     count = summary["count"]
     singular, plural = _SUMMARY_NOUN.get(kind, (kind, kind))
     parts = [f"{count} {singular if count == 1 else plural}"]
-    if kind == "cards":
+    if kind in _CARD_ENVELOPES:
         # The column buckets print even at zero — that IS the definitive state of a
         # filtered set (`--column todo` → `· 0 done`), and AXI 5 asks for definitive.
         parts += [f"{summary[column]} {column}" for column in COLUMNS]
@@ -1368,6 +1378,8 @@ _HINTS: dict[str, tuple[str, ...]] = {
     "create": ("pandan move <id> in_progress", "pandan update <id> --points N"),
     "update": ("pandan get <id>",),
     "move": ('pandan comment add <id> --body "…"', "pandan move <id> done"),
+    # `claim` lands a card in in_progress, so its next steps are `move`'s (KAN-502).
+    "claim": ('pandan comment add <id> --body "…"', "pandan move <id> done"),
     "next": ("pandan move <id> in_progress", 'pandan needs-human <id> --note "…"'),
     "needs-human": ("pandan resolve <id>",),
     "resolve": ("pandan move <id> done",),
@@ -1726,6 +1738,19 @@ def _cmd_next(client: PandanClient, config: Config, args: argparse.Namespace) ->
     return client.next_ready(board, label=args.label, priority=args.priority)
 
 
+def _cmd_claim(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """Claim a **named** card in one invocation (KAN-502): move it to ``in_progress``
+    and set its assignee. ``next --claim`` claims whatever the board offers next, so
+    it is not a substitute for claiming a card you have already chosen — that used to
+    need ``move`` + ``update``, two round trips a reader had to know to pair.
+
+    ``--assignee`` is **required**, exactly as it is on the MCP ``claim_card`` tool:
+    the shared client's ``claim_card`` PATCHes the assignee it is handed, and the
+    board API has no "the caller" default on that path (only ``dispatch`` does, which
+    is what ``next --claim`` uses). Not transactional — see the client's docstring."""
+    return client.claim_card(_resolve_card_id(client, args.card_id), args.assignee)
+
+
 def _cmd_needs_human(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.flag_needs_human(
         _resolve_card_id(client, args.card_id), attention_note=args.note
@@ -1805,12 +1830,81 @@ def _cmd_board_create(client: PandanClient, config: Config, args: argparse.Names
     return client.create_board(args.name)
 
 
+def _cmd_board_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.get_board(args.board_id)
+
+
+def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """Rename a board and/or configure its V38 signed outbound webhook (KAN-502) —
+    the capability that was MCP-only until this slice, and the reason the packaged
+    skill shipped a raw-``curl`` workaround.
+
+    Only the flags actually passed are sent; the client's ``_clean`` drops the rest, so
+    an omitted field is left untouched. **The secret is write-only**: the API accepts it
+    on PATCH and never returns it in a board read, so nothing below reads it back out of
+    ``result`` — the CLI passes it *in* and forgets it. Prefer
+    ``--outbound-webhook-secret-stdin``, which keeps it out of argv (and therefore out of
+    ``ps`` and the shell history), the same reason ``login``/``config set`` have
+    ``--token-stdin``."""
+    secret = _read_secret_arg(args)
+    fields = {
+        "name": args.name,
+        "outbound_webhook_url": args.outbound_webhook_url,
+        "outbound_webhook_secret": secret,
+        "outbound_webhook_enabled": args.outbound_webhook_enabled,
+    }
+    if all(value is None for value in fields.values()):
+        raise CliError(
+            "nothing to update (pass --name / --outbound-webhook-url / "
+            "--outbound-webhook-secret[-stdin] / --outbound-webhook-enabled|-disabled)",
+            code="invalid_input",
+        )
+    return client.update_board(args.board_id, **fields)
+
+
+def _read_secret_arg(args: argparse.Namespace) -> str | None:
+    """The outbound-webhook secret for ``board update``, or ``None`` when unset.
+
+    ``--outbound-webhook-secret-stdin`` reads exactly one line from stdin so the value
+    never enters argv — mirroring ``config set --token-stdin``. An empty read is an
+    error rather than a silent no-op, because "I piped nothing" and "I want to clear it"
+    must not look the same (clearing needs an explicit ``null``, which only the raw API
+    accepts today)."""
+    if getattr(args, "outbound_webhook_secret_stdin", False):
+        secret = sys.stdin.readline().strip()
+        if not secret:
+            raise CliError(
+                "no secret read from stdin",
+                code="invalid_input",
+                arg="--outbound-webhook-secret-stdin",
+            )
+        return secret
+    return args.outbound_webhook_secret
+
+
+def _cmd_board_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    if not args.yes:
+        raise CliError(
+            f"refusing to delete board {args.board_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
+        )
+    return client.delete_board(args.board_id)
+
+
 # --- epic handlers ----------------------------------------------------------
 # Epics are board-scoped, so list/create honour --board / PANDAN_BOARD_ID.
 
 
 def _cmd_epic_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_epics(board_id=_resolve_board(args.board, config))
+
+
+def _cmd_epic_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """Read a single epic by id or ``EPIC-<n>`` (KAN-502). A verb gap rather than a
+    capability gap — ``epic list`` could already show it — but ``get_epic`` had no
+    twin, and the one-epic read is what an agent following a card's ``epic_id`` wants."""
+    return client.get_epic(_resolve_epic_id(client, args.epic_id))
 
 
 def _cmd_epic_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -1992,6 +2086,52 @@ def _load_json_arg(value: str) -> Any:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise CliError(f"invalid JSON: {exc}", code="invalid_input") from exc
+
+
+def _cmd_batch_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """File N stories from one JSON array (KAN-502) — the CLI twin of ``create_cards``,
+    which needed N ``pandan create`` invocations before this slice.
+
+    **Fail-fast, not atomic.** There is no batch-create endpoint: the shared client
+    loops ``create_card``, so on the first rejection the cards *before* it stay created
+    and nothing rolls back. That is the opposite of ``batch-update``, which is one
+    server-side transaction, and it is why the two verbs are named differently rather
+    than being one flag.
+
+    Each object takes the same fields as ``create``'s flags, under the API's own names
+    (``title`` required; ``description``/``column``/``story_points``/``assignee``/
+    ``epic_id``/``cycle_id``/``priority``/``due_date``/``label_ids``/``board_id``).
+    ``board_id`` is filled in from ``--board`` / ``PANDAN_BOARD_ID`` for any object that
+    omits it, because a card dict with no board lands on your **earliest** board — the
+    footgun every other verb's board resolution exists to avoid. An object that names
+    its own ``board_id`` keeps it, so one batch can span boards."""
+    cards = _load_json_arg(args.cards)
+    if not isinstance(cards, list):
+        raise CliError(
+            "batch-create expects a JSON array of card objects (title required)",
+            code="invalid_input",
+            arg="JSON",
+        )
+    board = _resolve_board(args.board, config)
+    prepared: list[dict[str, Any]] = []
+    for index, card in enumerate(cards):
+        if not isinstance(card, dict):
+            raise CliError(
+                f"batch-create item {index} is not a JSON object",
+                code="invalid_input",
+                arg="JSON",
+            )
+        if not card.get("title"):
+            raise CliError(
+                f"batch-create item {index} has no title",
+                code="invalid_input",
+                arg="JSON",
+            )
+        prepared.append(
+            card if card.get("board_id") is not None or board is None
+            else {**card, "board_id": board}
+        )
+    return client.create_cards(prepared)
 
 
 def _cmd_batch_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -2559,6 +2699,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_next.set_defaults(func=_cmd_next, hints=_HINTS["next"])
 
+    # ``claim`` is the *named-card* counterpart of ``next --claim`` (KAN-502): one
+    # invocation that moves a card you chose to in_progress and assigns it, instead of
+    # `move` + `update`. Parity with the MCP `claim_card` tool, `--assignee` and all.
+    p_claim = sub.add_parser(
+        "claim",
+        parents=[common],
+        help="claim a named card (move to in_progress + assign) in one call",
+    )
+    p_claim.add_argument(
+        "card_id", type=_id_or_ticket_arg, metavar="CARD",
+        help="a card id or KAN-<n> ticket",
+    )
+    p_claim.add_argument(
+        "--assignee",
+        required=True,
+        help="who to claim it as (required — this path has no server-side default)",
+    )
+    p_claim.set_defaults(func=_cmd_claim, hints=_HINTS["claim"])
+
     # --- needs-human handoff (M5 V13, KAN-246) -------------------------------
     p_needs_human = sub.add_parser(
         "needs-human", parents=[common], help="flag a card as needing a human"
@@ -2645,7 +2804,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_notify_read.set_defaults(func=_cmd_notify_read, noun="notification")
 
     # --- board subcommands (nested group; parity with /api/v1/boards) --------
-    p_board = sub.add_parser("board", help="manage boards (list / create)")
+    # ``get``/``update``/``delete`` land in KAN-502: until then the group had only
+    # ``list``/``create``, so renaming a board — or setting up its V38 signed outbound
+    # webhook — was reachable only from MCP or a raw ``curl`` (ADR 0019 rejected
+    # "let the CLI be the surface" partly on this).
+    p_board = sub.add_parser(
+        "board", help="manage boards (list / get / create / update / delete)"
+    )
     board_sub = p_board.add_subparsers(
         dest="board_command", metavar="<subcommand>", required=True
     )
@@ -2654,14 +2819,79 @@ def build_parser() -> argparse.ArgumentParser:
     _add_fields_arg(p_board_list, "id,name,owner_id")
     p_board_list.set_defaults(func=_cmd_board_list, noun="board")
 
+    p_board_get = board_sub.add_parser("get", parents=[common], help="get a single board by id")
+    p_board_get.add_argument("board_id", type=int, metavar="BOARD", help="a board id")
+    p_board_get.set_defaults(func=_cmd_board_get, noun="board")
+
     p_board_create = board_sub.add_parser("create", parents=[common], help="create a board")
     p_board_create.add_argument("name")
     p_board_create.set_defaults(
         func=_cmd_board_create, noun="board", hints=_HINTS["board create"]
     )
 
+    p_board_update = board_sub.add_parser(
+        "update",
+        parents=[common],
+        help="rename a board / configure its signed outbound webhook",
+    )
+    p_board_update.add_argument("board_id", type=int, metavar="BOARD", help="a board id")
+    p_board_update.add_argument("--name", help="rename the board")
+    p_board_update.add_argument(
+        "--outbound-webhook-url",
+        dest="outbound_webhook_url",
+        metavar="URL",
+        help="where to POST each notification (V38 signed outbound webhook)",
+    )
+    # The secret is a credential: argv is visible in `ps` and lands in shell history, so
+    # the stdin form is the documented path and the flag exists for parity/scripting.
+    secret_group = p_board_update.add_mutually_exclusive_group()
+    secret_group.add_argument(
+        "--outbound-webhook-secret",
+        dest="outbound_webhook_secret",
+        metavar="SECRET",
+        help=(
+            "the HMAC-SHA256 signing key (write-only: the API never reads it back, and "
+            "neither does this CLI). Prefer --outbound-webhook-secret-stdin — a value "
+            "here is visible in `ps` and your shell history"
+        ),
+    )
+    secret_group.add_argument(
+        "--outbound-webhook-secret-stdin",
+        dest="outbound_webhook_secret_stdin",
+        action="store_true",
+        help="read the signing key as one line from stdin, so it never enters argv",
+    )
+    # A tri-state: absent leaves the flag alone, which is what makes `--name`-only
+    # renames safe. store_const rather than store_true/false so "unset" stays None.
+    enabled_group = p_board_update.add_mutually_exclusive_group()
+    enabled_group.add_argument(
+        "--outbound-webhook-enabled",
+        dest="outbound_webhook_enabled",
+        action="store_const",
+        const=True,
+        default=None,
+        help="turn outbound webhook delivery ON for this board",
+    )
+    enabled_group.add_argument(
+        "--outbound-webhook-disabled",
+        dest="outbound_webhook_enabled",
+        action="store_const",
+        const=False,
+        help="turn outbound webhook delivery OFF for this board",
+    )
+    p_board_update.set_defaults(func=_cmd_board_update, noun="board")
+
+    p_board_delete = board_sub.add_parser(
+        "delete", parents=[common], help="delete a board (its cards + epics cascade)"
+    )
+    p_board_delete.add_argument("board_id", type=int, metavar="BOARD", help="a board id")
+    p_board_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
+    p_board_delete.set_defaults(func=_cmd_board_delete, noun="board")
+
     # --- epic subcommands (nested group; parity with /api/v1/epics) ----------
-    p_epic = sub.add_parser("epic", help="manage epics (list / create / update / delete)")
+    p_epic = sub.add_parser(
+        "epic", help="manage epics (list / get / create / update / delete)"
+    )
     epic_sub = p_epic.add_subparsers(
         dest="epic_command", metavar="<subcommand>", required=True
     )
@@ -2670,6 +2900,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_epic_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     _add_fields_arg(p_epic_list, "ticket,name,lead,target_date")
     p_epic_list.set_defaults(func=_cmd_epic_list, noun="epic")
+
+    p_epic_get = epic_sub.add_parser(
+        "get", parents=[common], help="get a single epic by id or EPIC-<n>"
+    )
+    p_epic_get.add_argument(
+        "epic_id", type=_id_or_ticket_arg, metavar="EPIC",
+        help="an epic id or EPIC-<n> ticket",
+    )
+    p_epic_get.set_defaults(func=_cmd_epic_get, noun="epic")
 
     p_epic_create = epic_sub.add_parser("create", parents=[common], help="create an epic")
     p_epic_create.add_argument("name")
@@ -2826,6 +3065,42 @@ def build_parser() -> argparse.ArgumentParser:
     p_cycle_metrics.add_argument("cycle_id", type=int)
     p_cycle_metrics.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_cycle_metrics.set_defaults(func=_cmd_cycle_metrics, noun="cycle")
+
+    # --- batch create (KAN-502): N creates in one invocation -----------------
+    # Deliberately NOT atomic and deliberately a separate verb from `batch-update`,
+    # which is: there is no batch-create endpoint, so the shared client loops
+    # `create_card` and the cards before a rejection stay created. Naming the two
+    # differently is how a caller finds that out without reading the source.
+    p_batch_create = sub.add_parser(
+        "batch-create",
+        parents=[common],
+        help="create several cards in one call (JSON array; fail-fast, NOT atomic)",
+        # The one place a caller reads before running it, so the non-atomicity is
+        # stated here rather than only in the source. `batch-update` is atomic;
+        # this is not, and the difference decides how you recover from a failure.
+        description=(
+            "Create several cards in one invocation. Fail-fast and NOT atomic: there is "
+            "no batch-create endpoint, so this loops one POST per card and the cards "
+            "created BEFORE a rejection stay created — nothing is rolled back. Re-run "
+            "with the remainder rather than the whole array. (`batch-update` is the "
+            "atomic one: it is a single server-side transaction.)"
+        ),
+    )
+    p_batch_create.add_argument(
+        "cards",
+        metavar="JSON",
+        help=(
+            "a JSON array of card objects (\"title\" required), or '-' to read stdin "
+            "(so `pandan batch-create - < cards.json` files a whole plan). Fields are "
+            "the API's own names: description/column/story_points/assignee/epic_id/"
+            "cycle_id/priority/due_date/label_ids/board_id"
+        ),
+    )
+    p_batch_create.add_argument(
+        "--board", type=int,
+        help="board id filled into objects that omit board_id (default: PANDAN_BOARD_ID)",
+    )
+    p_batch_create.set_defaults(func=_cmd_batch_create)
 
     # --- batch update (M5 V19 / KAN-252): atomic multi-card PATCH ------------
     # One transaction server-side: all cards update or none (any bad id fails the

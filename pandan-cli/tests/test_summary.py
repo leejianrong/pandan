@@ -77,6 +77,18 @@ POPULATED: dict[str, tuple[list[str], dict, str]] = {
         },
         "4 cards · 2 todo · 1 in_progress · 1 done · 1 needs-human",
     ),
+    # `batch-create` (KAN-502) returns `create_cards`' own {"created": [...]} envelope,
+    # whose rows are cards — so it totals exactly like `list`, and the aggregate is the
+    # cheapest way for the caller to confirm what actually landed on a fail-fast verb.
+    "batch-create": (
+        ["batch-create", '[{"title": "a"}, {"title": "b"}, {"title": "c"}]', "--board", "5"],
+        {"created": [
+            _card("KAN-11", "todo"),
+            _card("KAN-12", "todo"),
+            _card("KAN-13", "in_progress"),
+        ]},
+        "3 cards · 2 todo · 1 in_progress · 0 done",
+    ),
     "board list": (
         ["board", "list"],
         {"boards": [{"id": 5, "name": "Roadmap", "owner_id": 1}]},
@@ -164,6 +176,13 @@ EMPTY: dict[str, tuple[list[str], dict, str]] = {
         "help: pandan get <id>\n"
         "help: pandan move <id> in_progress\n"
         "0 cards · 0 todo · 0 in_progress · 0 done\n",
+    ),
+    # The zero state keeps the envelope's own name (`created`), like every other verb
+    # here — the CLI never re-labels the client's key (see `cli._CARD_ENVELOPES`).
+    "batch-create": (
+        ["batch-create", "[]", "--board", "5"],
+        {"created": []},
+        "(no created)\n0 cards · 0 todo · 0 in_progress · 0 done\n",
     ),
     "board list": (["board", "list"], {"boards": []}, "(no boards)\n0 boards\n"),
     "epic list": (
