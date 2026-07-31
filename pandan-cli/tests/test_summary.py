@@ -158,7 +158,12 @@ EMPTY: dict[str, tuple[list[str], dict, str]] = {
     "list": (
         ["list", "--board", "5"],
         {"cards": [], "next_cursor": None},
-        "(no cards)\n0 cards · 0 todo · 0 in_progress · 0 done\n",
+        # `list` is the one hinted verb here (KAN-492), and its hints land between the
+        # prose zero-state and the aggregate — which is what keeps `tail -1` the count.
+        "(no cards)\n"
+        "help: pandan get <id>\n"
+        "help: pandan move <id> in_progress\n"
+        "0 cards · 0 todo · 0 in_progress · 0 done\n",
     ),
     "board list": (["board", "list"], {"boards": []}, "(no boards)\n0 boards\n"),
     "epic list": (
@@ -235,8 +240,9 @@ def run_capture(monkeypatch, capsys, argv, result) -> str:
     assert cli.run(argv) == cli.EXIT_OK
     return capsys.readouterr().out
 def without_hints(out: str) -> str:
-    """``out`` minus V46's ``help:`` next-step lines (KAN-429), which ``_emit`` appends
-    after the result on the decision-point verbs (``get``/``create``/``move``/…).
+    """``out`` minus V46's ``help:`` next-step lines (KAN-429), which ``_emit`` prints
+    for the hinted verbs (``get``/``create``/``move``/``list``/…) after the result and,
+    since KAN-492, **above** the aggregate line this suite is about.
 
     Applied at the assertion site and deliberately **not** inside ``run_capture``:
     every "stdout still parses as JSON/TOON" check in this suite must stay able to
@@ -258,9 +264,10 @@ def test_every_list_verb_ends_with_its_aggregate(monkeypatch, capsys, verb):
 @pytest.mark.parametrize("verb", VERBS)
 def test_the_aggregate_does_not_disturb_the_rows_above_it(monkeypatch, capsys, verb):
     """The summary is *appended*: strip the last line and what remains is exactly what
-    ``_humanize`` produced before this slice."""
+    ``_humanize`` produced before this slice. (Hints are stripped first — since KAN-492
+    ``list`` carries them, and they sit between the rows and the aggregate.)"""
     argv, result, _ = POPULATED[verb]
-    out = run_capture(monkeypatch, capsys, argv, result)
+    out = without_hints(run_capture(monkeypatch, capsys, argv, result))
     rows = "\n".join(out.splitlines()[:-1])
     assert rows == cli._humanize(result)
 
@@ -272,7 +279,7 @@ def test_the_count_matches_the_rows_actually_printed(monkeypatch, capsys, verb):
     if verb == "dep list":
         pytest.skip("dep list has two arrays and no single row count")
     kind, summary = cli._summary_for(result)
-    out = run_capture(monkeypatch, capsys, argv, result)
+    out = without_hints(run_capture(monkeypatch, capsys, argv, result))
     printed_rows = len(out.splitlines()) - 1  # minus the aggregate itself
     assert summary["count"] == printed_rows
     assert summary["count"] == len(result[kind])
@@ -405,7 +412,7 @@ def test_an_empty_result_keeps_its_prose_zero_state_too(monkeypatch, capsys, ver
     always true. Mutation-tested. So assert the prose exists, is non-empty, and comes
     FIRST — above the aggregate, where a reader meets it."""
     argv, result, _ = EMPTY[verb]
-    out = run_capture(monkeypatch, capsys, argv, result)
+    out = without_hints(run_capture(monkeypatch, capsys, argv, result))
     prose = cli._humanize(result).splitlines()
     assert prose and all(line.strip() for line in prose)
     assert out.splitlines()[: len(prose)] == prose

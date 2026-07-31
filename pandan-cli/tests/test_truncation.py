@@ -98,8 +98,9 @@ def run_capture(monkeypatch, capsys, argv, result, *, exit_code=cli.EXIT_OK) -> 
     assert cli.run(argv) == exit_code
     return capsys.readouterr().out
 def without_hints(out: str) -> str:
-    """``out`` minus V46's ``help:`` next-step lines (KAN-429), which ``_emit`` appends
-    after the result on the decision-point verbs (``get``/``create``/``move``/…).
+    """``out`` minus V46's ``help:`` next-step lines (KAN-429), which ``_emit`` prints
+    for the hinted verbs (``get``/``create``/``move``/``list``/…) after the result and,
+    since KAN-492, above the V44 aggregate line rather than below it.
 
     Applied at the assertion site and deliberately **not** inside ``run_capture``:
     every "stdout still parses as JSON/TOON" check in this suite must stay able to
@@ -228,7 +229,7 @@ def test_a_list_row_never_grows_a_description_block(monkeypatch, capsys):
     SINGLE-entity affordance. Without this guard, `list` on the real board would
     print 118 cards × 500 characters."""
     result = {"cards": [_card(description=LONG), _card(description=SHORT)], "next_cursor": None}
-    out = run_capture(monkeypatch, capsys, ["list"], result)
+    out = without_hints(run_capture(monkeypatch, capsys, ["list"], result))
     rows = [line for line in out.splitlines() if not line.startswith("2 cards")]
     assert rows == ["KAN-478\ttodo\tShip it\tpts=1"] * 2
     assert "description" not in out

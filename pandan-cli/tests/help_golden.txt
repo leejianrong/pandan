@@ -4,6 +4,7 @@ Manage Pandan cards, boards, and epics from the command line.
 
 positional arguments:
   <command>
+    overview      live board state (what bare pandan prints)
     warmup        wake the API (ping /api/health) before a batch of work
     list          list / query cards
     get           get a single card by id
