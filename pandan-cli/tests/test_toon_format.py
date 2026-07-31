@@ -244,6 +244,15 @@ def run_capture(monkeypatch, capsys, argv, result) -> str:
     monkeypatch.setattr(cli, "PandanClient", lambda *a, **k: FakeClient(result))
     assert cli.run(argv) == cli.EXIT_OK
     return capsys.readouterr().out
+def without_hints(out: str) -> str:
+    """``out`` minus V46's ``help:`` next-step lines (KAN-429), which ``_emit`` appends
+    after the result on the decision-point verbs (``get``/``create``/``move``/…).
+
+    Applied at the assertion site and deliberately **not** inside ``run_capture``:
+    every "stdout still parses as JSON/TOON" check in this suite must stay able to
+    catch a hint leaking into a structured format. The hints themselves are pinned in
+    ``tests/test_content_first.py``."""
+    return "".join(f"{line}\n" for line in out.splitlines() if not line.startswith(cli.HINT_PREFIX))
 
 
 # --- 1. round-trip equality -------------------------------------------------
@@ -318,7 +327,7 @@ def test_no_flag_and_format_human_are_byte_identical(monkeypatch, capsys, argv, 
     found = cli._summary_for(result)
     if found is not None:
         expected += "\n" + cli._summary_line(*found)
-    assert bare == expected + "\n"
+    assert without_hints(bare) == expected + "\n"
 
 
 def test_the_default_list_row_is_still_tab_separated_with_no_keys(monkeypatch, capsys):

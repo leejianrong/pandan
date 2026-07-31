@@ -1,0 +1,65 @@
+usage: pandan [-h] [-v] <command> ...
+
+Manage Pandan cards, boards, and epics from the command line.
+
+positional arguments:
+  <command>
+    warmup        wake the API (ping /api/health) before a batch of work
+    list          list / query cards
+    get           get a single card by id
+    create        create a card
+    update        edit a card's fields
+    move          move a card to a column
+    delete        delete a card
+    next          show the next ready card (--claim to atomically dispatch it)
+    needs-human   flag a card as needing a human
+    resolve       clear a card's needs-human flag
+    metrics       derived flow metrics for a board (throughput / cycle time /
+                  aging / by-assignee)
+    activity      a board's activity feed, newest-first (filter by --actor /
+                  --action)
+    notify        your notification inbox (list / read)
+    board         manage boards (list / create)
+    epic          manage epics (list / create / update / delete)
+    label         manage labels (list / create / delete)
+    view          manage saved views (list / create / delete)
+    cycle         manage cycles / iterations (list / create / delete)
+    batch-update  atomically PATCH several cards (JSON array of {id,
+                  ...fields})
+    template      manage card templates (list / create / delete / apply)
+    login         save your PAT to the config file (prompts; never on the
+                  command line)
+    config        inspect / set the config file (set / show / path)
+    context       ambient board context for an agent session (install /
+                  uninstall / show / status)
+    dep           manage card dependencies (add / rm / list blocking edges)
+    link          manage card work-links (add / rm)
+    comment       manage card notes (add / list)
+
+options:
+  -h, --help      show this help message and exit
+  -v, --version   print the CLI version + build commit and exit
+
+Configuration keys (api_url / token / board_id), resolved per value in
+this order — first non-empty wins:
+  1. env vars   PANDAN_API_URL / PANDAN_TOKEN / PANDAN_BOARD_ID
+  2. config file  ~/.config/pandan/config.toml  (see `pandan login`)
+  3. .mcp.json    nearest up the tree, .mcpServers.pandan.env.*
+So the PAT can stay in a file and never touch the command line. Run
+`pandan login` once to save it; `pandan config show` prints the effective config.
+
+Output: --format human (default, tab-separated) | json | toon.
+--json is a supported alias for --format json; --format wins if both
+are given. toon is the token-cheap rendering for nested payloads.
+
+Every list verb ends with a pre-computed aggregate, so counts never cost
+a second request:  42 cards · 12 todo · 5 in_progress · 25 done
+(· N needs-human when non-zero). It always describes the rows RETURNED —
+under --limit or a filter, not the whole board. Under --format json/toon
+the same numbers ride the payload as a `summary` object instead.
+
+Exit codes: 0 ok, 1 error, 2 usage, 3 unauthorized, 4 forbidden, 5 not found
+(a KAN-/EPIC- ticket that resolves to nothing is also 5).
+Errors print one row on STDOUT: error<TAB>code<TAB>message<TAB>arg
+(an {"error": {...}} object under --format json/toon). No verb ever
+prompts when stdin is not a terminal.

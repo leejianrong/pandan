@@ -245,6 +245,17 @@ def patch_client(monkeypatch, fake: FakeClient) -> FakeClient:
     return fake
 
 
+def data_out(capsys) -> str:
+    """stdout with V46's ``help:`` next-step lines removed (KAN-429).
+
+    ``_emit`` appends those to the decision-point verbs (``get``/``create``/``move``/
+    ``next``/…) after the result. The assertions that use this helper are about the
+    row itself, so they read the data lines only rather than restating V46's contract,
+    which is pinned in ``tests/test_content_first.py``."""
+    out = capsys.readouterr().out
+    return "\n".join(line for line in out.splitlines() if not line.startswith(cli.HINT_PREFIX))
+
+
 class Err(NamedTuple):
     """A parsed structured error (V43, KAN-426): the row's three fields + both streams."""
 
@@ -981,7 +992,7 @@ def test_get_shows_story_points_field(monkeypatch, env, capsys):
     }
     patch_client(monkeypatch, FakeClient(result=card))
     assert cli.run(["get", "3"]) == 0
-    assert capsys.readouterr().out.strip() == "KAN-3\tin_progress\tWIP\tpts=8"
+    assert data_out(capsys).strip() == "KAN-3\tin_progress\tWIP\tpts=8"
 
 
 def test_single_card_with_labels_renders_card_line_not_no_labels(monkeypatch, env, capsys):
@@ -995,7 +1006,7 @@ def test_single_card_with_labels_renders_card_line_not_no_labels(monkeypatch, en
     }
     patch_client(monkeypatch, FakeClient(result=card))
     assert cli.run(["get", "260"]) == 0
-    out = capsys.readouterr().out.strip()
+    out = data_out(capsys).strip()
     assert out == "KAN-260\tdone\tFix humanize\tpts=3"
     assert out != "(no labels)"
     assert "(no labels)" not in out
@@ -1192,7 +1203,7 @@ def test_epic_single_human_output(monkeypatch, env, capsys):
     # The head line is unchanged; V45 (KAN-428) appends the epic's own description
     # to a **single**-entity render (``EPIC`` carries ``description: "d"``), well
     # under the limit so it prints verbatim with no hint.
-    assert capsys.readouterr().out.strip() == (
+    assert data_out(capsys).strip() == (
         "EPIC-1\tOnboarding\t60% (3/5) [at_risk]\ndescription:\nd"
     )
 
@@ -1618,7 +1629,7 @@ def test_next_humanizes_empty(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"card": None}))
     code = cli.run(["next", "--board", "3"])
     assert code == 0
-    assert capsys.readouterr().out.strip() == "(no card ready)"
+    assert data_out(capsys).strip() == "(no card ready)"
 
 
 # --- KAN-285: id-taking commands accept KAN-/EPIC- tickets (not only DB ids) --

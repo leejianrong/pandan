@@ -97,6 +97,15 @@ def run_capture(monkeypatch, capsys, argv, result, *, exit_code=cli.EXIT_OK) -> 
     monkeypatch.setattr(cli, "PandanClient", lambda *a, **k: FakeClient(result))
     assert cli.run(argv) == exit_code
     return capsys.readouterr().out
+def without_hints(out: str) -> str:
+    """``out`` minus V46's ``help:`` next-step lines (KAN-429), which ``_emit`` appends
+    after the result on the decision-point verbs (``get``/``create``/``move``/…).
+
+    Applied at the assertion site and deliberately **not** inside ``run_capture``:
+    every "stdout still parses as JSON/TOON" check in this suite must stay able to
+    catch a hint leaking into a structured format. The hints themselves are pinned in
+    ``tests/test_content_first.py``."""
+    return "".join(f"{line}\n" for line in out.splitlines() if not line.startswith(cli.HINT_PREFIX))
 
 
 def hint(total: int) -> str:
@@ -150,15 +159,15 @@ def test_get_with_no_description_renders_exactly_the_pre_v45_one_line_summary(
     description prints the same single line it always did."""
     card = _card()
     out = run_capture(monkeypatch, capsys, ["get", "478"], card)
-    assert out == cli._card_line(card) + "\n"
-    assert out == "KAN-478\ttodo\tShip it\tpts=1\n"
+    assert without_hints(out) == cli._card_line(card) + "\n"
+    assert without_hints(out) == "KAN-478\ttodo\tShip it\tpts=1\n"
     assert "description" not in out
 
 
 @pytest.mark.parametrize("description", [None, ""])
 def test_get_with_an_empty_description_renders_unchanged(monkeypatch, capsys, description):
     out = run_capture(monkeypatch, capsys, ["get", "478"], _card(description=description))
-    assert out == "KAN-478\ttodo\tShip it\tpts=1\n"
+    assert without_hints(out) == "KAN-478\ttodo\tShip it\tpts=1\n"
 
 
 def test_get_now_shows_a_short_description_verbatim_with_no_hint(monkeypatch, capsys):
@@ -166,7 +175,7 @@ def test_get_now_shows_a_short_description_verbatim_with_no_hint(monkeypatch, ca
     showed NO description, so there was nothing to truncate — there was nothing at
     all. Under the limit it prints byte-for-byte."""
     out = run_capture(monkeypatch, capsys, ["get", "478"], _card(description=SHORT))
-    assert out == f"KAN-478\ttodo\tShip it\tpts=1\ndescription:\n{SHORT}\n"
+    assert without_hints(out) == f"KAN-478\ttodo\tShip it\tpts=1\ndescription:\n{SHORT}\n"
     assert "truncated" not in out
 
 
@@ -187,7 +196,7 @@ def test_get_truncates_a_long_description_and_the_total_is_true(monkeypatch, cap
 
 def test_full_restores_the_whole_description_in_human_get(monkeypatch, capsys):
     out = run_capture(monkeypatch, capsys, ["get", "478", "--full"], _card(description=LONG))
-    assert out == f"KAN-478\ttodo\tShip it\tpts=1\ndescription:\n{LONG}\n"
+    assert without_hints(out) == f"KAN-478\ttodo\tShip it\tpts=1\ndescription:\n{LONG}\n"
     assert "truncated" not in out
 
 
