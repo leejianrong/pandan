@@ -323,6 +323,77 @@ mcp/scripts/assert-image-provenance.sh \
 > Anything long-lived (a committed `.mcp.json`, a CI job) should pin a semver tag
 > or a digest.
 
+### Which toolchain is inside? (KAN-475)
+
+**Scope statement, up front: the MCP image is _not_ byte-reproducible from its
+commit alone, and that is a deliberate, documented position rather than an
+oversight.** "Pin by digest for a reproducible **run**" above is a different
+promise from a reproducible **build** — the first says *these exact bytes again*,
+the second says *this commit yields these bytes*. Only the first is true here.
+
+`mcp/Dockerfile`'s two build inputs float, so `docker build` from a fixed commit
+can produce different images over time:
+
+| Input | Dockerfile default | Drift |
+| --- | --- | --- |
+| `python:3.12-slim` | interpreter + OS base | patch releases **and the Debian base**. It resolved to Debian 12 / glibc 2.36 once and to `3.12.13-slim-trixie` — Debian 13.6 / **glibc 2.41** — when KAN-475 measured it. Calling it "pinned to a minor" is generous: the C library floor moved. |
+| `ghcr.io/astral-sh/uv:latest` | the uv binary | fully unconstrained; any release at any time (0.12.0 when measured). |
+
+So `org.opencontainers.image.revision` is true but weaker than it looks — it
+says which commit, not which toolchain, and the release gate compares label
+values so it cannot see a toolchain difference either.
+
+**What the release does about it.** `publish-mcp-image.yml` resolves both tags to
+immutable digests **once per release**, builds against those digests, and records
+them on the image:
+
+```bash
+docker inspect --format '{{json .Config.Labels}}' \
+  ghcr.io/leejianrong/pandan-mcp:latest | jq .
+# → "io.github.leejianrong.pandan.build.python": "python@sha256:57cd7c3a…"
+#   "io.github.leejianrong.pandan.build.uv":     "ghcr.io/astral-sh/uv@sha256:606e70c7…"
+```
+
+The gate **fails the release** if either label is missing or is not digest-pinned,
+so the record cannot quietly regress. Two consequences worth stating plainly:
+
+- **Within a release the build is pinned.** The workflow builds twice (gate, then
+  push) and both builds now get the same resolved digests, so they cannot differ
+  in interpreter or uv.
+- **Across releases the inputs still move**, on purpose — you get current security
+  patches. The image is therefore **auditable, not reproducible**: it tells you
+  exactly which toolchain it got.
+
+**Rebuilding a published image's toolchain.** Read the two labels off the image
+(or the publishing run's job summary, which prints them) and pass them back:
+
+```bash
+docker build -f mcp/Dockerfile -t pandan-mcp:rebuild \
+  --build-arg PYTHON_BASE=python@sha256:<from the label> \
+  --build-arg UV_SOURCE=ghcr.io/astral-sh/uv@sha256:<from the label> .
+```
+
+With no `--build-arg` the defaults are the floating tags, so a plain
+`docker build` still needs no arguments.
+
+> **Why not just commit digest pins to the Dockerfile?** Because they would have
+> **no watcher**, which is worse than floating: a stale pin *looks* maintained.
+> `.github/dependabot.yml` has no `docker` ecosystem, and adding one would not
+> help the input that matters most — Dependabot's Docker updater ignores
+> `COPY --from` image references entirely
+> ([dependabot/dependabot-core#5103](https://github.com/dependabot/dependabot-core/issues/5103),
+> open since 2022), which is exactly how `uv` enters this image. A committed `uv`
+> pin could therefore never be bumped automatically, and would rot into a
+> stale-security-patch. Resolving at release time needs no watcher at all: every
+> release picks up current patches *and* records precisely what it picked up.
+> Committed digest pins become the right trade when the deployment threat model
+> changes — revisit alongside the k8s migration (KAN-439).
+>
+> The gate is consequently a check on a **release artifact**, not on any local
+> build: a plain `docker build` passes no labels, so it fails the gate (it already
+> did, on `.revision`). Images published *before* KAN-475 have no toolchain labels
+> and will fail on those two assertions specifically.
+
 ## Wire it into Claude Code
 
 Copy [`.mcp.json.example`](../.mcp.json.example) to `.mcp.json` at the repo root
