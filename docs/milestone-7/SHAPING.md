@@ -102,12 +102,19 @@ already-efficient path to satisfy a rubric literally would be cargo-culting it.
 
 ### MCP right-sizing — the unexamined cost
 
-The MCP server has **48 tools**. Every one of those schemas loads into an agent's context before it
-does any work, and the CLI now has full parity with all of them — so for any agent that can run a
-shell, the CLI-plus-skill path is *strictly cheaper per task* than the MCP path. That's a real
-tradeoff nobody has priced. M7 prices it and acts on the answer; it does not assume the answer is
-"delete things" (MCP is the documented fallback for agents without shell access, and that's a
-legitimate reason to keep breadth). The decision needs a measurement and an ADR, so it's a slice.
+The MCP server has **49 tools** (this section said 48; the count was verified in V49). Every one of
+those schemas loads into an agent's context before it does any work, and the CLI is cheap to drive — so
+for any agent that can run a shell, the CLI-plus-skill path looks *cheaper per task* than the MCP path.
+That's a real tradeoff nobody has priced. M7 prices it and acts on the answer; it does not assume the
+answer is "delete things" (MCP is the documented fallback for agents that can't run the CLI, and that's
+a legitimate reason to keep breadth). The decision needs a measurement and an ADR, so it's a slice.
+
+> **Priced in V49, and two claims here were wrong** ([ADR 0019](../adr/0019-mcp-surface-right-sizing.md)).
+> The CLI is **not** at full parity: parity runs MCP ⊇ CLI, and `update_board`/`delete_board` have no CLI
+> verb at all. And the resident cost — 8,775 `o200k_base` tokens — is the *small* half: a single
+> `list_cards` against the real board returns ~45k, 5× the whole schema surface. The CLI is still
+> cheaper per task (11.4× on real reads), but because the MCP adapter never got V42/V45/V47's payload
+> shaping, not because of the tool count. Decision: keep the breadth, freeze its growth.
 
 ---
 
@@ -136,7 +143,7 @@ legitimate reason to keep breadth). The decision needs a measurement and an ADR,
 | R2.10 | Existing conformance (AXI 5 empty states, AXI 10 per-subcommand `--help`) is **regression-guarded by tests**, not re-implemented | Must-have |
 | R2.11 | **Release discipline**: a user-visible CLI change bumps the version in the same PR, and `--version` **discriminates** a released build from a source run — so "which `kan` am I running?" is answerable | Must-have |
 | **R3** | **MCP right-sizing** | |
-| R3.1 | Measure the schema token cost of the 48-tool surface and of each alternative | Must-have |
+| R3.1 | Measure the schema token cost of the **49**-tool surface and of each alternative | Must-have — ✅ V49, harness at `mcp/scripts/measure_tool_schema_tokens.py` |
 | R3.2 | Record the chosen surface as an ADR and execute it | Nice-to-have |
 | **R4** | **Constraints (non-functional)** | |
 | R4.1 | **No API, schema or migration change** — M7 lives in the CLI/MCP/docs/deploy layers only | Must-have |
@@ -193,9 +200,10 @@ legitimate reason to keep breadth). The decision needs a measurement and an ADR,
 - **Release discipline is an ergonomics feature, not chores.** An agent (or a user) that cannot tell
   which build it is running cannot trust any other guarantee in this list — a documented output
   contract is worthless if the binary predates it. Hence KAN-435 leads EPIC-67.
-- **MCP right-sizing is measured before it's decided.** The 48-tool surface may be correct as a
-  documented fallback for shell-less agents; the slice's job is to price it and write the ADR, not to
-  presume deletion.
+- **MCP right-sizing is measured before it's decided.** The 49-tool surface may be correct as a
+  documented fallback for agents that can't run the CLI; the slice's job is to price it and write the
+  ADR, not to presume deletion. *(Vindicated: V49 measured it and kept the breadth. The measurement
+  also relocated the problem — see [ADR 0019](../adr/0019-mcp-surface-right-sizing.md).)*
 - **No API/schema change in M7.** Every gap found is in the adapter layer. If a fix seems to need an
   endpoint, that's a signal it belongs in a later milestone, not scope creep here.
 
