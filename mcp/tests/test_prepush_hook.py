@@ -263,13 +263,17 @@ def test_second_push_of_a_merge_commit_passes(scratch):
 
     # Merge main into the branch, keeping our higher version on conflict.
     scratch.git("switch", "-q", BRANCH)
-    merge = subprocess.run(
-        ["git", "merge", "--no-ff", "-m", "Merge origin/main into the branch", landed],
-        cwd=scratch.path,
-        capture_output=True,
-        text=True,
+    merge = scratch.git_raw("merge", "--no-ff", "-m", "Merge origin/main into the branch", landed)
+    # Be specific about WHY it failed. `assert returncode != 0` alone is the
+    # classic blind assertion — any unrelated git error satisfies it, and one did
+    # (this call once ran without the scrubbed env and failed on an unknown sha,
+    # which looked exactly like a conflict).
+    assert "CONFLICT" in merge.stdout + merge.stderr, (
+        "expected a version-line conflict, got:\n" + merge.stdout + merge.stderr
     )
-    assert merge.returncode != 0, "expected the version line to conflict"
+    assert scratch.git_raw("rev-parse", "--verify", "-q", "MERGE_HEAD").returncode == 0, (
+        "no merge in progress — the conflict never happened"
+    )
     scratch.write(_init_version("0.11.0"))
     scratch.git("add", "-A")
     scratch.git("commit", "-q", "--no-edit")
