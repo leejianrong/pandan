@@ -226,9 +226,11 @@ def _error_payload(err: CliError) -> dict[str, Any]:
 
 def _error_row(err: CliError) -> str:
     """The human/greppable form: four tab-separated columns, so `cut -f2` is the code
-    and `cut -f3` the message. Newlines/tabs inside the message are flattened."""
-    message = err.message.replace("\t", " ").replace("\n", " ")
-    return "\t".join(("error", err.code, message, err.arg or "-"))
+    and `cut -f3` the message. Newlines/tabs inside the message are flattened — via
+    the shared ``_flatten`` (KAN-485), which is where this rule now lives for every
+    row the CLI prints; it was open-coded here and in ``_field_value``, and the two
+    copies each missed ``\\r``."""
+    return "\t".join(("error", err.code, _flatten(err.message), err.arg or "-"))
 
 
 def _print_error(err: CliError, *, fmt: str | None = None) -> int:
@@ -310,6 +312,25 @@ def _truncate_text(text: str, limit: int) -> tuple[str, int | None]:
         return text, None
     # `str` slicing is by code point: this cannot split a multi-byte character.
     return text[:limit], len(text)
+
+
+def _flatten(text: str) -> str:
+    """Collapse the three characters that would break a tab-separated row — ``\\t``,
+    ``\\n``, ``\\r`` — to single spaces. **The one flattening rule** (KAN-485): every
+    row helper that prints free text goes through it, and so does the ``--fields``
+    projection (``_field_value``), so the default row and the projection cannot drift
+    into disagreeing about what "one line" is — which is exactly what had happened:
+    ``comment list --fields body`` was safe while ``comment list`` was not.
+
+    It applies to a *row cell* only. A single-entity ``description:`` block
+    (``_description_block``) is deliberately left alone: that output is prose on its
+    own lines by design, and flattening it would destroy the paragraphs the caller
+    asked for.
+
+    Length-preserving — one character in, one out — which is what lets it run
+    **before** ``_truncate_inline`` without changing how much real text survives or
+    what the size hint's total says."""
+    return text.replace("\t", " ").replace("\r", " ").replace("\n", " ")
 
 
 def _truncate_inline(text: str, limit: int) -> str:
@@ -494,61 +515,57 @@ def _humanize(
         projected = _project_rows(result, fields, limit=limit)
         if projected is not None:
             return projected
-    if isinstance(result, dict) and "cards" in result:  # list_cards
-        cards = result["cards"]
-        if not cards:
+    # Whether a result IS a list is decided in exactly one place — ``_list_envelope``
+    # — and this chain dispatches on its answer (KAN-478). Before that, the two
+    # functions each carried their own idea of list-ness and disagreed: V44's
+    # aggregate correctly declined to summarise a ``template create`` result while
+    # this renderer printed the template's unsaved card *definitions* as rows with
+    # ``?`` where a ticket number would be. The shared guard excludes both known
+    # single-entity payloads that merely *carry* an envelope key — a ``CardRead``'s
+    # ``labels`` (KAN-277) and a single template's ``cards`` — and any future one,
+    # because it keys off the entity's own ``id``/``ticket_number`` rather than
+    # naming the offenders. Each falls through to its single-entity branch below.
+    envelope, rows = _list_envelope(result) or (None, [])
+    if envelope == "cards":  # list_cards
+        if not rows:
             return "(no cards)"
-        lines = [_card_line(c) for c in cards]
+        lines = [_card_line(c) for c in rows]
         if result.get("next_cursor"):
             lines.append(f"(more — next cursor: {result['next_cursor']})")
         return "\n".join(lines)
-    if isinstance(result, dict) and "boards" in result:  # list_boards
-        boards = result["boards"]
-        return "\n".join(_board_line(b) for b in boards) if boards else "(no boards)"
-    if isinstance(result, dict) and "epics" in result:  # list_epics
-        epics = result["epics"]
-        return "\n".join(_epic_line(e) for e in epics) if epics else "(no epics)"
-    # list_labels returns ``{"labels": [...]}``. Guard with ``"ticket_number" not
-    # in result`` because a single ``CardRead`` also *carries* a ``labels`` array
-    # (alongside its ``ticket_number``); without this, ``get``/``create``/``update``/
-    # ``move`` (which all return one card) would match here and print ``(no labels)``
-    # instead of the card line (KAN-277). A label-LIST response never has a ticket.
-    if isinstance(result, dict) and "labels" in result and "ticket_number" not in result:
-        labels = result["labels"]
-        return "\n".join(_label_line(la) for la in labels) if labels else "(no labels)"
-    if isinstance(result, dict) and "views" in result:  # list_views
-        views = result["views"]
-        return "\n".join(_view_line(v) for v in views) if views else "(no views)"
-    if isinstance(result, dict) and "templates" in result:  # list_templates
-        templates = result["templates"]
+    if envelope == "boards":  # list_boards
+        return "\n".join(_board_line(b) for b in rows) if rows else "(no boards)"
+    if envelope == "epics":  # list_epics
+        return "\n".join(_epic_line(e) for e in rows) if rows else "(no epics)"
+    if envelope == "labels":  # list_labels
+        return "\n".join(_label_line(la) for la in rows) if rows else "(no labels)"
+    if envelope == "views":  # list_views
+        return "\n".join(_view_line(v) for v in rows) if rows else "(no views)"
+    if envelope == "templates":  # list_templates
         return (
-            "\n".join(_template_line(t) for t in templates)
-            if templates
+            "\n".join(_template_line(t) for t in rows)
+            if rows
             else "(no templates)"
         )
-    if isinstance(result, dict) and "cycles" in result:  # list_cycles
-        cycles = result["cycles"]
-        return "\n".join(_cycle_line(c) for c in cycles) if cycles else "(no cycles)"
-    if isinstance(result, dict) and "notifications" in result:  # list_notifications
-        rows = result["notifications"]
+    if envelope == "cycles":  # list_cycles
+        return "\n".join(_cycle_line(c) for c in rows) if rows else "(no cycles)"
+    if envelope == "notifications":  # list_notifications
         return (
             "\n".join(_notification_line(n, limit=limit) for n in rows)
             if rows
             else "(no notifications)"
         )
-    if isinstance(result, dict) and "activity" in result:  # list_activity
-        rows = result["activity"]
+    if envelope == "activity":  # list_activity
         if not rows:
             return "(no activity)"
         lines = [_activity_line(r) for r in rows]
         if result.get("next_cursor"):
             lines.append(f"(more — next cursor: {result['next_cursor']})")
         return "\n".join(lines)
-    if isinstance(result, dict) and "comments" in result:  # list_comments
-        comments = result["comments"]
+    if envelope == "comments":  # list_comments
         return (
-            "\n".join(_comment_line(c, limit=limit) for c in comments)
-            if comments
+            "\n".join(_comment_line(c, limit=limit) for c in rows)
+            if rows
             else "(no comments)"
         )
     # list_dependencies returns {"card_id", "blocked_by", "blocks"} — ``card_id``
@@ -590,6 +607,12 @@ def _humanize(
     # name-without-title branch below.
     if isinstance(result, dict) and "color" in result and "name" in result:
         return _label_line(result)
+    # A single card template (``template create``) carries a ``cards`` array of card
+    # *definitions* + ``name``. Render it as the template it is — the same line
+    # ``template list`` prints for the same entity (KAN-478). Matched before the
+    # generic name-without-title branch below, which would print it as a board line.
+    if isinstance(result, dict) and "name" in result and isinstance(result.get("cards"), list):
+        return _template_line(result)
     # A single entity: epics/boards carry ``name`` (no ``title``); cards carry
     # ``title``. Epics additionally have a ``ticket_number`` (``EPIC-…``).
     if isinstance(result, dict) and "name" in result and "title" not in result:
@@ -615,12 +638,15 @@ def _card_line(card: dict[str, Any]) -> str:
 
     Story points read the API's ``story_points`` field (what ``--points`` writes and
     ``--json`` shows), rendered ``pts=<n>``/``pts=-`` so they're never invisible in
-    human output (KAN-269). The ticket/column/title prefix is unchanged."""
+    human output (KAN-269). The ticket/column/title prefix is unchanged.
+
+    ``title`` is free text (a ``varchar`` the API does not screen for control
+    characters), so it goes through ``_flatten`` — one card, one line (KAN-485)."""
     return "\t".join(
         (
             str(card.get("ticket_number", card.get("id", "?"))),
             str(card.get("column", "")),
-            str(card.get("title", "")),
+            _flatten(str(card.get("title", ""))),
             _fmt_points(card.get("story_points")),
         )
     )
@@ -682,7 +708,7 @@ def _epic_line(epic: dict[str, Any]) -> str:
     return "\t".join(
         (
             str(epic.get("ticket_number", epic.get("id", "?"))),
-            str(epic.get("name", "")),
+            _flatten(str(epic.get("name", ""))),
             _fmt_progress(epic),
         )
     )
@@ -698,7 +724,7 @@ def _epic_block(epic: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS) ->
 
 def _board_line(board: dict[str, Any]) -> str:
     """One concise line for a board: id, name (tab-separated)."""
-    return "\t".join((str(board.get("id", "?")), str(board.get("name", ""))))
+    return "\t".join((str(board.get("id", "?")), _flatten(str(board.get("name", "")))))
 
 
 def _label_line(label: dict[str, Any]) -> str:
@@ -706,18 +732,21 @@ def _label_line(label: dict[str, Any]) -> str:
     return "\t".join(
         (
             str(label.get("id", "?")),
-            str(label.get("name", "")),
-            str(label.get("color", "")),
+            _flatten(str(label.get("name", ""))),
+            _flatten(str(label.get("color", ""))),
         )
     )
 
 
 def _view_line(view: dict[str, Any]) -> str:
-    """One concise line for a saved view: id, name, its query as compact JSON."""
+    """One concise line for a saved view: id, name, its query as compact JSON.
+
+    The query needs no flattening — ``json.dumps`` escapes a control character
+    inside a string value, so the cell is single-line by construction."""
     return "\t".join(
         (
             str(view.get("id", "?")),
-            str(view.get("name", "")),
+            _flatten(str(view.get("name", ""))),
             json.dumps(view.get("query", {}), default=str, sort_keys=True),
         )
     )
@@ -731,7 +760,7 @@ def _cycle_line(cycle: dict[str, Any]) -> str:
     return "\t".join(
         (
             str(cycle.get("id", "?")),
-            str(cycle.get("name", "")),
+            _flatten(str(cycle.get("name", ""))),
             str(cycle.get("starts_on") or "-"),
             str(cycle.get("ends_on") or "-"),
         )
@@ -748,20 +777,24 @@ def _template_line(tmpl: dict[str, Any]) -> str:
     return "\t".join(
         (
             str(tmpl.get("id", "?")),
-            str(tmpl.get("name", "")),
+            _flatten(str(tmpl.get("name", ""))),
             f"{len(cards)} cards",
         )
     )
 
 
 def _activity_line(row: dict[str, Any]) -> str:
-    """One concise line for an activity row: timestamp, actor, action, summary."""
+    """One concise line for an activity row: timestamp, actor, action, summary.
+
+    ``summary`` is a server-composed sentence that **embeds the card's title**
+    (``created KAN-3: Fix login``) and ``actor_label`` a denormalised human handle, so
+    both are free text and both are flattened — one activity row, one line (KAN-485)."""
     return "\t".join(
         (
             str(row.get("ts", "")),
-            str(row.get("actor_label") or "-"),
+            _flatten(str(row.get("actor_label") or "-")),
             str(row.get("action", "")),
-            str(row.get("summary", "")),
+            _flatten(str(row.get("summary", ""))),
         )
     )
 
@@ -769,13 +802,15 @@ def _activity_line(row: dict[str, Any]) -> str:
 def _notification_line(n: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS) -> str:
     """One concise line for a notification (V37, KAN-301): id, kind, read/unread
     state, body (tab-separated). The body is a ``Text`` column like a comment's, so
-    it truncates the same way (V45, KAN-428)."""
+    it truncates the same way (V45, KAN-428) — and, since KAN-485, flattens the same
+    way too: **flatten first, then truncate**, so a newline near the limit cannot
+    change how much real text survives and the size hint stays on this row's line."""
     return "\t".join(
         (
             str(n.get("id", "?")),
             str(n.get("kind", "")),
             "read" if n.get("read_at") else "unread",
-            _truncate_inline(str(n.get("body", "")), limit),
+            _truncate_inline(_flatten(str(n.get("body", ""))), limit),
         )
     )
 
@@ -784,12 +819,14 @@ def _warmup_line(result: dict[str, Any]) -> str:
     """One concise line for a warmup result: the status, plus any detail.
 
     ``ok`` → the API is awake; ``waking``/``error`` carry a ``detail`` explaining
-    what to do next (call again shortly / what failed)."""
+    what to do next (call again shortly / what failed). ``detail`` is flattened
+    (KAN-485): on the error path it is a stringified API error, which can carry a
+    response body, and this is a two-column row like any other."""
     status = str(result.get("status", "?"))
     if status == "ok":
         return "ok\tAPI is awake"
     detail = result.get("detail")
-    return f"{status}\t{detail}" if detail else status
+    return f"{status}\t{_flatten(str(detail))}" if detail else status
 
 
 def _fmt_duration(seconds: float | None) -> str:
@@ -831,8 +868,10 @@ def _metrics_block(result: dict[str, Any]) -> str:
             f"max {_fmt_duration(aging.get('max_seconds'))}"
         ),
     ]
+    # The per-row cells below are one line each, so the caller-supplied ``assignee``
+    # is flattened like any other row's free text (KAN-485).
     for item in aging.get("items", []):
-        assignee = item.get("assignee") or "(unassigned)"
+        assignee = _flatten(str(item.get("assignee") or "(unassigned)"))
         lines.append(
             f"  {item.get('ticket_number', '?')}\t{assignee}\t"
             f"{_fmt_duration(item.get('age_seconds'))}"
@@ -841,7 +880,7 @@ def _metrics_block(result: dict[str, Any]) -> str:
     if by_assignee:
         lines.append("by assignee:")
         for row in by_assignee:
-            who = row.get("assignee") or "(unassigned)"
+            who = _flatten(str(row.get("assignee") or "(unassigned)"))
             lines.append(f"  {who}\tdone {row.get('throughput', 0)}\twip {row.get('wip', 0)}")
     return "\n".join(lines)
 
@@ -896,23 +935,32 @@ def _comment_line(comment: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHAR
 
     The body is truncated to ``limit`` characters with a size hint (V45, KAN-428) —
     this was the CLI's other unbounded surface: a ``comment list`` on a card with a
-    few long notes returned all of them in full."""
+    few long notes returned all of them in full.
+
+    It is also **flattened before it is truncated** (KAN-485). A body with newlines —
+    which the board's own comments frequently have — used to spill across several
+    output lines, so an agent splitting on newline over-counted comments and
+    mis-associated ids with bodies. V45's truncation bounded that spill without ending
+    it: 500 characters of prose with two newlines in it is still three lines. Flatten
+    first so the hint lands on this row rather than on a fragment of it."""
     return "\t".join(
         (
             str(comment.get("id", "?")),
             str(comment.get("created_at", "")),
-            _truncate_inline(str(comment.get("body", "")), limit),
+            _truncate_inline(_flatten(str(comment.get("body", ""))), limit),
         )
     )
 
 
 def _link_line(link: dict[str, Any]) -> str:
-    """One concise line for a work-link: id, label, url (tab-separated)."""
+    """One concise line for a work-link: id, label, url (tab-separated).
+
+    Both cells are caller-supplied strings, so both are flattened (KAN-485)."""
     return "\t".join(
         (
             str(link.get("id", "?")),
-            str(link.get("label", "")),
-            str(link.get("url", "")),
+            _flatten(str(link.get("label", ""))),
+            _flatten(str(link.get("url", ""))),
         )
     )
 
@@ -1006,7 +1054,10 @@ def _field_value(value: Any) -> str:
         return ",".join(_field_item(item) for item in value)
     if isinstance(value, dict):
         return json.dumps(value, default=str, sort_keys=True, separators=(",", ":"))
-    return str(value).replace("\t", " ").replace("\n", " ")
+    # ``_flatten`` is this line's own former body, lifted into a shared helper so the
+    # default row helpers cut free text exactly the way this projection does (KAN-485).
+    # It also picks up ``\r``, which this branch used to let through.
+    return _flatten(str(value))
 
 
 def _field_item(item: Any) -> str:
@@ -1065,25 +1116,22 @@ def _project_rows(
     result isn't a list envelope (then the caller falls back to the default render).
 
     The definitive empty state (AXI 5) and the ``next_cursor`` hint are preserved
-    verbatim — a projection changes which columns print, nothing else."""
-    if not isinstance(result, dict):
+    verbatim — a projection changes which columns print, nothing else.
+
+    List-ness comes from ``_list_envelope``, the same one place ``_humanize`` and
+    V44's aggregate ask (KAN-478) — so the third copy of "is this a list?" is gone
+    along with its own hand-written KAN-277 exception for a ``CardRead``'s ``labels``."""
+    found = _list_envelope(result)
+    if found is None:
         return None
-    for key in _LIST_ENVELOPES:
-        if key not in result or not isinstance(result[key], list):
-            continue
-        # A single ``CardRead`` also *carries* a ``labels`` array (the KAN-277 trap):
-        # only a label LIST response has no ticket of its own.
-        if key == "labels" and "ticket_number" in result:
-            continue
-        rows = result[key]
-        if not rows:
-            return f"(no {key})"
-        _validate_fields(fields, rows, _ROW_NOUN.get(key, key))
-        lines = [_project_line(row, fields, limit=limit) for row in rows]
-        if result.get("next_cursor"):
-            lines.append(f"(more — next cursor: {result['next_cursor']})")
-        return "\n".join(lines)
-    return None
+    key, rows = found
+    if not rows:
+        return f"(no {key})"
+    _validate_fields(fields, rows, _ROW_NOUN.get(key, key))
+    lines = [_project_line(row, fields, limit=limit) for row in rows]
+    if isinstance(result, dict) and result.get("next_cursor"):
+        lines.append(f"(more — next cursor: {result['next_cursor']})")
+    return "\n".join(lines)
 
 
 # --- pre-computed list aggregates (V44, KAN-427 — AXI 4) --------------------
@@ -1130,7 +1178,15 @@ def _list_envelope(result: Any) -> tuple[str, list[Any]] | None:
     Two **single-entity** payloads carry an envelope key of their own and must not be
     counted as lists: a ``CardRead`` has a ``labels`` array (the KAN-277 trap) and a
     single template has a ``cards`` array (``template create``). One rule excludes
-    both — a list envelope has no ``id`` / ``ticket_number`` of its own."""
+    both — a list envelope has no ``id`` / ``ticket_number`` of its own.
+
+    **This is the CLI's only definition of "is this a list?"** (KAN-478). ``_humanize``
+    (the human rows), ``_project_rows`` (``--fields``) and ``_summary_for`` (V44's
+    aggregate) all dispatch on this one answer. They each used to carry their own
+    version, and they disagreed: the aggregate declined to summarise a ``template
+    create`` result while ``_humanize`` printed the template's unsaved card
+    definitions as rows with ``?`` for a ticket number. A test pins the three
+    together, because that class of bug has now been hit twice."""
     if not isinstance(result, dict):
         return None
     if "id" in result or "ticket_number" in result:
