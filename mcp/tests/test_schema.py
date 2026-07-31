@@ -275,3 +275,114 @@ def test_required_arguments_are_untouched_by_compaction():
 def test_the_compacted_schema_is_still_valid_json():
     for tool in _tools():
         json.dumps(tool.inputSchema)
+
+
+# --- outputSchema: measured, and deliberately NOT compacted (KAN-518) -------
+#
+# A ``tools/list`` entry carries THREE schema-ish fields, not two: ``name``,
+# ``description``, ``inputSchema`` — and ``outputSchema``. V49 compacted and
+# published only the first three; the fourth went unmeasured and unmentioned,
+# which KAN-518 fixed. The measurement now has its own bracketed row in
+# ``scripts/measure_tool_schema_tokens.py`` and its own section in ADR 0019.
+#
+# The decision that followed the measurement was **do not compact it**, and these
+# tests exist to keep that decision from quietly eroding — in either direction.
+
+#: The suffix Pydantic stamps on the generated per-tool output model, built from
+#: the *function* name at mcp/server/fastmcp/utilities/func_metadata.py:501
+#: (``DictModel.__name__ = f"{func_name}DictOutput"``). Note: the *function* name,
+#: not the registered tool name — the tool registered as ``next`` wraps
+#: ``next_ready``, so its title reads ``next_readyDictOutput``. Asserting
+#: ``f"{tool.name}DictOutput"`` would be wrong, and was the one place the KAN-518
+#: card's description did not survive contact with the code.
+_GENERATED_OUTPUT_TITLE_SUFFIX = "DictOutput"
+
+
+def test_every_frozen_tool_carries_a_generated_output_schema():
+    """The premise of the KAN-518 measurement, pinned so the row cannot go stale.
+
+    Cross-checked against ``FROZEN_TOOLS`` rather than against itself: a set
+    comprehension over the live tools would agree with a later assertion about the
+    same set no matter how few tools existed, so the count is anchored to the
+    independent freeze constant. (Same non-vacuity discipline as
+    ``pandan-cli/tests/test_parity.py``.)
+    """
+    with_output = {t.name for t in _tools() if t.outputSchema is not None}
+    assert with_output == FROZEN_TOOLS, (
+        "the set of tools carrying an outputSchema drifted from the frozen surface; "
+        f"missing an outputSchema: {sorted(FROZEN_TOOLS - with_output) or 'none'}"
+    )
+    assert len(with_output) == FROZEN_TOOL_COUNT != 0
+
+
+def test_the_generated_output_schema_is_the_shape_the_measurement_assumes():
+    """Every one is the identical three-key object with a generated class name in
+    it. If a tool ever returns something richer than ``dict[str, Any]`` this goes
+    red, and the ~17-tokens-per-tool figure in ADR 0019 needs re-deriving."""
+    titles = []
+    for tool in _tools():
+        schema = tool.outputSchema
+        assert set(schema) == {"additionalProperties", "title", "type"}, (
+            f"{tool.name}: unexpected outputSchema keys {sorted(schema)}"
+        )
+        assert schema["type"] == "object"
+        assert schema["additionalProperties"] is True
+        assert schema["title"].endswith(_GENERATED_OUTPUT_TITLE_SUFFIX), (
+            f"{tool.name}: outputSchema title {schema['title']!r} is not a generated one"
+        )
+        titles.append(schema["title"])
+    assert len(titles) == FROZEN_TOOL_COUNT, (
+        f"counted {len(titles)} generated output titles, expected {FROZEN_TOOL_COUNT}"
+    )
+    assert len(set(titles)) == FROZEN_TOOL_COUNT, "two tools share an output model name"
+
+
+def test_the_advertised_output_schema_is_the_object_the_server_validates_against():
+    """**Why KAN-518 declined to compact outputSchema, pinned as a fact.**
+
+    V49's entire safety argument for rewriting ``inputSchema`` was a *separation*:
+    ``Tool.parameters`` (advertised) is a distinct dict from
+    ``fn_metadata.arg_model`` (validating), and FastMCP registers its call handler
+    with ``validate_input=False`` (mcp/server/fastmcp/server.py:308) so the
+    lowlevel jsonschema input check at
+    mcp/server/lowlevel/server.py:534-538 never fires against the advertised copy.
+
+    **Neither half of that holds for outputSchema.** ``Tool.output_schema`` is a
+    ``cached_property`` that returns ``self.fn_metadata.output_schema`` — the same
+    object, not a copy (mcp/server/fastmcp/tools/base.py:41-43) — and the lowlevel
+    server runs ``jsonschema.validate(instance=..., schema=tool.outputSchema)`` on
+    **every** tool result, unconditionally, with no ``validate_output`` opt-out to
+    turn off (mcp/server/lowlevel/server.py:566-573). So the advertised
+    outputSchema is live on the call path.
+
+    If this test goes red, the SDK has separated the two — at which point the
+    KAN-518 decision should be re-read rather than the test relaxed, because its
+    central premise would have changed.
+    """
+    for tool in mcp._tool_manager.list_tools():
+        assert tool.output_schema is tool.fn_metadata.output_schema, (
+            f"{tool.name}: the advertised and validating output schemas are no "
+            "longer the same object — re-read ADR 0019 § The third field (KAN-518)"
+        )
+
+
+def test_compaction_leaves_output_schemas_untouched():
+    """The KAN-518 decision, as a guard: the V49 compaction is scoped to
+    ``inputSchema`` and must stay that way until someone amends ADR 0019.
+
+    The generated ``…DictOutput`` titles are exactly the class of artefact V49
+    stripped from ``inputSchema``, so removing them here looks like finishing an
+    unfinished job. It is not: worth ~346 compact tokens of a field that may cost
+    the model nothing at all, paid for by editing the one schema the server
+    validates against on every call (see the test above). If you are deliberately
+    reversing that call, amend the ADR and delete this test in the same PR.
+    """
+    for tool in _tools():
+        assert "title" in tool.outputSchema, (
+            f"{tool.name}: its outputSchema title was stripped. ADR 0019 § The "
+            "third field (KAN-518) decided NOT to compact outputSchema — reversing "
+            "that is an ADR amendment, not a cleanup."
+        )
+        # ...and the compaction rule itself is unchanged: applied to this schema it
+        # *would* strip the title, which is precisely why the scoping is the guard.
+        assert compact_schema(tool.outputSchema) != tool.outputSchema
