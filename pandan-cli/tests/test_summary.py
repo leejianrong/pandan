@@ -181,10 +181,11 @@ EMPTY: dict[str, tuple[list[str], dict, str]] = {
         {"cards": [], "next_cursor": None},
         # `list` is the one hinted verb here (KAN-492), and its hints land between the
         # prose zero-state and the aggregate — which is what keeps `tail -1` the count.
-        "(no cards)\n"
-        "help: pandan get <id>\n"
-        "help: pandan move <id> in_progress\n"
-        "0 cards · 0 todo · 0 in_progress · 0 done\n",
+        # Both of them carry `<id>`, though, so on an EMPTY result both are dropped
+        # (KAN-526): they were next steps on rows this very call said do not exist.
+        # The zero state and the aggregate are untouched by that — this line is what
+        # asserts the drop did not eat either of them.
+        "(no cards)\n0 cards · 0 todo · 0 in_progress · 0 done\n",
     ),
     # The zero state keeps the envelope's own name (`created`), like every other verb
     # here — the CLI never re-labels the client's key (see `cli._CARD_ENVELOPES`).
