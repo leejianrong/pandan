@@ -14,6 +14,7 @@ import json
 import pathlib
 import re
 import subprocess
+from typing import NamedTuple
 
 import httpx
 import pytest
@@ -242,6 +243,28 @@ def env(monkeypatch):
 def patch_client(monkeypatch, fake: FakeClient) -> FakeClient:
     monkeypatch.setattr(cli, "PandanClient", lambda *a, **k: fake)
     return fake
+
+
+class Err(NamedTuple):
+    """A parsed structured error (V43, KAN-426): the row's three fields + both streams."""
+
+    code: str
+    message: str
+    arg: str
+    out: str
+    err: str
+
+
+def read_error(capsys) -> Err:
+    """Parse the structured error row the CLI prints on **stdout**, asserting there is
+    exactly one and that the machine channel is stdout (AXI 6). Errors are no longer
+    prose on stderr, so every failure assertion goes through here."""
+    captured = capsys.readouterr()
+    rows = [line for line in captured.out.splitlines() if line.startswith("error\t")]
+    assert len(rows) == 1, f"expected one error row on stdout, got out={captured.out!r}"
+    _, code, message, arg = rows[0].split("\t")
+    assert "pandan:" not in captured.err  # the old stderr prose is gone
+    return Err(code, message, arg, captured.out, captured.err)
 
 
 # --- --version / -v (top-level, no subcommand) ------------------------------
@@ -615,7 +638,10 @@ def test_metrics_maps_board_and_window(monkeypatch, env):
 def test_metrics_requires_a_board(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result=METRICS))
     assert cli.run(["metrics"]) == 1  # no --board, no PANDAN_BOARD_ID → refused
-    assert "board is required" in capsys.readouterr().err
+    err = read_error(capsys)
+    assert err.code == "board_required"
+    assert "board is required" in err.message
+    assert err.arg == "--board"
 
 
 def test_metrics_human_output(monkeypatch, env, capsys):
@@ -663,7 +689,9 @@ def test_activity_maps_board_and_filters(monkeypatch, env):
 def test_activity_requires_a_board(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"activity": []}))
     assert cli.run(["activity"]) == 1  # no --board, no PANDAN_BOARD_ID → refused
-    assert "board is required" in capsys.readouterr().err
+    err = read_error(capsys)
+    assert err.code == "board_required"
+    assert err.arg == "--board"
 
 
 def test_activity_human_output(monkeypatch, env, capsys):
@@ -871,7 +899,11 @@ def test_delete_requires_yes(monkeypatch, env, capsys):
     code = cli.run(["delete", "5"])
     assert code == cli.EXIT_ERROR
     assert fake.calls == []  # never touched the API
-    assert "--yes" in capsys.readouterr().err
+    # Stdout is non-empty and self-describing: a scripted sweep sees a REASON, not the
+    # silence that used to read as "the verb returned nothing" (M7 stage-3 note).
+    err = read_error(capsys)
+    assert err.code == "confirmation_required"
+    assert err.arg == "--yes"
 
 
 def test_delete_with_yes(monkeypatch, env, capsys):
@@ -985,7 +1017,9 @@ def test_missing_token_is_config_error(monkeypatch, capsys):
     monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     code = cli.run(["list"])
     assert code == cli.EXIT_ERROR
-    assert "PANDAN_TOKEN" in capsys.readouterr().err
+    err = read_error(capsys)
+    assert err.code == "config"
+    assert "PANDAN_TOKEN" in err.message
 
 
 @pytest.mark.parametrize(
@@ -1001,13 +1035,19 @@ def test_api_error_maps_to_exit_code(monkeypatch, env, capsys, status, expected)
     patch_client(monkeypatch, FakeClient(error=PandanApiError(status, "boom")))
     code = cli.run(["get", "1"])
     assert code == expected
-    assert "pandan:" in capsys.readouterr().err
+    err = read_error(capsys)
+    assert err.code == {401: "unauthorized", 403: "forbidden", 404: "not_found"}.get(
+        status, "api_error"
+    )
+    assert "boom" in err.message
 
 
 def test_unexpected_error_is_general(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(error=httpx.ConnectError("down")))
     assert cli.run(["get", "1"]) == cli.EXIT_ERROR
-    assert "pandan:" in capsys.readouterr().err
+    err = read_error(capsys)
+    assert err.code == "transport"  # no answer from the API, not a 4xx
+    assert "down" in err.message
 
 
 def test_usage_error_exits_two(env):
@@ -1110,7 +1150,9 @@ def test_epic_delete_requires_yes(monkeypatch, env, capsys):
     code = cli.run(["epic", "delete", "1"])
     assert code == cli.EXIT_ERROR
     assert fake.calls == []  # never touched the API
-    assert "--yes" in capsys.readouterr().err
+    err = read_error(capsys)
+    assert err.code == "confirmation_required"
+    assert err.arg == "--yes"
 
 
 def test_epic_delete_with_yes(monkeypatch, env, capsys):
@@ -1668,16 +1710,23 @@ def test_card_ticket_resolution_pages_the_cursor(monkeypatch, env):
 
 
 def test_unknown_card_ticket_is_a_clean_error(monkeypatch, env, capsys):
+    # V43: a ticket that resolves to nothing is NOT_FOUND (5), the same code the API
+    # gives for a numeric id that doesn't exist. It used to be 1.
     fake = patch_client(monkeypatch, FakeClient(results={"list_cards": {"cards": []}}))
-    assert cli.run(["get", "KAN-999"]) == cli.EXIT_ERROR
-    assert "no card found with ticket KAN-999" in capsys.readouterr().err
+    assert cli.run(["get", "KAN-999"]) == cli.EXIT_NOT_FOUND
+    err = read_error(capsys)
+    assert err.code == "not_found"
+    assert "no card found with ticket KAN-999" in err.message
+    assert err.arg == "KAN-999"
     assert fake.calls == [("list_cards", {"board_id": None})]
 
 
 def test_card_id_arg_rejects_epic_ticket(monkeypatch, env, capsys):
     fake = patch_client(monkeypatch, FakeClient())
     assert cli.run(["get", "EPIC-3"]) == cli.EXIT_ERROR
-    assert "not a card ticket" in capsys.readouterr().err
+    err = read_error(capsys)
+    assert err.code == "invalid_ref"  # wrong KIND of ticket, not a missing card
+    assert "not a card ticket" in err.message
     assert fake.calls == []  # never lists — the shape is wrong up front
 
 
@@ -1748,7 +1797,9 @@ def test_epic_update_accepts_epic_ticket(monkeypatch, env):
 def test_epic_arg_rejects_kan_ticket(monkeypatch, env, capsys):
     fake = patch_client(monkeypatch, FakeClient())
     assert cli.run(["epic", "update", "KAN-3", "--name", "x"]) == cli.EXIT_ERROR
-    assert "not an epic ticket" in capsys.readouterr().err
+    err = read_error(capsys)
+    assert err.code == "invalid_ref"
+    assert "not an epic ticket" in err.message
     assert fake.calls == []
 
 
@@ -1958,9 +2009,10 @@ def test_mixed_env_resolves_per_value(monkeypatch):
 
 def test_no_token_from_either_spelling_is_a_config_error(monkeypatch, capsys):
     assert cli.run(["list"]) == cli.EXIT_ERROR
-    err = capsys.readouterr().err
-    assert "PANDAN_TOKEN is required" in err
-    assert "pandan_pat_" in err
+    err = read_error(capsys)
+    assert err.code == "config"
+    assert "PANDAN_TOKEN is required" in err.message
+    assert "pandan_pat_" in err.message
 
 
 def test_mcp_json_pandan_server_key_is_read(monkeypatch, tmp_path):
@@ -2125,13 +2177,16 @@ def test_fields_keeps_a_projected_row_on_one_line(monkeypatch, env, capsys):
 
 def test_fields_unknown_name_is_a_clean_error_naming_the_field(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
+    # V43 folded this into the structured shape: same content, now a machine code +
+    # the offending field in its own column, on stdout. Exit code unchanged (1) — the
+    # CLI (not argparse) rejected a runtime-validated value.
     assert cli.run(["list", "--fields", "ticket,nope"]) == cli.EXIT_ERROR
-    err = capsys.readouterr().err
-    assert "unknown --fields name 'nope'" in err   # names the offending field
-    assert "for card rows" in err                  # and which row type it applied to
-    assert "available:" in err and "ticket" in err  # and what IS valid
-    # V43 (KAN-426) folds this message into the structured error shape; the *content*
-    # asserted here (offending field + vocabulary) is what must survive that change.
+    err = read_error(capsys)
+    assert err.code == "unknown_field"
+    assert err.arg == "nope"  # the offending field, isolated in its own column
+    assert "unknown --fields name 'nope'" in err.message
+    assert "for card rows" in err.message  # which row type it applied to
+    assert "available:" in err.message and "ticket" in err.message  # what IS valid
 
 
 def test_fields_rejects_an_empty_list_as_a_usage_error(env):
@@ -2468,24 +2523,24 @@ def test_id_or_ticket_arg_rejects_malformed_values_with_a_naming_message():
     ],
     ids=["get", "update", "move", "delete", "comment-list"],
 )
-def test_unresolvable_card_ref_is_an_error_not_a_crash(monkeypatch, env, capsys, argv):
+def test_unresolvable_card_ref_is_not_found(monkeypatch, env, capsys, argv):
     """A well-formed ticket that matches nothing fails cleanly on every verb that
-    resolves a ref.
-
-    NOTE: this asserts EXIT_ERROR (1) — the behaviour today. V43 / KAN-426 changes
-    client-side ref-resolution failure to EXIT_NOT_FOUND (5) so it agrees with the
-    server-side 404 a numeric id produces; this test is the one that must be
-    updated (deliberately) in that slice."""
+    resolves a ref — with **EXIT_NOT_FOUND (5)** as of V43 / KAN-426, matching the
+    server-side 404 the numeric form produces (see the agreement test below)."""
     fake = patch_client(monkeypatch, FakeClient(results={"list_cards": {"cards": []}}))
-    assert cli.run(argv) == cli.EXIT_ERROR
-    assert "no card found with ticket KAN-4242" in capsys.readouterr().err
+    assert cli.run(argv) == cli.EXIT_NOT_FOUND
+    err = read_error(capsys)
+    assert err.code == "not_found"
+    assert "no card found with ticket KAN-4242" in err.message
     assert [c[0] for c in fake.calls] == ["list_cards"]  # never reached the verb's call
 
 
-def test_unresolvable_epic_ref_is_an_error(monkeypatch, env, capsys):
+def test_unresolvable_epic_ref_is_not_found(monkeypatch, env, capsys):
     fake = patch_client(monkeypatch, FakeClient(results={"list_epics": {"epics": []}}))
-    assert cli.run(["epic", "update", "EPIC-4242", "--name", "x"]) == cli.EXIT_ERROR
-    assert "no epic found with ticket EPIC-4242" in capsys.readouterr().err
+    assert cli.run(["epic", "update", "EPIC-4242", "--name", "x"]) == cli.EXIT_NOT_FOUND
+    err = read_error(capsys)
+    assert err.code == "not_found"
+    assert "no epic found with ticket EPIC-4242" in err.message
     assert [c[0] for c in fake.calls] == ["list_epics"]
 
 
@@ -2506,5 +2561,335 @@ def test_wrong_entity_ticket_is_rejected_up_front(monkeypatch, env, capsys, argv
     before any lookup — the mismatch is knowable without a request."""
     fake = patch_client(monkeypatch, FakeClient(results={"list_cards": _CARD_PAGE}))
     assert cli.run(argv) == cli.EXIT_ERROR
-    assert message in capsys.readouterr().err
+    err = read_error(capsys)
+    assert err.code == "invalid_ref"
+    assert message in err.message
     assert "add_dependency" not in [c[0] for c in fake.calls]
+
+
+# --- V43 / KAN-426: the error contract (AXI 6) -------------------------------
+# Three things are pinned here, because all three are a published contract:
+#   1. the SIX exit codes and their meanings (scripts branch on them — never renumber),
+#   2. the machine `code` vocabulary and its code→exit mapping,
+#   3. the *stream* and *shape*: one row on stdout, JSON under --json, human extras
+#      (argparse usage, the KANBAN_* notice) on stderr.
+
+
+def test_exit_code_scheme_is_pinned_by_literal_numbers():
+    """Deliberately literal. These numbers are a scripting contract documented in
+    pandan-cli/README.md §"Exit codes"; renumbering silently breaks callers, so the
+    test states the numbers rather than re-deriving them from the module."""
+    assert cli.EXIT_OK == 0
+    assert cli.EXIT_ERROR == 1
+    assert cli.EXIT_USAGE == 2
+    assert cli.EXIT_AUTH == 3
+    assert cli.EXIT_FORBIDDEN == 4
+    assert cli.EXIT_NOT_FOUND == 5
+    # HTTP status → exit code, the mapping verified against prod (401→3, 403→4, 404→5).
+    assert cli._STATUS_EXIT == {401: 3, 403: 4, 404: 5}
+
+
+def test_error_code_vocabulary_is_pinned():
+    """Every machine code and the exit code it maps to. Entries may be ADDED (a new
+    failure class), never renamed or remapped."""
+    assert cli.ERROR_CODES == {
+        "usage": 2,
+        "config": 1,
+        "board_required": 1,
+        "confirmation_required": 1,
+        "invalid_input": 1,
+        "invalid_ref": 1,
+        "unknown_field": 1,
+        "no_token": 1,
+        "unauthorized": 3,
+        "forbidden": 4,
+        "not_found": 5,
+        "api_error": 1,
+        "transport": 1,
+        "unexpected": 1,
+    }
+    # The 1-vs-2 rule: only argparse's own rejection is a usage error.
+    assert [c for c, code in cli.ERROR_CODES.items() if code == 2] == ["usage"]
+
+
+def test_cli_error_derives_its_exit_code_and_rejects_an_unknown_code():
+    err = cli.CliError("nope", code="not_found", arg="KAN-1")
+    assert (err.exit_code, err.code, err.arg, err.status) == (5, "not_found", "KAN-1", None)
+    with pytest.raises(KeyError):  # a typo'd code is a programming error, not a silent 1
+        cli.CliError("x", code="no_such_code")
+
+
+# --- one case per failure class: stream, shape, exit code --------------------
+
+
+def test_unknown_flag_is_structured_on_stdout_and_keeps_usage_on_stderr(env, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["list", "--nope"])
+    assert exc.value.code == cli.EXIT_USAGE
+    captured = capsys.readouterr()
+    # Machine channel: stdout carries the parseable row…
+    row = captured.out.strip().split("\t")
+    assert row[0] == "error" and row[1] == "usage"
+    assert "--nope" in row[2]
+    # …while the human usage block stays on stderr (AXI 10 — --help is unaffected).
+    # (`unrecognized arguments` is raised by the TOP-level parser once the subparser
+    # has consumed what it understands, so this is the top-level usage line.)
+    assert captured.err.startswith("usage: pandan")
+
+
+def test_invalid_enum_value_is_a_usage_error_on_stdout(env, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["move", "7", "not_a_column"])
+    assert exc.value.code == cli.EXIT_USAGE
+    out = capsys.readouterr().out
+    assert out.startswith("error\tusage\t")
+    assert "not_a_column" in out
+
+
+def test_missing_required_option_is_a_usage_error_on_stdout(env, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["comment", "add", "7"])  # --body is required
+    assert exc.value.code == cli.EXIT_USAGE
+    assert capsys.readouterr().out.startswith("error\tusage\t")
+
+
+def test_invalid_json_payload_is_invalid_input(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient())
+    assert cli.run(["batch-update", "{not json"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "invalid_input"
+    assert "invalid JSON" in err.message
+
+
+def test_wrong_shape_json_payload_names_the_argument(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient())
+    assert cli.run(["batch-update", '{"id": 1}']) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "invalid_input"
+    assert err.arg == "JSON"
+
+
+def test_success_prints_no_error_row_and_nothing_on_stderr(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result={"cards": [CARD]}))
+    assert cli.run(["list"]) == cli.EXIT_OK
+    captured = capsys.readouterr()
+    assert "error\t" not in captured.out
+    assert captured.err == ""
+
+
+def test_warmup_still_reports_a_status_not_an_error(monkeypatch, env, capsys):
+    """The one documented nonzero exit that is NOT an error row: a still-waking API is
+    a *status* (`waking  <detail>`) with exit 1, so `until pandan warmup; do …` keeps
+    working. Pinned so the error contract doesn't silently swallow it."""
+    patch_client(monkeypatch, FakeClient(result={"status": "waking", "detail": "call again"}))
+    assert cli.run(["warmup"]) == cli.EXIT_ERROR
+    out = capsys.readouterr().out
+    assert out.startswith("waking\t")
+    assert "error\t" not in out
+
+
+# --- the real defect: one failure, one exit code, whatever the identifier form ---
+
+
+@pytest.mark.parametrize(
+    "numeric_argv,ticket_argv",
+    [
+        (["get", "999999"], ["get", "KAN-999999"]),
+        (["update", "999999", "--title", "x"], ["update", "KAN-999999", "--title", "x"]),
+        (["move", "999999", "done"], ["move", "KAN-999999", "done"]),
+        (["delete", "999999", "--yes"], ["delete", "KAN-999999", "--yes"]),
+        (["comment", "list", "999999"], ["comment", "list", "KAN-999999"]),
+        (["dep", "list", "999999"], ["dep", "list", "KAN-999999"]),
+        (["needs-human", "999999"], ["needs-human", "KAN-999999"]),
+        (["resolve", "999999"], ["resolve", "KAN-999999"]),
+    ],
+    ids=["get", "update", "move", "delete", "comment-list", "dep-list", "needs-human", "resolve"],
+)
+def test_both_identifier_forms_of_a_missing_card_agree(
+    monkeypatch, env, capsys, numeric_argv, ticket_argv
+):
+    """The KAN-426 defect: `get 999999` (404 server-side) exited 5 while
+    `get KAN-999999` (resolved client-side, found nothing) exited 1 — the same logical
+    failure reported two ways, which defeats branching on the exit code. Both forms now
+    exit 5 with code `not_found`, on every verb that resolves a ref."""
+    # Numeric: the API answers 404.
+    patch_client(monkeypatch, FakeClient(error=PandanApiError(404, "Card not found")))
+    numeric_exit = cli.run(numeric_argv)
+    numeric_err = read_error(capsys)
+    # Ticket: resolution happens client-side and matches nothing.
+    patch_client(monkeypatch, FakeClient(results={"list_cards": {"cards": []}}))
+    ticket_exit = cli.run(ticket_argv)
+    ticket_err = read_error(capsys)
+
+    assert numeric_exit == ticket_exit == cli.EXIT_NOT_FOUND
+    assert numeric_err.code == ticket_err.code == "not_found"
+
+
+def test_both_identifier_forms_of_a_missing_epic_agree(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(error=PandanApiError(404, "Epic not found")))
+    numeric_exit = cli.run(["epic", "update", "999999", "--name", "x"])
+    assert read_error(capsys).code == "not_found"
+    patch_client(monkeypatch, FakeClient(results={"list_epics": {"epics": []}}))
+    ticket_exit = cli.run(["epic", "update", "EPIC-999999", "--name", "x"])
+    assert read_error(capsys).code == "not_found"
+    assert numeric_exit == ticket_exit == cli.EXIT_NOT_FOUND
+
+
+def test_a_missing_blocker_ref_is_also_not_found(monkeypatch, env, capsys):
+    # `--blocked-by` resolves a ref too — the fix is in the resolver, so it covers
+    # every call site, not just the positional card argument.
+    patch_client(
+        monkeypatch, FakeClient(results={"list_cards": {"cards": [_card("KAN-7", 7)]}})
+    )
+    assert cli.run(["dep", "add", "KAN-7", "--blocked-by", "KAN-4242"]) == cli.EXIT_NOT_FOUND
+    assert read_error(capsys).arg == "KAN-4242"
+
+
+# --- --json error shape ------------------------------------------------------
+
+
+def read_json_error(capsys) -> dict:
+    """The `--json` error object from stdout (and stderr carries no prose)."""
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert "pandan:" not in captured.err
+    return payload["error"]
+
+
+def test_json_error_carries_code_message_arg_status_and_exit_code(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(error=PandanApiError(403, "not yours")))
+    assert cli.run(["list", "--json"]) == cli.EXIT_FORBIDDEN
+    err = read_json_error(capsys)
+    assert err == {
+        "code": "forbidden",
+        "message": "403: that board isn't yours — call list_boards to see the boards "
+        "you can use (not yours)",
+        "arg": None,
+        "status": 403,
+        "exit_code": 4,
+    }
+
+
+def test_json_error_keys_are_always_present_even_when_null(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(results={"list_cards": {"cards": []}}))
+    assert cli.run(["get", "KAN-4242", "--json"]) == cli.EXIT_NOT_FOUND
+    err = read_json_error(capsys)
+    assert set(err) == {"code", "message", "arg", "status", "exit_code"}
+    assert err["status"] is None       # client-side failure: no HTTP status
+    assert err["arg"] == "KAN-4242"    # …but the offending ref is named
+    assert err["exit_code"] == 5
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--json", "list", "--nope"], ["list", "--json", "--nope"]],
+    ids=["json-before-verb", "json-after-verb"],
+)
+def test_usage_errors_are_json_too_when_json_is_requested(env, capsys, argv):
+    """An argparse failure happens before there's a parsed namespace, so the render
+    mode is read straight off argv — both flag positions must work."""
+    with pytest.raises(SystemExit) as exc:
+        cli.run(argv)
+    assert exc.value.code == cli.EXIT_USAGE
+    err = json.loads(capsys.readouterr().out)["error"]
+    assert err["code"] == "usage" and err["exit_code"] == 2
+
+
+def test_error_row_is_one_line_even_for_a_multiline_message(capsys):
+    cli._set_error_json(False)
+    code = cli._print_error(cli.CliError("line one\nline\ttwo", code="unexpected"))
+    out = capsys.readouterr().out
+    assert code == cli.EXIT_ERROR
+    assert len(out.splitlines()) == 1
+    assert out == "error\tunexpected\tline one line two\t-\n"
+
+
+def test_help_is_unaffected_and_prints_human_usage_to_stdout(capsys):
+    # AXI 10: --help stays human text on stdout, exit 0, and is not an error.
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("usage: pandan")
+    assert "error\t" not in out
+    # The epilog documents the contract the tests above pin.
+    normalised = " ".join(out.split())
+    assert "Exit codes: 0 ok, 1 error, 2 usage, 3 unauthorized, 4 forbidden, 5 not found" in (
+        normalised
+    )
+    assert "error<TAB>code<TAB>message<TAB>arg" in normalised
+
+
+# --- never prompt when stdin isn't a tty (AXI 6) -----------------------------
+
+
+def _explode_getpass(*a, **k):
+    raise AssertionError("getpass must never be reached without a tty")
+
+
+def test_login_never_prompts_when_stdin_is_not_a_tty(monkeypatch, capsys):
+    monkeypatch.setattr("getpass.getpass", _explode_getpass)
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))  # nothing piped in
+    assert cli.run(["login"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "no_token"
+    assert "terminal" in err.message  # says how to supply it instead
+
+
+def test_login_reads_a_piped_token_without_prompting(monkeypatch, capsys):
+    monkeypatch.setattr("getpass.getpass", _explode_getpass)
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
+    monkeypatch.setattr("sys.stdin", io.StringIO("pandan_pat_piped\n"))
+    assert cli.run(["login"]) == cli.EXIT_OK
+    assert "saved token" in capsys.readouterr().out
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    assert config.load_config().token == "pandan_pat_piped"
+
+
+def test_login_prompts_only_when_stdin_is_a_tty(monkeypatch, capsys):
+    prompted: list[str] = []
+
+    def fake_getpass(prompt=""):
+        prompted.append(prompt)
+        return "pandan_pat_typed"
+
+    monkeypatch.setattr("getpass.getpass", fake_getpass)
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
+    assert cli.run(["login"]) == cli.EXIT_OK
+    assert prompted and "PAT" in prompted[0]
+    assert "saved token" in capsys.readouterr().out
+
+
+def test_token_stdin_never_prompts_even_on_a_tty(monkeypatch, capsys):
+    monkeypatch.setattr("getpass.getpass", _explode_getpass)
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)  # a tty, but --token-stdin wins
+    monkeypatch.setattr("sys.stdin", io.StringIO("pandan_pat_explicit\n"))
+    assert cli.run(["login", "--token-stdin"]) == cli.EXIT_OK
+    assert "saved token" in capsys.readouterr().out
+
+
+def test_stdin_is_tty_is_false_for_a_detached_stdin(monkeypatch):
+    class Detached:
+        def isatty(self):
+            raise ValueError("I/O operation on closed file")
+
+    monkeypatch.setattr("sys.stdin", Detached())
+    assert cli._stdin_is_tty() is False
+
+
+def test_config_set_errors_are_structured(monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+    assert cli.run(["config", "set", "--token-stdin"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "no_token"
+    assert cli.run(["config", "set"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "invalid_input"
+    assert "nothing to set" in err.message
+
+
+def test_config_set_rejects_non_integer_board_id_structured(capsys):
+    assert cli.run(["config", "set", "--board-id", "abc"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "invalid_input"
+    assert err.arg == "--board-id"
