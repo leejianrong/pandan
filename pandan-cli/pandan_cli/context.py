@@ -69,6 +69,8 @@ from typing import Any
 
 from pandan_client import PandanClient
 
+from . import __version__
+from .build_info import BUILD_SHA
 from .config import resolve_values
 
 # The hook event we install into. Verified against the shipped settings schema's
@@ -153,6 +155,181 @@ def packaged_skill_path() -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+# --- skill provenance (KAN-505) ---------------------------------------------
+#
+# The bug this exists to kill: comparing the installed skill against *this
+# build's* packaged copy and calling any difference "locally modified". The
+# baseline is the wrong reference — the same untouched file reported
+# `locally modified` under a released v0.12.0 binary and `matches this build`
+# under v0.15.0 source, because the packaged copy legitimately changed between
+# them. Worse, "locally modified" is the state that makes `install` refuse
+# without `--force-skill`, so a user whose binary was merely a release behind was
+# told they had edits *and* pointed at the one action that silently downgrades
+# their skill. Same class as KAN-484: a check whose baseline is wrong produces
+# confident, wrong output, and the obvious response to it makes things worse.
+#
+# Fixing it needs a *direction*, and content comparison alone cannot supply one:
+# "differs" is symmetric. So `install` writes a build stamp into the copy it lays
+# down, and the comparison becomes version-aware. What a stamp cannot do is
+# retrofit provenance onto a copy already on disk — every pre-KAN-505 install is
+# unstamped forever — so `UNKNOWN` is a real, permanent outcome and must degrade
+# honestly rather than guess a direction. That hedge matches the tone
+# `_uninstall_skill` already had ("locally modified or unknown build").
+
+# The stamp `install` appends to the copy it writes.
+#
+# An HTML comment, deliberately **not** a YAML frontmatter key. The frontmatter
+# is the harness's own skill-metadata contract (`name`/`description` drive
+# discovery), so an unrecognised key there is a schema risk in a file Claude Code
+# actually parses; an HTML comment is inert in Markdown and, as agent
+# instructions, carries no imperative — it names a build, it does not tell the
+# model to do anything. It goes on the **last** line so it can never displace the
+# skill's opening framing.
+SKILL_STAMP_PREFIX = "<!-- pandan-cli: skill installed by pandan "
+SKILL_STAMP_SUFFIX = " -->"
+
+# What a source checkout writes where a release writes its commit — the same
+# wording `--version` uses, so the two can never be confused (build_info.py).
+SKILL_STAMP_SOURCE = "source checkout"
+
+# Comparison outcomes for an installed copy vs. this build's packaged copy.
+SKILL_ABSENT = "absent"  # nothing installed
+SKILL_NO_PACKAGED = "no_packaged"  # this build carries no copy to compare against
+SKILL_MATCH = "match"  # byte-identical body — no question to answer
+SKILL_NEWER = "newer"  # stamped by a NEWER build: the *binary* is stale
+SKILL_OLDER = "older"  # stamped by an OLDER build: the *skill* is stale
+SKILL_MODIFIED = "modified"  # stamped by THIS build, body differs → hand-edited
+SKILL_UNKNOWN = "unknown"  # differs, direction genuinely not decidable
+
+
+def stamp_line(version: str = __version__, build_sha: str | None = BUILD_SHA) -> str:
+    """The one-line build stamp, e.g.
+    ``<!-- pandan-cli: skill installed by pandan 0.17.0 (2f03276) -->``.
+
+    Both args are injectable so tests can render any build's stamp without
+    freezing a binary — the same seam ``build_info.version_string`` uses."""
+    sha = (build_sha or "").strip()
+    return f"{SKILL_STAMP_PREFIX}{version} ({sha or SKILL_STAMP_SOURCE}){SKILL_STAMP_SUFFIX}"
+
+
+def parse_stamp(text: str) -> tuple[str, str] | None:
+    """``(version, build_sha)`` from a skill body's stamp, or ``None`` when it has
+    none. ``build_sha`` is ``""`` for a source-checkout stamp.
+
+    Only the **last** non-empty line is considered: the stamp is something we
+    appended, and scanning the whole file would let prose inside the skill (which
+    documents `--version` output, so it genuinely contains version-shaped text)
+    masquerade as provenance."""
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    line = lines[-1].strip()
+    if not line.startswith(SKILL_STAMP_PREFIX) or not line.endswith(SKILL_STAMP_SUFFIX):
+        return None
+    inner = line[len(SKILL_STAMP_PREFIX) : -len(SKILL_STAMP_SUFFIX)].strip()
+    version, _, rest = inner.partition(" ")
+    sha = rest.strip().lstrip("(").rstrip(")").strip()
+    if sha == SKILL_STAMP_SOURCE:
+        sha = ""
+    return (version, sha) if version else None
+
+
+def strip_stamp(payload: bytes) -> bytes:
+    """``payload`` without its trailing stamp line — the form that is compared.
+
+    Comparison has to happen on the *body*: once ``install`` stamps what it
+    writes, an unmodified installed copy is no longer byte-identical to the
+    packaged one, and a naive compare would report every install as modified.
+    Non-UTF-8 bytes are returned untouched (and will simply compare unequal)
+    rather than raising: a status command must never crash on a mangled file."""
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return payload
+    if parse_stamp(text) is None:
+        return payload
+    kept: list[str] = []
+    lines = text.split("\n")
+    dropped = False
+    for line in reversed(lines):
+        if not dropped and line.strip().startswith(SKILL_STAMP_PREFIX):
+            dropped = True
+            continue
+        kept.append(line)
+    return "\n".join(reversed(kept)).encode("utf-8")
+
+
+def _version_tuple(raw: str) -> tuple[int, ...] | None:
+    """``"0.17.0"`` → ``(0, 17, 0)``; anything not purely numeric → ``None``.
+
+    ``None`` deliberately propagates to ``SKILL_UNKNOWN``. An unparseable version
+    is exactly the case where inventing an ordering would re-create this bug one
+    level up."""
+    parts = raw.strip().split(".")
+    try:
+        return tuple(int(part) for part in parts)
+    except ValueError:
+        return None
+
+
+def compare_skill(
+    installed: bytes | None,
+    packaged: bytes | None,
+    *,
+    version: str = __version__,
+    build_sha: str | None = BUILD_SHA,
+) -> tuple[str, str]:
+    """``(state, detail)`` for an installed skill copy against this build's.
+
+    Pure and fully injectable — no filesystem, no globals — because this is the
+    decision the whole card turns on, and it has to be testable at every build
+    skew without producing real binaries. ``detail`` is the stamped build's
+    version when one was read, else ``""``.
+
+    The ordering of the branches is the honesty contract:
+
+    * identical bodies short-circuit, so a stale stamp on an unmodified copy is
+      harmless and ``install`` needn't rewrite the file just to refresh it;
+    * a **newer** stamp is the KAN-505 case — the binary is behind, and
+      ``--force-skill`` would *downgrade* the skill, so callers must not offer it;
+    * an **older** stamp means the skill is behind, where ``--force-skill`` is the
+      correct upgrade;
+    * equal version **and** equal commit is the only situation in which a
+      differing body proves a hand edit;
+    * everything else — no stamp at all, an unparseable version, or the V50
+      pathology of one version number covering two different builds — is
+      ``UNKNOWN``, and says so instead of picking a direction.
+    """
+    if installed is None:
+        return SKILL_ABSENT, ""
+    if packaged is None:
+        return SKILL_NO_PACKAGED, ""
+    if strip_stamp(installed) == strip_stamp(packaged):
+        return SKILL_MATCH, ""
+
+    try:
+        stamp = parse_stamp(installed.decode("utf-8"))
+    except UnicodeDecodeError:
+        stamp = None
+    if stamp is None:
+        return SKILL_UNKNOWN, ""
+
+    stamped_version, stamped_sha = stamp
+    theirs = _version_tuple(stamped_version)
+    ours = _version_tuple(version)
+    if theirs is None or ours is None:
+        return SKILL_UNKNOWN, stamped_version
+    if theirs > ours:
+        return SKILL_NEWER, stamped_version
+    if theirs < ours:
+        return SKILL_OLDER, stamped_version
+    if stamped_sha == (build_sha or "").strip():
+        return SKILL_MODIFIED, stamped_version
+    # One version number, two different builds — the exact ambiguity V50's commit
+    # stamp exists to expose. Refuse to guess.
+    return SKILL_UNKNOWN, stamped_version
 
 
 # --- the hook entry ---------------------------------------------------------
@@ -595,17 +772,54 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"board_id\t{resolved.get('board_id') or '(unset)'}")
     print(f"token\t{'set' if resolved.get('token') else '(unset)'}")
     skill = skill_target_path()
-    packaged = packaged_skill_path()
-    if not skill.is_file():
-        state = "not installed"
-    elif packaged is None:
-        state = "installed (this build carries no copy to compare against)"
-    elif skill.read_bytes() == packaged.read_bytes():
-        state = "installed (matches this build)"
-    else:
-        state = "installed (locally modified)"
-    print(f"skill\t{state}\t{skill}")
+    for line in _skill_status_lines(skill):
+        print(line)
     return 0
+
+
+def _skill_status_lines(skill: Path) -> list[str]:
+    """The ``skill`` rows of ``context status`` — one state row, plus an advice row
+    where there is something safe to advise.
+
+    The point of the split (KAN-505): the advice is *state-dependent*, and the one
+    state that must never carry "pass --force-skill" is the one where the installed
+    copy is newer than this build, because there the flag downgrades it. Collapsing
+    the states would put the destructive suggestion under the false alarm."""
+    packaged = packaged_skill_path()
+    state, detail = compare_skill(
+        skill.read_bytes() if skill.is_file() else None,
+        packaged.read_bytes() if packaged is not None else None,
+    )
+    if state == SKILL_ABSENT:
+        return [f"skill\tnot installed\t{skill}"]
+    if state == SKILL_NO_PACKAGED:
+        return [f"skill\tinstalled (this build carries no copy to compare against)\t{skill}"]
+    if state == SKILL_MATCH:
+        return [f"skill\tinstalled (matches this build)\t{skill}"]
+    if state == SKILL_NEWER:
+        return [
+            f"skill\tinstalled copy is NEWER than this build "
+            f"(laid down by {detail}, this is {__version__})\t{skill}",
+            "skill\tyour binary is stale — re-download the release. Do NOT pass "
+            "--force-skill: it would downgrade the skill to this older build's copy",
+        ]
+    if state == SKILL_OLDER:
+        return [
+            f"skill\tinstalled (from an older build {detail}, or locally modified)\t{skill}",
+            "skill\tre-run `pandan context install --force-skill` to update it to "
+            "this build's copy",
+        ]
+    if state == SKILL_MODIFIED:
+        return [
+            f"skill\tinstalled (locally modified)\t{skill}",
+            "skill\tpass --force-skill to overwrite it with this build's copy",
+        ]
+    return [
+        f"skill\tinstalled (differs from this build; no build stamp, so local edits "
+        f"and a different build are indistinguishable)\t{skill}",
+        "skill\tcheck `pandan --version` against the build you installed it with "
+        "before passing --force-skill, which overwrites it with this build's copy",
+    ]
 
 
 # --- skill distribution ----------------------------------------------------
@@ -628,20 +842,68 @@ def _install_skill(args: argparse.Namespace) -> list[str]:
         ]
     target = skill_target_path()
     payload = source.read_bytes()
+    forced = bool(getattr(args, "force_skill", False))
+    notes: list[str] = []
     if target.is_file():
-        if target.read_bytes() == payload:
+        state, detail = compare_skill(target.read_bytes(), payload)
+        if state == SKILL_MATCH:
             return [f"skill\tup to date\t{target}"]
-        if not getattr(args, "force_skill", False):
+        if not forced:
+            # KAN-505: the refusal message is per-state, and only the states where
+            # overwriting is an *upgrade* (or is at worst same-version) may point at
+            # --force-skill. Offering it under SKILL_NEWER is what made the false
+            # alarm dangerous rather than merely wrong.
+            if state == SKILL_NEWER:
+                return [
+                    f"skill\tleft alone — installed copy is NEWER than this build "
+                    f"(laid down by {detail}, this is {__version__})\t{target}",
+                    "skill\tyour binary is stale — re-download the release rather than "
+                    "forcing this older copy over it",
+                ]
+            if state == SKILL_OLDER:
+                return [
+                    f"skill\tleft alone (from an older build {detail}, or locally "
+                    f"modified)\t{target}",
+                    "skill\tpass --force-skill to overwrite it with this build's copy",
+                ]
+            if state == SKILL_UNKNOWN:
+                return [
+                    f"skill\tleft alone (differs from this build; no build stamp, so "
+                    f"local edits and a different build are indistinguishable)\t{target}",
+                    "skill\tpass --force-skill to overwrite it with this build's copy",
+                ]
             return [
                 f"skill\tleft alone (locally modified)\t{target}",
                 "skill\tpass --force-skill to overwrite it with this build's copy",
             ]
         verb = "overwrote"
+        if state == SKILL_NEWER:
+            # --force-skill stays an escape hatch: an explicit flag is intent, and
+            # refusing it outright would leave no way back to an older skill. But it
+            # is labelled, so a downgrade is never silent.
+            notes.append(
+                f"skill\tWARNING: this DOWNGRADED the skill — the copy you replaced was "
+                f"laid down by {detail}, newer than this build ({__version__})"
+            )
     else:
         verb = "installed"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(payload)
-    return [f"skill\t{verb}\t{target}"]
+    target.write_bytes(_stamped(payload))
+    return [f"skill\t{verb}\t{target}", *notes]
+
+
+def _stamped(payload: bytes) -> bytes:
+    """``payload`` with this build's stamp as its last line.
+
+    This is the half of KAN-505 that makes provenance *decidable* going forward: a
+    copy on disk can now name the build that wrote it, so "differs" acquires a
+    direction. It does nothing for a copy already installed — those stay
+    ``SKILL_UNKNOWN`` forever, which is why that state had to be honest."""
+    body = strip_stamp(payload)
+    text = body.decode("utf-8", errors="strict")
+    if not text.endswith("\n"):
+        text += "\n"
+    return (text + stamp_line() + "\n").encode("utf-8")
 
 
 def _uninstall_skill(args: argparse.Namespace) -> list[str]:
@@ -653,7 +915,14 @@ def _uninstall_skill(args: argparse.Namespace) -> list[str]:
     if not target.is_file():
         return ["skill\tnot installed"]
     source = packaged_skill_path()
-    if source is None or target.read_bytes() != source.read_bytes():
+    state, _detail = compare_skill(
+        target.read_bytes(), source.read_bytes() if source is not None else None
+    )
+    if state != SKILL_MATCH:
+        # Compared on the **body**, so our own stamp doesn't make an otherwise
+        # untouched copy look edited and thus undeletable (KAN-505). The hedged
+        # wording is unchanged — it was right all along, and is the tone the rest of
+        # this module now matches.
         return [
             f"skill\tkept (locally modified or unknown build)\t{target}",
             "skill\tdelete it by hand if you meant to remove it",

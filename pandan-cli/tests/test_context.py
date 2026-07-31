@@ -29,7 +29,7 @@ import httpx
 import pytest
 from pandan_client import PandanApiError
 
-from pandan_cli import cli, config, context
+from pandan_cli import __version__, cli, config, context
 
 CARDS = [
     {"id": 1, "ticket_number": "KAN-1", "column": "todo", "title": "A", "story_points": 3,
@@ -511,24 +511,45 @@ def test_the_skill_is_packaged_in_the_repo():
 def test_install_lays_down_the_skill_and_uninstall_removes_it(tmp_path, capsys):
     target = context.skill_target_path()
     assert cli.run(["context", "install"]) == 0
-    assert target.read_bytes() == context.packaged_skill_path().read_bytes()
+    packaged = context.packaged_skill_path().read_bytes()
+
+    # Since KAN-505 the installed copy carries a build stamp, so it is deliberately
+    # *not* byte-identical to the packaged one — but its body is, which is the
+    # comparison everything else is made on.
+    assert target.read_bytes() != packaged
+    assert context.strip_stamp(target.read_bytes()) == context.strip_stamp(packaged)
+    assert context.parse_stamp(target.read_text()) == (__version__, context.BUILD_SHA)
     assert "skill\tinstalled" in capsys.readouterr().out
 
+    # And the stamp must not make an untouched copy look edited — otherwise
+    # stamping would have silently broken uninstall's "never delete a modified
+    # skill" promise into "never delete anything".
     assert cli.run(["context", "uninstall"]) == 0
     assert not target.exists()
     assert "skill\tremoved" in capsys.readouterr().out
 
 
-def test_install_does_not_clobber_a_locally_edited_skill(tmp_path, capsys):
+def test_install_does_not_clobber_an_unstamped_skill_but_does_not_call_it_edited(
+    tmp_path, capsys
+):
+    # An unstamped copy is the pre-KAN-505 install (and the hand-written file). It is
+    # still never clobbered without --force-skill, but the *reason* is now honest:
+    # with no stamp, local edits and a different build are indistinguishable, and
+    # this is exactly where the old code asserted "locally modified" without knowing.
     target = context.skill_target_path()
     target.parent.mkdir(parents=True)
     target.write_text("my own notes")
     assert cli.run(["context", "install"]) == 0
     assert target.read_text() == "my own notes"
-    assert "left alone (locally modified)" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "left alone (differs from this build; no build stamp" in out
+    assert "left alone (locally modified)" not in out
+    assert "pass --force-skill to overwrite it with this build's copy" in out
 
     assert cli.run(["context", "install", "--force-skill"]) == 0
-    assert target.read_bytes() == context.packaged_skill_path().read_bytes()
+    assert context.strip_stamp(target.read_bytes()) == context.strip_stamp(
+        context.packaged_skill_path().read_bytes()
+    )
 
 
 def test_uninstall_never_deletes_a_locally_edited_skill(tmp_path, capsys):
@@ -550,6 +571,259 @@ def test_no_skill_and_keep_skill_opt_out(tmp_path, capsys):
     assert cli.run(["context", "uninstall", "--keep-skill"]) == 0
     assert context.skill_target_path().is_file()
     assert "skill\tkept (--keep-skill)" in capsys.readouterr().out
+
+
+# --- skill provenance: the KAN-505 false alarm ----------------------------
+#
+# The bug: `context status` compared the installed skill against *the build you
+# invoked it with* and called any difference "locally modified". A user one release
+# behind was told they had edits they never made — and "locally modified" is the
+# state that points at `--force-skill`, which would have DOWNGRADED their skill.
+# So the tests below come in pairs: every assertion that a new state *fires* is
+# matched by one that it does **not** fire in the neighbouring state.
+
+THIS_BUILD = (__version__, context.BUILD_SHA)
+
+
+def _install_stamped(body: str, version: str, build_sha: str = ""):
+    """Put a skill on disk stamped as if a build ``version`` had laid it down."""
+    target = context.skill_target_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        body.rstrip("\n") + "\n" + context.stamp_line(version, build_sha) + "\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+def _bump(version: str, by: int) -> str:
+    major, minor, patch = (int(part) for part in version.split("."))
+    return f"{major}.{minor + by}.{patch}"
+
+
+def test_the_kan_505_reproduction_the_same_file_read_by_two_builds():
+    """The card's exact scenario, as a pure-function test.
+
+    One untouched file, laid down by the newer build; two builds asking about it.
+    The newer build sees a match. The older build must **not** say "locally
+    modified" — that was the false alarm, and it is the whole card."""
+    old_packaged = b"# pandan skill\nas shipped in 0.12.0\n"
+    new_packaged = b"# pandan skill\nas shipped in 0.15.0\n"
+    installed = new_packaged + context.stamp_line("0.15.0", "abc1234").encode() + b"\n"
+
+    # The build that actually laid it down: identical.
+    assert context.compare_skill(installed, new_packaged, version="0.15.0") == (
+        context.SKILL_MATCH,
+        "",
+    )
+    # The stale 0.12.0 release binary on $PATH: differs, but the direction is known,
+    # and it is the *binary* that is behind — not the file that was edited.
+    assert context.compare_skill(installed, old_packaged, version="0.12.0") == (
+        context.SKILL_NEWER,
+        "0.15.0",
+    )
+
+
+def test_status_reports_a_stale_binary_and_never_invites_the_downgrade(tmp_path, capsys):
+    _install_stamped("# not this build's copy", _bump(__version__, 1))
+    assert cli.run(["context", "status"]) == 0
+    out = capsys.readouterr().out
+
+    assert "installed copy is NEWER than this build" in out
+    assert "your binary is stale" in out
+    # The severity of the card: the false alarm pointed at the destructive fix. The
+    # invitation must be absent here, and replaced by an explicit warning against it.
+    assert "pass --force-skill to overwrite it with this build's copy" not in out
+    assert "Do NOT pass --force-skill" in out
+    assert "installed (locally modified)" not in out
+
+
+def test_status_still_reports_a_genuinely_edited_skill_as_locally_modified(tmp_path, capsys):
+    """The pairing for the test above: when the stamp names *this* build, a differing
+    body really is a hand edit, and the confident wording (plus the --force-skill
+    invitation) is correct. Without this, the fix would just be a new confidently
+    wrong answer."""
+    _install_stamped("# I edited this myself", *THIS_BUILD)
+    assert cli.run(["context", "status"]) == 0
+    out = capsys.readouterr().out
+
+    assert "installed (locally modified)" in out
+    assert "pass --force-skill to overwrite it with this build's copy" in out
+    # The new state must NOT leak into the genuinely-modified case.
+    assert "NEWER than this build" not in out
+    assert "your binary is stale" not in out
+
+
+def test_status_reports_an_older_build_copy_as_stale_skill_not_as_local_edits(
+    tmp_path, capsys
+):
+    _install_stamped("# an older build's copy", "0.1.0")
+    assert cli.run(["context", "status"]) == 0
+    out = capsys.readouterr().out
+
+    assert "installed (from an older build 0.1.0, or locally modified)" in out
+    # Upgrading is the safe direction here, so --force-skill IS the right advice.
+    assert "--force-skill" in out
+    assert "your binary is stale" not in out
+
+
+def test_status_degrades_honestly_when_the_installed_copy_carries_no_stamp(
+    tmp_path, capsys
+):
+    """The migration case, and the one that can never be fixed retroactively: a copy
+    installed before KAN-505 has no stamp, so the direction is genuinely unknowable.
+    It must say so rather than pick a side — guessing here would be the same defect
+    one level up."""
+    target = context.skill_target_path()
+    target.parent.mkdir(parents=True)
+    target.write_text("# laid down by some build, no stamp\n")
+    assert cli.run(["context", "status"]) == 0
+    out = capsys.readouterr().out
+
+    assert "no build stamp" in out
+    assert "indistinguishable" in out
+    # It claims neither direction.
+    assert "installed (locally modified)" not in out
+    assert "NEWER than this build" not in out
+    assert "older build" not in out
+
+
+def test_status_reports_a_match_for_an_untouched_install(tmp_path, capsys):
+    # Identity invariant: the unchanged case still reports exactly as it did before.
+    assert cli.run(["context", "install"]) == 0
+    capsys.readouterr()
+    assert cli.run(["context", "status"]) == 0
+    out = capsys.readouterr().out
+    assert "skill\tinstalled (matches this build)" in out
+    assert "modified" not in out
+    assert "stale" not in out
+
+
+def test_install_refuses_to_downgrade_a_newer_skill_without_offering_force_skill(
+    tmp_path, capsys
+):
+    newer = _bump(__version__, 1)
+    target = _install_stamped("# from a newer build", newer)
+    before = target.read_bytes()
+
+    assert cli.run(["context", "install"]) == 0
+    out = capsys.readouterr().out
+    assert target.read_bytes() == before  # untouched
+    assert "left alone — installed copy is NEWER than this build" in out
+    assert f"laid down by {newer}" in out
+    assert "pass --force-skill to overwrite it with this build's copy" not in out
+    assert "re-download the release" in out
+
+
+def test_force_skill_labels_a_downgrade_instead_of_doing_it_silently(tmp_path, capsys):
+    """--force-skill stays an escape hatch — an explicit flag is intent, and removing
+    it would leave no way back to an older skill. But the downgrade is now announced,
+    where before it was silent."""
+    newer = _bump(__version__, 1)
+    target = _install_stamped("# from a newer build", newer)
+
+    assert cli.run(["context", "install", "--force-skill"]) == 0
+    out = capsys.readouterr().out
+    assert context.strip_stamp(target.read_bytes()) == context.strip_stamp(
+        context.packaged_skill_path().read_bytes()
+    )
+    assert "WARNING: this DOWNGRADED the skill" in out
+    assert f"laid down by {newer}" in out
+
+
+def test_uninstall_removes_a_stamped_but_unmodified_copy_yet_keeps_an_edited_one(
+    tmp_path, capsys
+):
+    # Two halves of the same guard: the stamp must not make uninstall refuse, but a
+    # real edit still must.
+    assert cli.run(["context", "install"]) == 0
+    capsys.readouterr()
+    assert cli.run(["context", "uninstall"]) == 0
+    assert not context.skill_target_path().exists()
+    assert "skill\tremoved" in capsys.readouterr().out
+
+    target = _install_stamped("# I edited this myself", *THIS_BUILD)
+    assert cli.run(["context", "uninstall"]) == 0
+    assert target.is_file()
+    assert "kept (locally modified or unknown build)" in capsys.readouterr().out
+
+
+# --- the stamp itself ------------------------------------------------------
+
+
+def test_the_stamp_is_an_inert_trailing_comment_not_frontmatter():
+    """A SKILL.md is consumed as agent instructions, so the stamp must not change how
+    it reads. It is an HTML comment (inert in Markdown, carries no imperative) on the
+    **last** line — never a frontmatter key, because the frontmatter is the harness's
+    own metadata contract and an unrecognised key there is a schema risk."""
+    packaged = context.packaged_skill_path().read_bytes()
+    stamped = context._stamped(packaged)
+    text = stamped.decode("utf-8")
+
+    # Frontmatter and body are untouched, byte for byte.
+    assert text.startswith("---\nname: pandan\n")
+    assert context.strip_stamp(stamped) == packaged
+
+    last = text.rstrip("\n").rsplit("\n", 1)[-1]
+    assert last.startswith("<!--") and last.endswith("-->")
+    assert "\n" not in last
+    # The packaged copy carries no stamp of its own, so stamping is not cumulative.
+    assert context.parse_stamp(packaged.decode("utf-8")) is None
+    assert text.count(context.SKILL_STAMP_PREFIX) == 1
+    assert context._stamped(stamped) == stamped
+
+
+def test_stamp_round_trips_and_ignores_version_shaped_prose():
+    # The skill's own body documents `--version` output, so it genuinely contains
+    # version-shaped text. Only the last line may be read as provenance.
+    body = "# skill\n`pandan --version` prints `pandan 0.7.0 (bd28cf0)`.\n"
+    assert context.parse_stamp(body) is None
+    assert context.strip_stamp(body.encode()) == body.encode()
+
+    stamped = body + context.stamp_line("1.2.3", "deadbee") + "\n"
+    assert context.parse_stamp(stamped) == ("1.2.3", "deadbee")
+    assert context.strip_stamp(stamped.encode()).decode() == body
+
+    source = body + context.stamp_line("1.2.3", "") + "\n"
+    assert context.parse_stamp(source) == ("1.2.3", "")
+
+
+@pytest.mark.parametrize(
+    "installed_version,installed_sha,ours,our_sha,expected",
+    [
+        # Same version AND same commit: a differing body can only be a hand edit.
+        ("1.2.3", "aaaaaaa", "1.2.3", "aaaaaaa", context.SKILL_MODIFIED),
+        # Same version, different commit — the V50 pathology of one number covering
+        # two builds. Direction unknowable; must not be reported as an edit.
+        ("1.2.3", "aaaaaaa", "1.2.3", "bbbbbbb", context.SKILL_UNKNOWN),
+        ("1.3.0", "aaaaaaa", "1.2.3", "aaaaaaa", context.SKILL_NEWER),
+        ("1.2.3", "aaaaaaa", "1.3.0", "aaaaaaa", context.SKILL_OLDER),
+        ("2.0.0", "", "1.9.9", "", context.SKILL_NEWER),
+        # An unparseable version is never given an invented ordering.
+        ("1.2.3rc1", "aaaaaaa", "1.2.3", "aaaaaaa", context.SKILL_UNKNOWN),
+    ],
+)
+def test_compare_skill_only_claims_a_direction_it_can_prove(
+    installed_version, installed_sha, ours, our_sha, expected
+):
+    installed = (
+        b"# installed body\n"
+        + context.stamp_line(installed_version, installed_sha).encode()
+        + b"\n"
+    )
+    state, detail = context.compare_skill(
+        installed, b"# a different body\n", version=ours, build_sha=our_sha
+    )
+    assert state == expected
+    assert detail == installed_version
+
+
+def test_compare_skill_handles_absent_and_unbundled_and_undecodable_copies():
+    packaged = b"# body\n"
+    assert context.compare_skill(None, packaged)[0] == context.SKILL_ABSENT
+    assert context.compare_skill(packaged, None)[0] == context.SKILL_NO_PACKAGED
+    # A mangled file must be a comparison result, never a traceback out of `status`.
+    assert context.compare_skill(b"\xff\xfe not utf-8", packaged)[0] == context.SKILL_UNKNOWN
 
 
 # --- argument validation -------------------------------------------------
