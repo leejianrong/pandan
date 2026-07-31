@@ -29,6 +29,12 @@ config → one client call → print. ``--format`` picks the rendering (V47, KAN
 ``json`` and ``toon`` render the **same** object through one shaping function
 (``_structured_payload``) and differ only in the serializer, so the two can't drift.
 
+**Every list verb ends with a pre-computed aggregate** (V44, KAN-427 — AXI 4), so an
+agent never pays a second round trip for counts: ``42 cards · 12 todo · 5 in_progress
+· 25 done`` as the last human line, or the same numbers as a ``summary`` object beside
+the rows under ``--format json``/``toon``. It always describes **the rows actually
+returned** — under ``--limit``, a filter, or one keyset page — never the whole board.
+
 Failures are **structured and on stdout** (V43, KAN-426 — AXI 6): one tab-separated
 row ``error<TAB><code><TAB><message><TAB><arg>`` (``-`` when no single argument is at
 fault), or the same object serialized under ``--format json``/``toon``. stdout is the
@@ -226,18 +232,25 @@ def _structured_payload(result: Any) -> Any:
     V47 (KAN-430) exists to establish. ``json`` and ``toon`` differ only in how this
     return value is written out, so they cannot describe different data.
 
-    Today it is the client's result verbatim (``--json`` has always been a
-    documented passthrough, and the README's "--json output shape" section is that
-    promise). It is a function, not an inlined expression, because the next three
-    slices all want to bend the structured payload and must bend **both** formats
-    at once:
+    It is the client's result verbatim **plus** a ``summary`` object beside the rows
+    on a list response (V44, KAN-427 — see ``_summary_for``); every other shape (a
+    single entity, metrics, a delete receipt) passes through untouched, because
+    there is nothing to total. The human counterpart of that ``summary`` is the
+    trailing line in ``_emit`` below, rendered from the *same* dict.
 
-    * **V44 (KAN-427)** — attach the pre-computed ``summary`` object beside the rows
-      here. Its human counterpart is the trailing line in ``_emit`` below.
+    It is a function, not an inlined expression, because the remaining slices want
+    to bend the structured payload and must bend **both** formats at once:
+
     * **V45 (KAN-428)** — truncate long text here, taking ``full: bool`` (from
       ``--full``) as a keyword argument threaded down from ``_emit``'s caller.
     """
-    return result
+    found = _summary_for(result)
+    if found is None:
+        return result
+    _, summary = found
+    # ``summary`` last, so the rows an agent cares about stay at the top of the
+    # payload; a list envelope never has a key of that name of its own.
+    return {**result, "summary": summary}
 
 
 def _render_structured(payload: Any, fmt: str) -> str:
@@ -272,13 +285,20 @@ def _emit(
 
     **V46 (KAN-429)** hangs its ``help[]`` next-step hints off the human branch
     below — after the ``_humanize`` line and *inside* the ``else``, which is what
-    "suppressed under ``--json``/``--format toon``" means mechanically.
+    "suppressed under ``--json``/``--format toon``" means mechanically. Put them
+    **after** the V44 summary line, so the aggregate stays the last *data* line.
     """
     if fmt in STRUCTURED_FORMATS:
         print(_render_structured(_structured_payload(result), fmt))
         return
-    # V44 (KAN-427): the trailing human summary line goes after this print.
     print(_humanize(result, noun=noun, fields=fields))
+    # V44 (KAN-427): a list verb's pre-computed aggregate, always its last line, so
+    # an agent reads counts off `tail -1` instead of paying a second round trip.
+    # Non-list results get none (nothing to total); the structured formats carry the
+    # same numbers as a `summary` object instead (see ``_structured_payload``).
+    found = _summary_for(result)
+    if found is not None:
+        print(_summary_line(*found))
 
 
 def _humanize(result: Any, *, noun: str = "card", fields: list[str] | None = None) -> str:
@@ -816,6 +836,173 @@ def _project_rows(result: Any, fields: list[str]) -> str | None:
             lines.append(f"(more — next cursor: {result['next_cursor']})")
         return "\n".join(lines)
     return None
+
+
+# --- pre-computed list aggregates (V44, KAN-427 — AXI 4) --------------------
+# Every list verb ends with one aggregate line, so an agent never pays a second
+# round trip for counts it could have been handed. The aggregate describes **the
+# returned set** — under `--limit`, a filter, or one keyset page it totals the rows
+# actually returned and nothing else. That is not a limitation to fix: the CLI has
+# exactly one response in hand, and a line that silently described the whole board
+# would be a number the caller cannot reconcile with the rows above it.
+#
+# One dispatcher (`_summary_for`) decides the shape and computes the numbers once;
+# `_structured_payload` attaches its dict as `summary` and `_emit` renders the human
+# line **from that same dict**. So human / json / toon cannot disagree about counts.
+
+# Envelope key → (singular, plural) noun for the leading `<n> <noun>` clause.
+# Every `_LIST_ENVELOPES` key needs an entry — a test pins the two tuples together
+# so a new list verb cannot ship a summary line reading "1 cycles".
+_SUMMARY_NOUN: dict[str, tuple[str, str]] = {
+    "cards": ("card", "cards"),
+    "boards": ("board", "boards"),
+    "epics": ("epic", "epics"),
+    "labels": ("label", "labels"),
+    "views": ("view", "views"),
+    "templates": ("template", "templates"),
+    "cycles": ("cycle", "cycles"),
+    "notifications": ("notification", "notifications"),
+    # "activity" is already a mass noun — "50 activitys" is not a sentence.
+    "activity": ("activity row", "activity rows"),
+    "comments": ("comment", "comments"),
+}
+
+# The epic health vocabulary (backend ``schemas.EpicHealth``). ``health`` is null
+# when the epic has no ``target_date``, so these buckets need NOT sum to ``count``.
+_EPIC_HEALTHS = ("on_track", "at_risk", "overdue")
+
+# `dep list` is the one list verb whose response is two arrays rather than one
+# envelope, so its summary gets a pseudo-key of its own.
+_DEPENDENCIES = "dependencies"
+
+
+def _list_envelope(result: Any) -> tuple[str, list[Any]] | None:
+    """The ``(envelope key, rows)`` of a list response, or ``None`` for anything else.
+
+    Two **single-entity** payloads carry an envelope key of their own and must not be
+    counted as lists: a ``CardRead`` has a ``labels`` array (the KAN-277 trap) and a
+    single template has a ``cards`` array (``template create``). One rule excludes
+    both — a list envelope has no ``id`` / ``ticket_number`` of its own."""
+    if not isinstance(result, dict):
+        return None
+    if "id" in result or "ticket_number" in result:
+        return None
+    for key in _LIST_ENVELOPES:
+        rows = result.get(key)
+        if isinstance(rows, list):
+            return key, rows
+    return None
+
+
+def _card_summary(rows: list[Any]) -> dict[str, Any]:
+    """Per-column counts + the needs-human tally for a card list.
+
+    Buckets are derived from ``COLUMNS``, so adding a board column (a `varchar` +
+    CHECK, deliberately cheap to extend — see CLAUDE.md) extends the summary with
+    it. A row whose ``column`` is outside ``COLUMNS`` still counts in ``count`` but
+    lands in no bucket, so the buckets need not sum to ``count``."""
+    counts = dict.fromkeys(COLUMNS, 0)
+    needs_human = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        column = row.get("column")
+        if column in counts:
+            counts[column] += 1
+        if row.get("needs_human"):
+            needs_human += 1
+    return {**counts, "needs_human": needs_human}
+
+
+def _epic_summary(rows: list[Any]) -> dict[str, Any]:
+    """The rollup spread over an epic list: child stories done / total across the
+    returned epics (``percent`` computed the way the API computes a single epic's —
+    ``round(done/total*100)``, ``0`` when there are no children), plus how many epics
+    sit in each health bucket."""
+    total = 0
+    done = 0
+    health = dict.fromkeys(_EPIC_HEALTHS, 0)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        progress = row.get("progress")
+        if isinstance(progress, dict):
+            total += int(progress.get("total") or 0)
+            done += int(progress.get("done") or 0)
+        bucket = row.get("health")
+        if bucket in health:
+            health[bucket] += 1
+    return {
+        "stories_total": total,
+        "stories_done": done,
+        "percent": round(done / total * 100) if total else 0,
+        **health,
+    }
+
+
+def _notification_summary(rows: list[Any]) -> dict[str, Any]:
+    """Read/unread split for a notification list — ``read_at`` unset means unread,
+    the same test ``_notification_line`` renders."""
+    unread = sum(1 for row in rows if isinstance(row, dict) and not row.get("read_at"))
+    return {"unread": unread, "read": len(rows) - unread}
+
+
+def _summary_for(result: Any) -> tuple[str, dict[str, Any]] | None:
+    """The pre-computed aggregate for a list result — ``(kind, summary)`` — or
+    ``None`` when the result is not a list (a single entity, metrics, a delete
+    receipt: nothing to total).
+
+    ``kind`` is the envelope key (or ``_DEPENDENCIES`` for ``dep list``) and is
+    deliberately **not** part of the structured payload: the payload already names
+    the rows. It only tells ``_summary_line`` which shape to render."""
+    # `dep list` first — its response is two arrays, not an envelope, and `card_id`
+    # + `blocked_by` is the same pair ``_humanize`` keys its dep branch off.
+    if isinstance(result, dict) and "card_id" in result and "blocked_by" in result:
+        return _DEPENDENCIES, {
+            "blocked_by": len(result.get("blocked_by") or []),
+            "blocks": len(result.get("blocks") or []),
+        }
+    found = _list_envelope(result)
+    if found is None:
+        return None
+    key, rows = found
+    summary: dict[str, Any] = {"count": len(rows)}
+    if key == "cards":
+        summary.update(_card_summary(rows))
+    elif key == "epics":
+        summary.update(_epic_summary(rows))
+    elif key == "notifications":
+        summary.update(_notification_summary(rows))
+    return key, summary
+
+
+def _summary_line(kind: str, summary: dict[str, Any]) -> str:
+    """The human aggregate, e.g. ``42 cards · 12 todo · 5 in_progress · 25 done``
+    (``· 3 needs-human`` appended only when non-zero, so a board with no handoffs
+    pending doesn't carry a permanent ``· 0``).
+
+    Rendered from the very dict ``_structured_payload`` attaches, never recomputed:
+    a structured consumer and a human read the same numbers by construction."""
+    if kind == _DEPENDENCIES:
+        return f"{summary['blocked_by']} blocked_by · {summary['blocks']} blocks"
+    count = summary["count"]
+    singular, plural = _SUMMARY_NOUN.get(kind, (kind, kind))
+    parts = [f"{count} {singular if count == 1 else plural}"]
+    if kind == "cards":
+        # The column buckets print even at zero — that IS the definitive state of a
+        # filtered set (`--column todo` → `· 0 done`), and AXI 5 asks for definitive.
+        parts += [f"{summary[column]} {column}" for column in COLUMNS]
+        if summary["needs_human"]:
+            parts.append(f"{summary['needs_human']} needs-human")
+    elif kind == "epics":
+        parts.append(
+            f"{summary['stories_done']}/{summary['stories_total']} stories done "
+            f"({summary['percent']}%)"
+        )
+        parts += [f"{summary[b]} {b}" for b in _EPIC_HEALTHS if summary[b]]
+    elif kind == "notifications":
+        parts.append(f"{summary['unread']} unread")
+    return " · ".join(parts)
 
 
 # --- board resolution -------------------------------------------------------
@@ -1551,6 +1738,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Output: --format human (default, tab-separated) | json | toon.\n"
             "--json is a supported alias for --format json; --format wins if both\n"
             "are given. toon is the token-cheap rendering for nested payloads.\n"
+            "\n"
+            "Every list verb ends with a pre-computed aggregate, so counts never cost\n"
+            "a second request:  42 cards · 12 todo · 5 in_progress · 25 done\n"
+            "(· N needs-human when non-zero). It always describes the rows RETURNED —\n"
+            "under --limit or a filter, not the whole board. Under --format json/toon\n"
+            "the same numbers ride the payload as a `summary` object instead.\n"
             "\n"
             "Exit codes: 0 ok, 1 error, 2 usage, 3 unauthorized, 4 forbidden, 5 not found\n"
             "(a KAN-/EPIC- ticket that resolves to nothing is also 5).\n"

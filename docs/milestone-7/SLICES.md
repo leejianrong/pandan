@@ -30,7 +30,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 | **V50 · CLI release discipline** ✅ | version-bump-on-fix + discriminating `--version` | A0 | 2 | KAN-435 | `pandan --version` says which build this is; a stale binary is detectable, not silent |
 | **V42 · `--fields` + round-trip tests** ✅ | projection flag; pin the shipped ref handling | A1 | 2 | KAN-425 | `--fields` widens the row; a per-verb test feeds each printed identifier back |
 | **V43 · Error contract** ✅ | structured errors, exit codes | A2 | 2 | KAN-426 | A bad flag, a bad value and a missing token each print a parseable error on **stdout** with the documented exit code |
-| **V44 · Aggregates** | summary on every list verb | A3 | 2 | KAN-427 | `pandan list` ends with `42 cards · 12 todo · 5 in_progress · 25 done`; no second call needed for a count |
+| **V44 · Aggregates** ✅ | summary on every list verb | A3 | 2 | KAN-427 | `pandan list` ends with `42 cards · 12 todo · 5 in_progress · 25 done`; no second call needed for a count |
 | **V45 · Truncation** | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
 | **V46 · Content-first + disclosure** | bare command, `help[]` | A5 | 2 | KAN-429 | Bare `pandan` prints live board state and exits 0; results carry `help[]` next-step templates |
 | **V47 · TOON** | `--format toon` for nested payloads | A6 | 2 | KAN-430 | `pandan get KAN-304 --format toon` returns the same data as `--json`, materially cheaper |
@@ -47,12 +47,14 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 > prioritised **first** in Wave 2. Audit against `uv run python -m pandan_cli` from `pandan-cli/`,
 > never a `kan` on `PATH` — see the [shaping](SHAPING.md)'s methodology note.
 
-> **Status:** 🚧 **in progress (4/11 shipped, 1 deferred).** **V40 / KAN-423 is shipped** (two PRs —
+> **Status:** 🚧 **in progress (6/11 shipped, 1 deferred).** **V40 / KAN-423 is shipped** (two PRs —
 > structural then semantic; see its slice note), and Wave 2 has begun: **V50 / KAN-435** shipped as
 > **v0.5.0** (release provenance in `--version` + the version-bump guard), **V42 / KAN-425** as
-> **v0.6.0** (`--fields` + the identifier round-trip suite), and **V43 / KAN-426** as **v0.7.0** (the
+> **v0.6.0** (`--fields` + the identifier round-trip suite), **V43 / KAN-426** as **v0.7.0** (the
 > CLI's error contract: structured errors on stdout, the six-code exit scheme documented and pinned,
-> and ref-resolution failure repaired to exit `5`). **V41 / KAN-424 is ⏸️ deferred**, `blocked-by`
+> and ref-resolution failure repaired to exit `5`), **V47 / KAN-430** as **v0.8.0**
+> (`--format {human,json,toon}` over one shared serializer), and **V44 / KAN-427** as **v0.9.0**
+> (a pre-computed `summary` on all eleven list verbs, on V47's seams). **V41 / KAN-424 is ⏸️ deferred**, `blocked-by`
 > **KAN-439** (k8s homelab migration), with **KAN-437** carved out for the in-place renames.
 > Board cards **KAN-423…KAN-432** + **KAN-435** under the three `M7:` epics
 > **EPIC-66** (Pandan Rebrand), **EPIC-67** (Agent-Ergonomic CLI), **EPIC-68** (MCP Right-Sizing).
@@ -257,7 +259,7 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   (prod board 11 exists but isn't ours → `403` → exit `4`; policy at `backend/app/authz.py:194-205`) —
   flagging the gap is what got it closed.
 
-### V44 · Pre-computed aggregates on every list verb (A3) — KAN-427
+### V44 · Pre-computed aggregates on every list verb (A3) — KAN-427 ✅
 - **Build:** AXI 4. Every list verb ends with a summary the agent would otherwise pay a round trip for:
   cards → `42 cards · 12 todo · 5 in_progress · 25 done` (plus `· 3 needs-human` when non-zero); epics
   → count + rollup spread; and the analogous one-liner for label/view/template/comment/dep lists.
@@ -268,6 +270,31 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   explicitly); an empty result still prints its definitive zero state (AXI 5 regression guard);
   `--json` carries `summary` and no trailing line.
 - **Acceptance:** the summary-line demo; suite green. CLI-only — no deploy.
+- **Shipped** as **v0.9.0**, on V47's seams unmoved: `_structured_payload` attaches the `summary`
+  object (so `json` and `toon` cannot drift) and `_emit`'s human branch prints `_summary_line` **from
+  the same dict** (so human and structured cannot drift either). One dispatcher, `_summary_for`,
+  computes the numbers once. Live: `23 epics · 96/107 stories done (90%)`,
+  `1 card · 1 todo · 0 in_progress · 0 done · 1 needs-human`, `79 notifications · 78 unread`,
+  `2 blocked_by · 1 blocks`, and a plain `2 labels` / `1 view` / `2 activity rows` elsewhere.
+- **The verb count is ELEVEN, not the card's seven.** The ten `_LIST_ENVELOPES` (cards, boards, epics,
+  labels, views, templates, cycles, notifications, activity, comments — V42's `--fields` set) **plus
+  `dep list`**, whose response is two arrays rather than an envelope and so needs a shape of its own.
+  `_SUMMARY_NOUN` and the test verb table are both pinned against that tuple, so an eleventh list verb
+  can't ship without its aggregate.
+- **The card's "suppressed under `--json`" was superseded**, as this section already said: structured
+  consumers get the `summary` object, which is what parity means. The `--json` envelope is therefore
+  **no longer a byte-verbatim passthrough** — the rows are untouched and `summary` is the only added
+  key. README's "The `--json` output shape" section needs that sentence (KAN-442/451 owns the file).
+- **Two blind guards found by mutation testing**, both fixed and both now proven red: asserting
+  `_humanize(result) in out` for the AXI-5 zero state passes for a humanizer returning `""` (`"" in
+  out` is always true), and asserting only `unread + read == count` passes for `unread = 0`. Fifteen
+  mutations run in all; the other thirteen were red first time.
+- **A pre-existing bug surfaced, deliberately not fixed here** (needs its own card): `template create`
+  returns one template whose payload carries a top-level `cards` array, so `_humanize`
+  (`pandan-cli/pandan_cli/cli.py:296`) matches its `list_cards` branch and prints the template's card
+  *payloads* as card rows with `?` for the ticket, instead of the template line — the KAN-277 trap,
+  second instance. V44 guards its own aggregate against it (`_list_envelope`: a list envelope has no
+  `id`/`ticket_number`) and leaves the rendering alone, since changing it is a separate behaviour call.
 
 ### V45 · Content truncation with size hints + `--full` (A4) — KAN-428
 - **Build:** AXI 3 — and note the audit correction: the gap is **not** that human `get` dumps a long
