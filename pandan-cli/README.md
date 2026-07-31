@@ -56,6 +56,7 @@ rather than spot-fixing it.
 | `pandan move <card_id> <column> [--position N]` | `POST /cards/{id}/move` |
 | `pandan delete <card_id> --yes` | `DELETE /cards/{id}` |
 | `pandan next [--board N] [--claim] [--assignee A] [--label ID] [--priority P]` | `GET /boards/{id}/next` (peek); with `--claim` → `POST /boards/{id}/dispatch` (atomic claim) |
+| `pandan claim <card_id> --assignee A` | `POST /cards/{id}/move` **then** `PATCH /cards/{id}` (claim a *chosen* card: to `in_progress` + assigned, one invocation). `--assignee` is required — unlike `next --claim`'s dispatch endpoint, this path has no server-side "the caller" default. Composed client-side, so **not transactional**: a failed PATCH leaves the card moved but unassigned |
 | `pandan needs-human <card_id> [--note N]` | `POST /cards/{id}/needs-human` |
 | `pandan resolve <card_id>` | `POST /cards/{id}/resolve` |
 | `pandan metrics [--board N] [--since ISO] [--window SPAN]` | `GET /boards/{id}/metrics` |
@@ -63,8 +64,12 @@ rather than spot-fixing it.
 | `pandan notify list [--unread]` | `GET /notifications` (V37, KAN-301 — your own inbox, **not** board-scoped, so no `--board`) |
 | `pandan notify read <id>` | `PATCH /notifications/{id}` (stamps `read_at`; idempotent) |
 | `pandan board list` | `GET /boards` |
+| `pandan board get <board_id>` | `GET /boards/{id}` |
 | `pandan board create <name>` | `POST /boards` |
+| `pandan board update <board_id> [--name N] [--outbound-webhook-url URL] [--outbound-webhook-secret S \| --outbound-webhook-secret-stdin] [--outbound-webhook-enabled \| --outbound-webhook-disabled]` | `PATCH /boards/{id}` — **how you rename a board** (KAN-502; it needed a raw `curl` before) and how you set up the V38 signed outbound webhook. Only the flags passed are sent. The secret is **write-only** (accepted here, never in a board read), so prefer `--outbound-webhook-secret-stdin` — an argv value is visible in `ps`. `--outbound-webhook-enabled`/`-disabled` is a tri-state: omit both to leave it alone |
+| `pandan board delete <board_id> --yes` | `DELETE /boards/{id}` (cards + epics cascade) |
 | `pandan epic list [--board N]` | `GET /epics` |
+| `pandan epic get <epic_id>` | `GET /epics/{id}` (accepts an `EPIC-<n>` ticket) |
 | `pandan epic create <name> [--board N] [--description D] [--target-date ISO] [--lead L]` | `POST /epics` |
 | `pandan epic update <epic_id> [--name N] [--description D] [--target-date ISO] [--lead L]` | `PATCH /epics/{id}` |
 | `pandan epic delete <epic_id> --yes` | `DELETE /epics/{id}` |
@@ -78,11 +83,20 @@ rather than spot-fixing it.
 | `pandan cycle create <name> [--board N] [--starts-on ISO] [--ends-on ISO]` | `POST /boards/{id}/cycles` |
 | `pandan cycle delete <cycle_id> [--board N] --yes` | `DELETE /boards/{id}/cycles/{cycle_id}` (cards are detached, not deleted) |
 | `pandan cycle metrics <cycle_id> [--board N]` | `GET /boards/{id}/cycles/{cycle_id}/metrics` (V34, KAN-298 — burndown / velocity) |
+| `pandan batch-create <JSON \| -> [--board N]` | `POST /cards` **× N** — several cards in one invocation. **Fail-fast, NOT atomic** (there is no batch-create endpoint, so cards created before a rejection stay created; contrast `batch-update`, which is one transaction). `--board`/`PANDAN_BOARD_ID` fills `board_id` into objects that omit it |
 | `pandan batch-update <JSON \| ->` | `PATCH /cards/batch` (atomic multi-card edit) |
 | `pandan template list [--board N]` | `GET /boards/{id}/templates` |
 | `pandan template create <name> --cards <JSON \| -> [--board N]` | `POST /boards/{id}/templates` |
 | `pandan template delete <template_id> [--board N] --yes` | `DELETE /boards/{id}/templates/{template_id}` |
 | `pandan template apply <template_id> [--board N]` | `POST /boards/{id}/templates/{template_id}/apply` |
+| `pandan login [--api-url U] [--board-id N] [--token-stdin]` | *(local — saves the PAT to the config file)* |
+| `pandan config set [--api-url U] [--board-id N] [--token-stdin \| --token T]` | *(local — writes the config file)* |
+| `pandan config show` | *(local — prints the effective config, token redacted)* |
+| `pandan config path` | *(local — prints the config file path)* |
+| `pandan context install [--settings PATH] [--exec PATH] [--timeout SECONDS] [--limit N] [--no-skill] [--force-skill]` | *(local — wires a Claude Code `SessionStart` hook; see [Ambient context](#ambient-context-v48-kan-431))* |
+| `pandan context uninstall [--settings PATH] [--keep-skill]` | *(local — removes the hook, leaving unrelated settings alone)* |
+| `pandan context status [--settings PATH]` | *(local — is the hook installed, is the board configured, and how the skill compares to this build)* |
+| `pandan context show [--board N] [--hook] [--timeout SECONDS] [--limit N]` | `GET /cards` — the ambient block itself; `--hook` is what the hook runs |
 | `pandan dep add <card_id> --blocked-by BLOCKER_ID` | `POST /cards/{id}/dependencies` |
 | `pandan dep rm <card_id> --blocked-by BLOCKER_ID` | `DELETE /cards/{id}/dependencies/{blocker_id}` |
 | `pandan dep list <card_id>` | `GET /cards/{id}` (its `blocked_by` / `blocks`) |
@@ -90,15 +104,7 @@ rather than spot-fixing it.
 | `pandan link rm <card_id> --link-id ID` | `DELETE /cards/{id}/links/{link_id}` |
 | `pandan comment add <card_id> --body B` | `POST /cards/{id}/comments` |
 | `pandan comment list <card_id>` | `GET /cards/{id}/comments` |
-| `pandan context install [--settings PATH] [--exec PATH] [--timeout SECONDS] [--limit N] [--no-skill] [--force-skill]` | *(local — wires a Claude Code `SessionStart` hook; see [Ambient context](#ambient-context-v48-kan-431))* |
-| `pandan context uninstall [--settings PATH] [--keep-skill]` | *(local — removes the hook, leaving unrelated settings alone)* |
-| `pandan context status [--settings PATH]` | *(local — is the hook installed, is the board configured, does the skill match this build)* |
-| `pandan context show [--board N] [--hook] [--timeout SECONDS] [--limit N]` | `GET /cards` — the ambient block itself; `--hook` is what the hook runs |
-| `pandan --version` (or `-v`) | *(local — prints the version **and the build's provenance**, then exits; see [Is my `pandan` stale?](#is-my-pandan-stale))* |
-| `pandan login [--api-url U] [--board-id N] [--token-stdin]` | *(local — saves the PAT to the config file)* |
-| `pandan config set [--api-url U] [--board-id N] [--token-stdin \| --token T]` | *(local — writes the config file)* |
-| `pandan config show` | *(local — prints the effective config, token redacted)* |
-| `pandan config path` | *(local — prints the config file path)* |
+| `pandan --version` (or `-v`) | *(local — a top-level **flag**, not a subcommand, so it has no place in the ordering above; prints the version **and the build's provenance**, then exits — see [Is my `pandan` stale?](#is-my-pandan-stale))* |
 
 Valid columns are `todo`, `in_progress`, `done`; valid priorities are `none`, `low`,
 `medium`, `high`, `urgent`. `delete` requires `--yes` as a guard against accidental

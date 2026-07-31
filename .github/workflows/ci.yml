@@ -86,6 +86,16 @@ jobs:
               - 'pandan-client/**'
             cli:
               - 'pandan-cli/**'
+              # pandan-cli/tests/test_parity.py reads the MCP tool names out of
+              # server.py AS TEXT (it must not import pandan_mcp — that would
+              # invert ADR 0005's adapter independence), and asserts parity in
+              # BOTH directions. So the CLI suite has a real input outside
+              # pandan-cli/: adding an MCP tool without a CLI route must fail
+              # here, and without this line an mcp-only PR would never run it.
+              # mcp/tests/test_schema.py's 49-tool freeze catches the same case
+              # first, so the two compose — but a guard whose CI does not run it
+              # is the KAN-452 / KAN-484 shape, and this closes it directly.
+              - 'mcp/pandan_mcp/server.py'
             # Bump-on-fix guard (V50, KAN-435): `cli_code` is a change to CLI
             # BEHAVIOUR, `cli_version` is a change to a version declaration. The
             # `cli` job fails when the first is true and the second is not — a

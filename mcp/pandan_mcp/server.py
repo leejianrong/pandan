@@ -21,6 +21,14 @@ grow. New board capability lands in the **CLI** first; adding a tool here means
 amending ADR 0019 and the pin in ``tests/test_schema.py``. See ``README.md``
 (*Why 49 tools, and why that is frozen*) for the reasoning and the numbers.
 
+**Two tests read THIS FILE, and both must stay green** (KAN-502): the freeze pin in
+``tests/test_schema.py``, and ``pandan-cli/tests/test_parity.py``, which parses the
+tool names out of this module *as text* — it must never ``import pandan_mcp``,
+because an adapter importing another adapter inverts ADR 0005 — and asserts parity
+in **both** directions. So a tool added here without a CLI route fails the **CLI**
+suite, and CI's ``cli`` paths filter includes this file for exactly that reason.
+Parity runs MCP ⊇ CLI *and* CLI ⊇ MCP as of KAN-502; it is no longer aspirational.
+
 **The read tools are shaped (KAN-501).** ADR 0019 measured one un-narrowed
 ``list_cards`` against a real 121-card board at ~44,900 tokens — 5.1× the entire
 schema surface, in a single result — and found the cost is *field breadth*, not
