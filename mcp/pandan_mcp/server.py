@@ -105,10 +105,12 @@ def warmup() -> dict[str, Any]:
 
 
 @mcp.tool()
-def list_boards() -> dict[str, Any]:
-    """List the boards you own (id + name). Call this first to discover which
-    boards you can target with ``board_id`` on the other tools."""
-    return _client_instance().list_boards()
+def list_boards(fields: list[str] | None = None) -> dict[str, Any]:
+    """List the boards you own. Call this first to discover which boards you can
+    target with ``board_id`` on the other tools. A row also carries autosync and
+    outbound-webhook settings a discovery call rarely reads, so pass
+    ``fields=["id","name"]`` (−84%). No ``full``: a board has no free text."""
+    return shape(_client_instance().list_boards(), fields=fields)
 
 
 @mcp.tool()
@@ -251,10 +253,12 @@ def get_card(
 
 
 @mcp.tool()
-def get_epic(epic_id: int) -> dict[str, Any]:
+def get_epic(epic_id: int, full: bool = False) -> dict[str, Any]:
     """Fetch a single epic by its numeric id. Authorized via the epic's own
-    board — no ``board_id`` needed."""
-    return _client_instance().get_epic(epic_id)
+    board — no ``board_id`` needed. A long description is truncated with a size hint
+    unless ``full=true`` — the same cut ``list_epics`` applies, so the listing and
+    this read agree about the same epic."""
+    return shape(_client_instance().get_epic(epic_id), full=full)
 
 
 @mcp.tool()
@@ -681,15 +685,27 @@ def activity(
 
 
 @mcp.tool()
-def list_notifications(unread: bool = False) -> dict[str, Any]:
+def list_notifications(
+    unread: bool = False,
+    fields: list[str] | None = None,
+    full: bool = False,
+) -> dict[str, Any]:
     """List YOUR notification inbox (V37) — items for events a human shouldn't miss:
     a card flagged needs_human, a card newly blocked by a dependency, a linked PR's
     CI failing, or a card being assigned. Notifications are **per-user, not
     board-scoped** (no board_id): you only ever see your own, addressed to you as a
     board owner. ``unread=true`` returns only unread ones; default returns all,
     newest-first. Poll/pull only (ADR 0007 — there is no push channel; poll this).
-    Returns ``{"notifications": [...]}``."""
-    return _client_instance().list_notifications(unread=unread or None)
+    Returns ``{"notifications": [...]}``.
+
+    **Pass ``fields``** (e.g. ``["id","kind","body"]``, −67%) — the inbox has no
+    ``limit`` and no cursor, so it returns your whole history and only grows: 127 rows
+    already cost ~14,300 tokens. Bodies truncate unless ``full=true``."""
+    return shape(
+        _client_instance().list_notifications(unread=unread or None),
+        fields=fields,
+        full=full,
+    )
 
 
 @mcp.tool()
