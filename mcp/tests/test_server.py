@@ -455,3 +455,66 @@ def test_create_card_passes_cycle_id(monkeypatch):
     seen = _capture_client(monkeypatch, httpx.Response(201, json={"id": 1}))
     server.create_card("T", board_id=3, cycle_id=4)
     assert json.loads(seen["content"]) == {"board_id": 3, "title": "T", "cycle_id": 4}
+
+
+# --- update_board: the autosync pair (KAN-529) ------------------------------
+# `autosync_enabled` / `autosync_advance_to_done` are two of the six `BoardUpdate`
+# fields (backend/app/schemas.py:436-443) and were reachable from NEITHER adapter, so
+# opting a board into EPIC-10 / ADR 0016 auto-sync meant a raw `curl`. Added as tool
+# ARGUMENTS, which ADR 0019's freeze permits — it freezes the tool *count*, pinned by
+# `tests/test_schema.py`, which these do not move.
+
+_BOARD_READ = {"id": 5, "name": "Roadmap", "autosync_enabled": True}
+
+
+def test_update_board_still_requires_only_board_id():
+    """Identity invariant first: the new arguments are optional, so no existing caller
+    becomes invalid. Asserted before any behaviour, because a widened `required` set is
+    a silent breaking change to every agent already calling this tool."""
+    update_board = next(t for t in _tools() if t.name == "update_board")
+    assert update_board.inputSchema["required"] == ["board_id"]
+
+
+def test_update_board_advertises_all_six_boardupdate_fields():
+    """The previous four must survive verbatim — a rename would break callers as surely
+    as a removal — and the two new ones must appear alongside them."""
+    update_board = next(t for t in _tools() if t.name == "update_board")
+    assert set(update_board.inputSchema["properties"]) == {
+        "board_id",
+        "name",
+        "autosync_enabled",
+        "autosync_advance_to_done",
+        "outbound_webhook_url",
+        "outbound_webhook_secret",
+        "outbound_webhook_enabled",
+    }
+
+
+def test_update_board_sends_only_the_autosync_flags_passed(monkeypatch):
+    """The property that matters: an omitted flag must not reach the wire at all, or an
+    unrelated rename would silently flip a board's auto-sync opt-in. `_clean` drops
+    `None` only — this goes through the real `PandanClient`, so it tests the client's
+    whitelist too (it enumerates fields; it does not forward `**kwargs`)."""
+    seen = _capture_client(monkeypatch, httpx.Response(200, json=_BOARD_READ))
+    server.update_board(5, autosync_enabled=True)
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/boards/5"
+    assert json.loads(seen["content"]) == {"autosync_enabled": True}
+
+
+def test_update_board_sends_an_explicit_false(monkeypatch):
+    """`False` is a value, not an omission — opting back out must be expressible.
+    `_clean` filters on `is not None` precisely so this survives."""
+    seen = _capture_client(monkeypatch, httpx.Response(200, json=_BOARD_READ))
+    server.update_board(5, autosync_enabled=False, autosync_advance_to_done=False)
+    assert json.loads(seen["content"]) == {
+        "autosync_enabled": False,
+        "autosync_advance_to_done": False,
+    }
+
+
+def test_update_board_rename_carries_no_autosync_opinion(monkeypatch):
+    """The KAN-502 rename case, re-asserted now that two more fields exist."""
+    seen = _capture_client(monkeypatch, httpx.Response(200, json=_BOARD_READ))
+    server.update_board(5, name="Pandan Roadmap")
+    assert json.loads(seen["content"]) == {"name": "Pandan Roadmap"}
