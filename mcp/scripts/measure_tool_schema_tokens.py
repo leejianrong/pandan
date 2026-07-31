@@ -20,6 +20,17 @@ Method
   with). Serialized **compact** (``separators=(",", ":")``) for the headline
   number, and at ``indent=2`` as an upper bracket, because the client's exact
   framing is not observable from here and pretty-printing costs ~46% more.
+* **What is counted SEPARATELY, and why** (KAN-518). A ``tools/list`` entry has a
+  *fourth* field, ``outputSchema`` — the second of its two schemas — which the
+  headline unit above does not include. That omission is deliberate but went
+  undocumented until KAN-518: the headline unit is "what a client puts in the
+  **model's context**", and whether
+  ``outputSchema`` lands there is not observable from inside the server — the
+  Anthropic Messages API tool definition has no ``output_schema`` field at all, so
+  a bridging client has nowhere to put it, while an MCP-native client may well
+  forward it. Rather than guess, :func:`measure_output_schemas` reports it as its
+  own bracketed row: alone, and as the ceiling where a client forwards all four
+  fields. Do **not** fold it into the headline — see ADR 0019, *The fourth field*.
 * **The alternatives are built with FastMCP too**, not hand-written JSON, so
   options (a) and (b) go through the identical Pydantic→JSON-Schema serializer
   as the live surface. Any per-tool framing overhead is therefore counted the
@@ -91,6 +102,58 @@ def measure(payloads: list[dict[str, Any]], enc) -> dict[str, int]:
             for p in payloads
         ),
         "names": sum(len(enc.encode(p["name"])) for p in payloads),
+    }
+
+
+def output_schemas(server: FastMCP) -> list[dict[str, Any] | None]:
+    """Each tool's ``outputSchema`` — the fourth field of a ``tools/list`` entry.
+
+    FastMCP generates one from the return annotation; for every pandan tool
+    (``-> dict[str, Any]``) that is the same three-key object with a Pydantic
+    class name in it: ``{"additionalProperties": true, "title":
+    "<fn>DictOutput", "type": "object"}`` (the title comes from the *function*
+    name at ``mcp/server/fastmcp/utilities/func_metadata.py:501``, not the
+    registered tool name — so the tool registered as ``next`` reads
+    ``next_readyDictOutput``).
+
+    ``None`` for a tool with no structured output, which is why the row below
+    reports how many were actually present rather than assuming the tool count.
+    """
+    return [tool.outputSchema for tool in asyncio.run(server.list_tools())]
+
+
+def measure_output_schemas(
+    payloads: list[dict[str, Any]], schemas: list[dict[str, Any] | None], enc
+) -> dict[str, int]:
+    """Measure ``outputSchema`` as its own bracketed row (KAN-518).
+
+    Two numbers, because the honest answer is a range and not a point:
+
+    * ``alone_*`` — the ``outputSchema`` objects on their own, i.e. what a client
+      that forwards them adds on top of the headline.
+    * ``combined_*`` — the headline payload with ``output_schema`` spliced in as a
+      fourth key, i.e. the ceiling for a client that forwards all four keys
+      (this is slightly more than ``headline + alone``, because the extra key name
+      and separators are counted too).
+    """
+    if len(payloads) != len(schemas):  # pragma: no cover - guards a caller bug
+        raise ValueError("payloads and schemas must line up tool-for-tool")
+    present = [s for s in schemas if s is not None]
+    combined = [
+        {**payload, "output_schema": schema} if schema is not None else payload
+        for payload, schema in zip(payloads, schemas)
+    ]
+
+    def total(objs: list[Any], **dump_kwargs: Any) -> int:
+        return sum(len(enc.encode(json.dumps(o, **dump_kwargs))) for o in objs)
+
+    return {
+        "tools": len(schemas),
+        "with_output_schema": len(present),
+        "alone_compact": total(present, separators=(",", ":")),
+        "alone_indent2": total(present, indent=2),
+        "combined_compact": total(combined, separators=(",", ":")),
+        "combined_indent2": total(combined, indent=2),
     }
 
 
@@ -416,8 +479,20 @@ def main() -> None:
     }
     results = {name: measure(payloads, enc) for name, payloads in surfaces.items()}
 
+    # outputSchema is measured per *live* surface only: the "before compaction"
+    # and "+ the same compaction" rows are inputSchema variants of a surface whose
+    # outputSchema is identical either way, so re-reporting them would be noise.
+    output_rows = {
+        name: measure_output_schemas(surfaces[name], output_schemas(server), enc)
+        for name, server in (
+            ("49 typed tools, AS SHIPPED (V49)", live_mcp),
+            ("(a) one tool per entity + action arg", option_a),
+            ("(b) single exec-pandan tool", option_b),
+        )
+    }
+
     if args.json:
-        print(json.dumps(results, indent=2))
+        print(json.dumps({"input_schema": results, "output_schema": output_rows}, indent=2))
         return
 
     baseline = results["49 typed tools, before compaction"]["compact"]
@@ -436,6 +511,23 @@ def main() -> None:
     print(f"  descriptions (prose) {cur['descriptions']:6d}")
     print(f"  input schemas        {cur['schemas']:6d}")
     print(f"  tool names           {cur['names']:6d}")
+
+    print()
+    print("outputSchema — the FOURTH field of a tools/list entry, NOT in the table above.")
+    print("Whether a client forwards it into the model's context is not observable from")
+    print("here (the Anthropic Messages API tool definition has no output_schema field),")
+    print("so it is bracketed on its own rather than folded into the headline. KAN-518.")
+    print(
+        f"{'surface':38s} {'n':>3s} {'alone-c':>8s} {'alone-i2':>8s} "
+        f"{'all4-c':>8s} {'all4-i2':>8s}"
+    )
+    print("-" * 78)
+    for name, row in output_rows.items():
+        print(
+            f"{name:38s} {row['with_output_schema']:3d} {row['alone_compact']:8d} "
+            f"{row['alone_indent2']:8d} {row['combined_compact']:8d} "
+            f"{row['combined_indent2']:8d}"
+        )
 
     if args.per_tool:
         print("\nPer-tool, as shipped (compact):")
