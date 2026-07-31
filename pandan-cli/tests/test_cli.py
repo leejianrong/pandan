@@ -995,10 +995,14 @@ def test_human_output_is_concise_line(monkeypatch, env, capsys):
 
 
 def test_human_output_empty_list(monkeypatch, env, capsys):
+    """No ``LIST_HINTS`` here on purpose: both of `list`'s hints name an ``<id>``, and
+    an empty result has none to name, so KAN-526 drops them. The zero state and the
+    aggregate are all that is left — and this stays a whole-stdout pin, so a hint
+    creeping back would fail here."""
     patch_client(monkeypatch, FakeClient(result={"cards": []}))
     cli.run(["list"])
     assert capsys.readouterr().out.strip() == (
-        "(no cards)\n" + LIST_HINTS + "0 cards · 0 todo · 0 in_progress · 0 done"
+        "(no cards)\n0 cards · 0 todo · 0 in_progress · 0 done"
     )
 
 
@@ -2793,11 +2797,12 @@ def test_fields_rejects_an_empty_list_as_a_usage_error(env):
 
 def test_fields_preserves_the_definitive_empty_state(monkeypatch, env, capsys):
     # AXI 5: an empty result still says so explicitly, projection or not — and V44's
-    # aggregate states the zero a second, machine-parseable way.
+    # aggregate states the zero a second, machine-parseable way. No `LIST_HINTS`:
+    # KAN-526 drops the `<id>` hints on an empty result (see test_human_output_empty_list).
     patch_client(monkeypatch, FakeClient(result={"cards": []}))
     assert cli.run(["list", "--fields", "ticket,title"]) == cli.EXIT_OK
     assert capsys.readouterr().out == (
-        "(no cards)\n" + LIST_HINTS + "0 cards · 0 todo · 0 in_progress · 0 done\n"
+        "(no cards)\n0 cards · 0 todo · 0 in_progress · 0 done\n"
     )
 
 
