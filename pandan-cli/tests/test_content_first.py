@@ -36,6 +36,12 @@ golden green, and neither of which was ever the point of the guard:
 * **List verbs carry hints**, because ``_emit`` prints hints *above* V44's aggregate
   instead of below it. V46 withheld them to protect the epilog's ``tail -1`` promise;
   reordering protects the same promise word-for-word and gets the hint back.
+
+**KAN-526 then took the one thing that change cost back** (§2c): a result naming no
+entity drops the templates whose ``<id>`` slot has no referent, because `pandan list`
+on an empty board was answering ``(no cards)`` and then offering two next steps on
+rows it had just said do not exist. The predicate lives in ``_hint_lines``, so
+``_emit`` is still a printer, and the ordering above is untouched.
 """
 from __future__ import annotations
 
@@ -599,6 +605,127 @@ def test_the_hints_print_above_the_aggregate_not_after_it(monkeypatch, capsys, a
     last_hint = max(i for i, line in enumerate(lines) if line.startswith(cli.HINT_PREFIX))
     assert last_hint < aggregate
     assert aggregate == len(lines) - 1  # the aggregate is the final line, i.e. `tail -1`
+
+
+# --- 2c. an empty result drops the hints that name a row (KAN-526) -----------
+#
+# Letting list verbs carry hints created a state that could not exist before KAN-492:
+# `pandan list` on an empty board printed `(no cards)` and then two next steps on rows
+# it had just said do not exist. KAN-526 drops a hint whose `<id>` slot has no referent
+# — and only that hint, which is why the answer differs per verb without a per-verb
+# rule. Below: the per-verb table, the drop, the survivors, and the control that keeps
+# the drop from becoming a blanket suppression.
+
+# Every hinted verb → the client result for its *empty* state, or ``None`` when the
+# verb has no empty state at all. ``None`` is the answer for every single-entity verb:
+# `get`/`update`/`move`/`claim`/`needs-human`/`resolve` return one card or raise (404 →
+# exit 5, no hints printed), and `create`/`comment add`/`board create`/`epic create`
+# return the thing they just made. Only the two aggregate-bearing verbs and `next` can
+# report nothing — and `next` is the one the KAN-526 card did not name.
+EMPTY_RESULTS: dict[str, dict | None] = {
+    "overview": {"cards": [], "next_cursor": None},
+    "list": {"cards": [], "next_cursor": None},
+    "next": {"card": None},
+    "get": None,
+    "create": None,
+    "update": None,
+    "move": None,
+    "claim": None,
+    "needs-human": None,
+    "resolve": None,
+    "comment add": None,
+    "board create": None,
+    "epic create": None,
+}
+CAN_BE_EMPTY = sorted(verb for verb, result in EMPTY_RESULTS.items() if result is not None)
+
+
+def test_the_empty_result_table_covers_every_hinted_verb():
+    """Enumerated against the real hint table, so a verb that grows hints later cannot
+    skip the question "and what does this print when it finds nothing?"."""
+    assert set(EMPTY_RESULTS) == set(cli._HINTS)
+
+
+@pytest.mark.parametrize(
+    "result,empty",
+    [
+        ({"cards": [], "next_cursor": None}, True),
+        ({"cards": [_card()], "next_cursor": None}, False),
+        ({"boards": []}, True),
+        ({"card": None}, True),  # next / dispatch found nothing ready
+        ({"card": _card()}, False),
+        (_card(), False),  # a single card is one entity, never "empty"
+        (BOARD, False),
+        (COMMENT, False),
+        ({"deleted": CARD_ID}, False),  # a receipt names the thing it deleted
+    ],
+)
+def test_names_no_entity_recognises_exactly_the_empty_shapes(result, empty):
+    """The predicate is an *enumeration*, not a falsiness test — a general "is this
+    falsy" rule would strip hints off shapes it had never seen. Both directions are
+    asserted so it can neither over- nor under-fire."""
+    assert cli._names_no_entity(result) is empty
+
+
+@pytest.mark.parametrize("verb", CAN_BE_EMPTY)
+def test_an_empty_result_drops_every_hint_that_names_a_row(monkeypatch, capsys, verb, board):
+    """Two runs, because the empty assertion alone would pass for a verb that never
+    had an ``<id>`` hint in the first place: the populated run proves the hints being
+    dropped genuinely exist, then the empty run proves every one of them is gone and
+    that nothing new appeared in their place."""
+    argv, populated_result = HINTED[verb]
+    populated = hints_in(
+        run_ok(monkeypatch, capsys, argv, result=populated_result,
+               results={"get_card": populated_result})
+    )
+    assert [line for line in populated if "<id>" in line], f"{verb} has no <id> hint"
+
+    empty = hints_in(run_ok(monkeypatch, capsys, argv, result=EMPTY_RESULTS[verb]))
+    assert all("<id>" not in line for line in empty), f"{verb} kept a hint about no rows"
+    assert set(empty) <= set(populated)  # survivors only; the drop invents nothing
+
+
+@pytest.mark.parametrize("verb", sorted(HINTED))
+def test_a_populated_result_still_prints_the_whole_hint_table(
+    monkeypatch, capsys, verb, board
+):
+    """The control on KAN-526: suppression is conditional, never blanket. Every hinted
+    verb with rows prints one line per template — so a predicate that quietly started
+    returning True fails here for all thirteen rather than passing as 'fewer hints'."""
+    argv, result = HINTED[verb]
+    out = run_ok(monkeypatch, capsys, argv, result=result, results={"get_card": result})
+    assert len(hints_in(out)) == len(cli._HINTS[verb])
+
+
+def test_an_empty_overview_keeps_the_hints_that_are_not_about_rows(monkeypatch, capsys, board):
+    """The per-verb difference the KAN-526 card asked for, and it falls out of the
+    predicate rather than a table: an empty board is exactly when `overview`'s two
+    board-level hints are most useful, so they stay, and only `pandan get <id>` — the
+    one with nothing to point at — goes."""
+    out = run_ok(monkeypatch, capsys, [], result={"cards": [], "next_cursor": None})
+    assert hints_in(out) == [
+        f"{cli.HINT_PREFIX} pandan list --column todo",
+        f"{cli.HINT_PREFIX} pandan next --claim",
+    ]
+    assert "(no cards)" in out  # the AXI 5 zero state is untouched by the drop
+
+
+def test_an_empty_list_is_the_zero_state_and_the_aggregate_and_nothing_else(
+    monkeypatch, capsys, board
+):
+    """The symptom KAN-526 was filed for, pinned as whole stdout. Both of `list`'s
+    hints name an ``<id>``, so an empty result keeps neither — and the two lines that
+    are contracts (AXI 5's prose zero, V44's ``tail -1`` aggregate) both survive."""
+    out = run_ok(monkeypatch, capsys, ["list"], result={"cards": [], "next_cursor": None})
+    assert out.splitlines() == ["(no cards)", "0 cards · 0 todo · 0 in_progress · 0 done"]
+
+
+def test_an_empty_next_is_the_zero_state_and_nothing_else(monkeypatch, capsys, board):
+    """`next` is the case the card did not name and the one an agent hits most: polling
+    a drained board used to answer "(no card ready)" and then suggest moving a card.
+    It has no aggregate to redeem it either, so the whole of stdout is one line."""
+    out = run_ok(monkeypatch, capsys, ["next", "--board", "5"], result={"card": None})
+    assert out.splitlines() == ["(no card ready)"]
 
 
 # --- 3. `--help` is unchanged (AXI 10 regression guard) ----------------------

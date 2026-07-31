@@ -65,7 +65,9 @@ runtime value stays parameterised (``<id>``, ``"…"``, ``N``) — and they are
 suppressed under ``--format json``/``toon``. Hints are printed **before** V44's
 aggregate (KAN-492), so a hinted list verb still ends with its aggregate: the
 ``tail -1`` contract is preserved by *ordering* rather than by withholding the hint
-(see ``_HINTS``).
+(see ``_HINTS``). A result that names **no** entity — an empty list, ``next``'s
+``(no card ready)`` — drops the hints whose ``<id>`` slot would have had nothing to
+refer to, and keeps the rest (KAN-526).
 
 Failures are **structured and on stdout** (V43, KAN-426 — AXI 6): one tab-separated
 row ``error<TAB><code><TAB><message><TAB><arg>`` (``-`` when no single argument is at
@@ -467,9 +469,11 @@ def _emit(
     the aggregate is a published ``tail -1`` contract, so putting the hints above it
     lets any verb carry hints — including a list verb — without breaking it. V46 got
     this order the other way round and paid for it by withholding hints from every
-    list verb; ordering is the cheaper of the two prices. They are built by
-    ``_hint_lines`` from the parsed namespace, so this function stays a printer and
-    never has to know which verb ran.
+    list verb; ordering is the cheaper of the two prices. They arrive **finished** —
+    built by ``_hint_lines`` from the parsed namespace *and* the result, including
+    KAN-526's drop of the ``<id>`` templates on a result that names no entity — so
+    this function stays a printer that never has to know which verb ran or inspect a
+    payload to decide what to print.
     """
     if fmt in STRUCTURED_FORMATS:
         print(_render_structured(_structured_payload(result, full=full, limit=limit), fmt))
@@ -1375,12 +1379,32 @@ def _summary_line(kind: str, summary: dict[str, Any]) -> str:
 #   genuinely ambiguous (a single entity, a mutation's receipt, the overview, a card
 #   list), not on every list verb by reflex — `label list` / `view list` and friends
 #   suggest nothing a caller isn't already about to type.
+# * **A hint that names an entity is dropped when the result names none** (KAN-526).
+#   Letting a list verb carry hints created a state that could not exist before it:
+#   `pandan list` on an empty board printed `(no cards)` and then offered
+#   `pandan get <id>` / `pandan move <id> in_progress` — next steps on rows the same
+#   call had just said do not exist. The rule is structural, not per-verb: a template
+#   carrying the `<id>` slot takes its referent FROM the result, so on a result that
+#   names no entity the slot has nothing to fill and the hint is dropped. Everything
+#   else survives, which is why the answer differs per verb without a per-verb table:
+#   an empty `overview` still prints `pandan list --column todo` and
+#   `pandan next --claim` — the two hints that tell a new user what to do with an
+#   empty board — and drops only `pandan get <id>`. The predicate lives in
+#   ``_hint_lines``, so ``_emit`` still receives a finished list of lines and stays a
+#   printer that never inspects a payload.
 HINT_PREFIX = "help:"
 
 # The slot an explicit ``--board`` is substituted into. Plain ``str.replace``, not
 # ``str.format`` — the templates are full of ``"…"`` and ``<id>`` and must never
 # depend on brace escaping.
 _HINT_BOARD_SLOT = "{board}"
+
+# The slot that makes a hint *about a row*: `pandan get <id>` is only a next step if
+# the result named an id to put there. Reused as the drop predicate on an empty
+# result (KAN-526) — no second annotation, because "carries `<id>`" and "refers to an
+# entity in the result" are the same property, and the hint guard in
+# ``tests/test_content_first.py`` already treats them as one.
+_HINT_ENTITY_SLOT = "<id>"
 
 _HINTS: dict[str, tuple[str, ...]] = {
     "overview": (
@@ -1411,12 +1435,43 @@ _HINTS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _hint_lines(args: argparse.Namespace) -> list[str]:
+def _names_no_entity(result: Any) -> bool:
+    """True when ``result`` holds nothing an ``<id>`` hint could point at (KAN-526).
+
+    Deliberately an **enumeration of the empty shapes**, not a general falsiness test:
+    only two results can name nothing, and every other hinted verb returns exactly one
+    entity (a card, a mutation receipt, a created board/epic/comment) that is never
+    "empty". Guessing at the rest is how a hint would silently vanish from a verb that
+    should have one.
+
+    1. A list envelope with zero rows — ``list`` and ``overview``, the two
+       aggregate-bearing hinted verbs. ``_list_envelope`` is the CLI's single
+       definition of "is this a list?" (KAN-478), so this inherits its answer rather
+       than growing a fourth one.
+    2. ``next``/``dispatch``'s explicit miss, ``{"card": None}``, which ``_humanize``
+       renders ``(no card ready)``. Not a list, no aggregate, and the case the KAN-526
+       card did not name — but the worst instance of the problem, because an agent
+       polling ``pandan next`` on a drained board is the state it reaches most often.
+    """
+    envelope = _list_envelope(result)
+    if envelope is not None:
+        return not envelope[1]
+    return isinstance(result, dict) and "card" in result and result["card"] is None
+
+
+def _hint_lines(args: argparse.Namespace, result: Any) -> list[str]:
     """The ``help[]`` lines for this invocation — empty for a verb with no hints.
 
     Read off the namespace (each hinted subparser ``set_defaults(hints=…)``), so the
-    templates live in one table next to each other rather than at their raise sites."""
+    templates live in one table next to each other rather than at their raise sites.
+
+    ``result`` is consulted for one thing only: a result that names no entity drops
+    the templates whose ``<id>`` slot would have referred to one (KAN-526). Doing it
+    here rather than in ``_emit`` is the whole point — ``run`` already holds both the
+    namespace and the result, so the printer never has to learn what a payload is."""
     templates: tuple[str, ...] = getattr(args, "hints", ()) or ()
+    if _names_no_entity(result):
+        templates = tuple(t for t in templates if _HINT_ENTITY_SLOT not in t)
     if not templates:
         return []
     # `is not None` and not truthiness: `--board 0` is not a real board id, but the
@@ -3536,7 +3591,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             full=getattr(args, "full", False),
             limit=config.max_text_chars,
             # V46 (KAN-429): the next-step templates for this verb, human-only.
-            hints=_hint_lines(args),
+            hints=_hint_lines(args, result),
         )
     except CliError as exc:
         return _print_error(exc, fmt=fmt)
