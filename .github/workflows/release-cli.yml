@@ -67,7 +67,7 @@ jobs:
       # macOS legs get Python from setup-python on the host.
       - name: Set up Python 3.12
         if: matrix.container == ''
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
