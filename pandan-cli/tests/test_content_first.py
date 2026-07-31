@@ -681,7 +681,14 @@ def test_no_top_level_verb_is_hidden_from_help(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         cli.run(["--help"])
     out = capsys.readouterr().out
-    listed = {line.split()[0] for line in out.splitlines() if line.startswith("    ")}
+    # Exactly four spaces: that is the subcommand-entry indent. A wrapped help string
+    # continues at 18 and the epilog's own lists start at 2, so neither can smuggle a
+    # verb name into this set (`metrics`'s wrap contributes "aging", not a verb).
+    listed = {
+        line.split()[0]
+        for line in out.splitlines()
+        if line.startswith("    ") and not line.startswith("     ")
+    }
 
     parser = cli.build_parser()
     sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
