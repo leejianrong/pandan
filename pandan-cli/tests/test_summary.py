@@ -524,7 +524,14 @@ def test_a_single_template_is_not_counted_as_a_card_list(monkeypatch, capsys):
         template,
     )
     assert "cards ·" not in out
-    assert "2 cards" not in out
+    # KAN-478 sharpened this. The original second assertion was ``"2 cards" not in
+    # out``, which passed for the wrong reason: the verb was printing the template's
+    # unsaved card *definitions* as rows (``?\ttodo\tAPI\tpts=3``), so no aggregate and
+    # no card count appeared. The template's own row legitimately reports its card
+    # count — ``template list`` has always printed ``2 cards`` for this same entity —
+    # so what must be absent is the card *aggregate*, asserted above. Pin the whole
+    # line instead: exactly one row, and it is the template's.
+    assert without_hints(out) == f"{cli._template_line(template)}\n"
 
 
 def test_a_single_card_is_not_counted_as_a_label_list(monkeypatch, capsys):
