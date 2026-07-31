@@ -254,6 +254,14 @@ Deliberately **out of V49's scope**, and filed as follow-ups because they are wh
 - **A `fields` argument on the MCP read tools** (`list_cards`, `get_card`, `list_epics`, `activity`,
   `metrics`), plus V45-style truncation — measured at ~−84% on a real board read, i.e. roughly ten
   times the saving any resident-surface change offers. This is the actual V49 finding.
+  > **✅ Landed 2026-07-31 as KAN-501** (PR #229), and the prediction held: **−82% across five real
+  > reads** (58,413 → 10,405 `o200k_base`), with `list_cards` alone 48,291 → 7,430 (−85%). It cost
+  > **+552 resident tokens** (7,388 → **7,940**, +7.5%) — repaid ~74× by a single narrowed
+  > `list_cards`, which is the trade this ADR predicted would be "obviously right". Re-runnable via
+  > `mcp/scripts/measure_read_payload_tokens.py`. The tool count is unchanged, so the freeze below is
+  > untouched. Also measured and **declined**: returning a pre-serialized compact string (a further
+  > −30%) would restring the `dict[str, Any]` output contract every consumer reads, to chase the
+  > smaller half.
 - **Closing the four CLI gaps** (`board get/update/delete`, an atomic claim of a named card, a batch
   create). That is the precondition that would make option (b) *available* later, and it should be
   done for the CLI's own sake regardless.
@@ -282,11 +290,17 @@ be superseded by one that takes it.
 - **Neutral:** the resident 7,388 tokens stay. At ~3.7% of a 200k window, prompt-cache-stable across a
   session's turns, that is a price worth paying for a typed fallback surface — and it is an order of
   magnitude less than what a single un-narrowed board read costs today.
+  > **Update 2026-07-31:** now **7,940** (~4.0%) after KAN-501 added `fields`/`full` to the read tools.
+  > The +552 is the price of the −82% per-read win recorded above.
 - **Negative / deferred:** the expensive problem is *named but not fixed* by this slice. Until the
   `fields` follow-up lands, an agent that calls `mcp__pandan__list_cards` on a busy board still burns
   ~45k tokens in one result, and the mitigation is advice ("prefer the CLI") rather than a mechanism.
   The four CLI parity gaps also remain, so the skill's fallback guidance stays load-bearing rather than
   vestigial.
+  > **Update 2026-07-31 — the first half is fixed, the second is not.** KAN-501 replaced the advice with
+  > a mechanism: an un-narrowed `list_cards` is now the caller's choice, not the only option. **The four
+  > CLI parity gaps remain open (KAN-502)**, so the skill's fallback guidance is still load-bearing, and
+  > option (b) is still unavailable — that part of this consequence stands as written.
 - **Falsified by measurement, recorded so it is not re-assumed:** the surface is 49 tools, not 48; the
   CLI is *not* at full parity with MCP; and the resident schema cost — the thing the card is about — is
   a small fraction of what the MCP path actually costs an agent per task.

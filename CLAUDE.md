@@ -18,20 +18,27 @@ the product is **pandan**, the CLI is **`pandan`** (the `pdn` alias was withdraw
 `--onefile` release can't deliver a console-script alias; symlink one if you want it), env config is
 **`PANDAN_*`**,
 and newly minted PATs carry **`pandan_pat_`**. The rebrand changed no API, schema or migration.
-[AXI](https://axi.md/) conformance for the CLI is well underway — V50 (release provenance), V42
-(`--fields`), V43 (the error contract) and V47 (`--format {human,json,toon}`) have all landed, through
-`v0.8.0`. What remains is V44–V46 plus V48, and then a right-sizing of the **49-tool** MCP surface
-(V49) — **now done**. It was measured at 8,775 `o200k_base` tokens of resident schema per session and
-ships at **7,388** (compact; 10,307 pretty-printed) after `mcp/pandan_mcp/schema.py` stripped 1,387
-tokens of pure Pydantic serializer artefact. The measurement is re-runnable via
-`mcp/scripts/measure_tool_schema_tokens.py`, and the decision is
-[ADR 0019](docs/adr/0019-mcp-surface-right-sizing.md) — **keep the breadth, freeze its growth**, because
-the resident cost turned out to be the *small* half of the problem: one `list_cards` against the real
-board returns ~45k tokens, 5× the whole schema surface, and per task the CLI is ~11× cheaper. **The
-49-tool surface is now pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a
-fixture edit.** **Per-slice status goes stale here
-faster than anywhere else in this file; read [docs/milestone-7/SLICES.md](docs/milestone-7/SLICES.md)
-and the board, not this paragraph.**
+[AXI](https://axi.md/) conformance for the CLI is **complete**: V50 (release provenance), V42
+(`--fields`), V43 (the error contract), V47 (`--format {human,json,toon}`), V44 (aggregates), V48
+(ambient context), V45 (truncation) and V46 (content-first + `help[]`) have all landed. **Ten of
+Milestone 7's eleven slices shipped; only V41/KAN-424 is deferred**, behind the k8s migration
+(KAN-439).
+
+The **49-tool** MCP surface was right-sized in V49: measured at 8,775 `o200k_base` tokens of resident
+schema per session, shipped at **7,388** (compact; 10,307 pretty-printed) after
+`mcp/pandan_mcp/schema.py` stripped 1,387 tokens of pure Pydantic serializer artefact. The decision is
+[ADR 0019](docs/adr/0019-mcp-surface-right-sizing.md) — **keep the breadth, freeze its growth** —
+because the resident cost turned out to be the *small* half of the problem: one un-narrowed
+`list_cards` against the real board returns ~45k tokens, 5× the whole schema surface, and per task the
+CLI was ~11× cheaper. **That gap is now largely closed from the MCP side** (KAN-501): every read tool
+takes `fields` + `full`, worth **−82% across five real reads** for **+552 resident tokens** (so the
+resident figure is now **7,940**). Both measurements are re-runnable —
+`mcp/scripts/measure_tool_schema_tokens.py` for the resident schema,
+`mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The 49-tool surface is pinned by
+`mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit** (adding an
+*argument*, as KAN-501 did, is not). **Per-slice status goes stale here faster than anywhere else in
+this file; read [docs/milestone-7/SLICES.md](docs/milestone-7/SLICES.md) and the board, not this
+paragraph.**
 
 Three things the rebrand deliberately did **not** rename, so don't "finish" it:
 - **The `KAN-` / `EPIC-` ticket prefixes** — immutable per-table Postgres sequences (ADR 0006/0009);
@@ -251,6 +258,20 @@ at an obvious "version" error). There is deliberately no waiver flag. The point 
 `pandan --version` prints build provenance — `pandan 0.5.0 (5da9ace)` for a release vs. an explicit
 `(source checkout, not a released build)` — so a stale binary is *detectable*; an unbumped version
 silently breaks that.
+
+**The bump is required somewhere in the BRANCH, not in the individual push** (KAN-484). The hook now
+computes **two** diff ranges on purpose: *which checks to run* is a question about the push
+(incremental, so a long-lived branch doesn't re-run green suites), while *does this branch bump the
+version* is a question about the branch (merge-base against the default branch — exactly what CI's
+`dorny/paths-filter` step evaluates against the PR base). Conflating them made the guard
+false-positive on a **merge commit**: merging `main` into an in-flight branch — the normal move under
+this repo's branch protection, and what `gh pr update-branch` does — pulls someone else's
+`pandan_cli/` files into the incremental range while your earlier bump sits outside it. Worse,
+resolving the version-line conflict *correctly* (keep your higher version) leaves the version files
+byte-identical across that range, so they vanish from the diff. Two agents hit it and both reached for
+`--no-verify`, which is the habit a guard cannot afford to teach. Pinned by
+`mcp/tests/test_prepush_hook.py` (there because the `mcp` job needs no DB/Docker/network; the `mcp`
+paths filter includes `scripts/git-hooks/**` so a hook-only PR still runs them).
 
 > **A plain `git push` may fail with `No anonymous write access` / `Authentication failed`.** Two
 > known causes: a sub-agent shell can't reach the VS Code credential socket, and a cached credential
