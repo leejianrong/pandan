@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { cleanupE2eBoards, login, uniqueTitle } from "./helpers";
+import { cleanupE2eBoards, login, openView, uniqueTitle } from "./helpers";
 
 // M5 V16 awareness dashboard (KAN-249): the Dashboard view composes, for the
 // active board, in-flight-by-assignee (+ PR links), a needs-attention list (V13),
@@ -36,10 +36,27 @@ async function seedDashboardBoard(page: Page): Promise<{ note: string }> {
   ).json();
   const boardId: number = board.id;
 
+  // A cycle spanning [2 days ago, today] so the burndown panel (V34) has a window.
+  const day = 24 * 3600 * 1000;
+  const startsOn = new Date(Date.now() - 2 * day).toISOString();
+  const endsOn = new Date().toISOString();
+  const cycle = await (
+    await page.request.post(`/api/v1/boards/${boardId}/cycles`, {
+      data: { name: uniqueTitle("sprint"), starts_on: startsOn, ends_on: endsOn },
+    })
+  ).json();
+
   // Completed card: todo → in_progress → done (drives throughput + cycle time).
+  // Assigned to the cycle with story points, so committed/completed/velocity show.
   const done = await (
     await page.request.post("/api/v1/cards", {
-      data: { title: uniqueTitle("shipped"), board_id: boardId, assignee: AGENT },
+      data: {
+        title: uniqueTitle("shipped"),
+        board_id: boardId,
+        assignee: AGENT,
+        cycle_id: cycle.id,
+        story_points: 5,
+      },
     })
   ).json();
   await page.request.post(`/api/v1/cards/${done.id}/move`, { data: { column: "in_progress" } });
@@ -53,6 +70,8 @@ async function seedDashboardBoard(page: Page): Promise<{ note: string }> {
         board_id: boardId,
         assignee: AGENT,
         column: "in_progress",
+        cycle_id: cycle.id,
+        story_points: 3,
       },
     })
   ).json();
@@ -85,7 +104,7 @@ async function seedDashboardBoard(page: Page): Promise<{ note: string }> {
 
 async function openDashboard(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await openView(page, "Dashboard");
   await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
 }
 
@@ -125,6 +144,24 @@ test("dashboard renders in-flight, needs-attention, activity + metrics panels", 
   expect(await feed.locator(".feed-row").count()).toBeGreaterThanOrEqual(3);
 });
 
+test("dashboard renders the cycle burndown panel (V34)", async ({ page }) => {
+  await seedDashboardBoard(page);
+  await openDashboard(page);
+
+  const cyclePanel = page.locator("section", {
+    has: page.getByRole("heading", { name: "Cycle burndown" }),
+  });
+  await expect(cyclePanel).toBeVisible();
+  // The active-cycle selector is present (a cycle was seeded).
+  await expect(cyclePanel.getByLabel("Active cycle")).toBeVisible();
+  // Committed vs completed chart + the velocity readout (5 pts done of 8 committed).
+  await expect(cyclePanel.getByRole("heading", { name: /Committed vs completed/ })).toBeVisible();
+  await expect(cyclePanel).toContainText("Velocity");
+  // Burndown chart renders per-day bars over the seeded 3-day window.
+  await expect(cyclePanel.getByRole("heading", { name: /Burndown/ })).toBeVisible();
+  expect(await cyclePanel.locator(".bar-track").count()).toBeGreaterThanOrEqual(1);
+});
+
 test("dashboard activity feed filters by action", async ({ page }) => {
   await seedDashboardBoard(page);
   await openDashboard(page);
@@ -145,6 +182,9 @@ test("dashboard screenshots — light + dark", async ({ page }, testInfo) => {
   await openDashboard(page);
   await expect(page.locator(".stat-strip")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Flow metrics" })).toBeVisible();
+  // Wait for the cycle burndown data (async, after the main panels) so the shot
+  // shows the rendered chart, not the "select a cycle" placeholder.
+  await expect(page.getByRole("heading", { name: /Committed vs completed/ })).toBeVisible();
 
   await page.screenshot({ path: testInfo.outputPath("dashboard-light.png"), fullPage: true });
   if (!CI) {

@@ -25,7 +25,7 @@ READ THESE FIRST — they are authoritative:
 - CLAUDE.md — repo conventions (branch/PR workflow, commands, architecture, ADRs). Follow exactly.
 - docs/milestone-3/SLICES.md (§ V10), SHAPING.md (Shape part **A7**), BREADBOARD.md (place **S6**).
 - docs/adr/0010 (`API_TOKENS`, being retired), 0013 (board authz), 0014 (agent PATs).
-- Current code: mcp/kanban_mcp/{config,api,server}.py + mcp/tests/, backend/app/authz.py,
+- Current code: mcp/pandan_mcp/{config,api,server}.py + mcp/tests/, backend/app/authz.py,
   backend/app/auth.py, backend/app/routers/tokens.py, backend/tests/integration/conftest.py,
   frontend/e2e/helpers.ts + frontend/playwright.config.ts, .mcp.json.example.
 

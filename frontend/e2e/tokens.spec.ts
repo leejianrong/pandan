@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login, uniqueTitle } from "./helpers";
+import { login, openView, uniqueTitle } from "./helpers";
 
 // M3 V9 demo (ADR 0014): create a named agent token in the UI, see the secret
 // exactly once, then revoke it. A real session is required (the Tokens API is
@@ -7,7 +7,7 @@ import { login, uniqueTitle } from "./helpers";
 test("create a token (revealed once), then revoke it", async ({ page }) => {
   await login(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Tokens", exact: true }).click();
+  await openView(page, "Tokens");
 
   const name = uniqueTitle("token");
   await page.getByRole("button", { name: "New token" }).click();
@@ -17,7 +17,7 @@ test("create a token (revealed once), then revoke it", async ({ page }) => {
   // The secret is revealed exactly once, and it's a real PAT.
   const secret = page.locator(".secret");
   await expect(secret).toBeVisible();
-  await expect(secret).toContainText("kanban_pat_");
+  await expect(secret).toContainText("pandan_pat_");
 
   // It shows up in the token list.
   const row = page.locator(".token-row", { has: page.getByText(name, { exact: true }) });

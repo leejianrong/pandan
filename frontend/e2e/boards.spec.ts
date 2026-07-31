@@ -5,6 +5,7 @@ import {
   createBoardViaSwitcher,
   createCard,
   login,
+  pickSelect,
   uniqueTitle,
 } from "./helpers";
 
@@ -19,8 +20,6 @@ test("a card on one board does not appear on another, across reload", async ({ p
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Todo", exact: true })).toBeVisible();
 
-  const boardSelect = page.getByLabel("Board", { exact: true });
-
   // Two owned boards; creating each switches to it.
   const boardA = await createBoardViaSwitcher(page, uniqueTitle("boardA"));
   const boardB = await createBoardViaSwitcher(page, uniqueTitle("boardB"));
@@ -31,7 +30,7 @@ test("a card on one board does not appear on another, across reload", async ({ p
   await expect(cardInColumn(page, "Todo", cardTitle)).toBeVisible();
 
   // Switch to board A — board B's card must not appear.
-  await boardSelect.selectOption({ label: boardA });
+  await pickSelect(page, page, "Switch board", boardA);
   await expect(cardInColumn(page, "Todo", cardTitle)).toHaveCount(0);
 
   // Reload: server-authoritative + persisted selection keeps us on board A, still
@@ -41,6 +40,6 @@ test("a card on one board does not appear on another, across reload", async ({ p
   await expect(cardInColumn(page, "Todo", cardTitle)).toHaveCount(0);
 
   // Switch to board B — its card is there and survived the reload.
-  await boardSelect.selectOption({ label: boardB });
+  await pickSelect(page, page, "Switch board", boardB);
   await expect(cardInColumn(page, "Todo", cardTitle)).toBeVisible();
 });

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cleanupE2eBoards, createCard, openFreshBoard, uniqueTitle } from "./helpers";
+import { cleanupE2eBoards, createCard, openFreshBoard, openView, uniqueTitle } from "./helpers";
 
 // KAN-18 activity feed: the panel renders recent, newest-first activity for the
 // active board, and honours the read API. Also captures light + dark screenshots
@@ -29,7 +29,7 @@ test("activity panel renders recorded activity, newest first", async ({ page }) 
   await createCard(page, "Todo", b);
 
   // Open the Activity view via the top-bar nav.
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await openView(page, "Activity");
 
   await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
   const feed = page.locator(".feed");
@@ -46,7 +46,7 @@ test("activity panel screenshots — light + dark", async ({ page }, testInfo) =
   await setTheme(page, "light");
   await openFreshBoard(page);
   await createCard(page, "Todo", uniqueTitle("shot"));
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await openView(page, "Activity");
   await expect(page.locator(".feed")).toBeVisible();
   // testInfo.outputPath resolves under the per-test output dir, which exists on
   // any runner (local or CI) — no hardcoded absolute path.

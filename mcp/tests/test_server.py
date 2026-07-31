@@ -5,11 +5,16 @@ import asyncio
 import json
 
 import httpx
-from kanban_client import KanbanClient
+from pandan_client import PandanClient
 
-from kanban_mcp import server
-from kanban_mcp.server import mcp
+from pandan_mcp import server
+from pandan_mcp.server import mcp
 
+# Bare tool names — the Python function names, which the rebrand does NOT touch.
+# The agent-visible identifier is ``mcp__<server>__<tool>``, and the ``<server>``
+# part comes from the client's ``mcpServers`` key in ``.mcp.json`` (V40 changed it
+# ``kanban`` → ``pandan``, so tools are now ``mcp__pandan__*``). None of that is
+# visible from inside the server, so this set is unaffected by the rename.
 EXPECTED_TOOLS = {
     "list_boards",
     "create_board",
@@ -46,6 +51,8 @@ EXPECTED_TOOLS = {
     "resolve",
     "metrics",
     "activity",
+    "list_notifications",
+    "mark_read",
     "list_views",
     "create_view",
     "delete_view",
@@ -54,6 +61,10 @@ EXPECTED_TOOLS = {
     "create_template",
     "delete_template",
     "apply_template",
+    "list_cycles",
+    "create_cycle",
+    "delete_cycle",
+    "cycle_metrics",
 }
 
 
@@ -81,7 +92,7 @@ def test_create_card_schema_marks_title_required():
 
 def _stub_client(monkeypatch, default_board_id):
     """Point the server's lazily-built client at a MockTransport and set the
-    KANBAN_BOARD_ID default, capturing the outgoing request."""
+    PANDAN_BOARD_ID default, capturing the outgoing request."""
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -89,7 +100,7 @@ def _stub_client(monkeypatch, default_board_id):
         seen["content"] = request.content
         return httpx.Response(201, json={"id": 1})
 
-    client = KanbanClient("http://test", transport=httpx.MockTransport(handler))
+    client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
     monkeypatch.setattr(server, "_default_board_id", default_board_id)
     return seen
@@ -127,7 +138,7 @@ def _capture_client(monkeypatch, response):
         seen["content"] = request.content
         return response
 
-    client = KanbanClient("http://test", transport=httpx.MockTransport(handler))
+    client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
     monkeypatch.setattr(server, "_default_board_id", None)
     return seen
@@ -250,7 +261,7 @@ def test_list_cards_passes_sort_and_assignee(monkeypatch):
         seen["params"] = dict(request.url.params)
         return httpx.Response(200, json=[])
 
-    client = KanbanClient("http://test", transport=httpx.MockTransport(handler))
+    client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
     monkeypatch.setattr(server, "_default_board_id", None)
     server.list_cards(board_id=3, sort="-priority", assignee="agent-7")
@@ -315,10 +326,37 @@ def _capture_get(monkeypatch, response):
         seen["params"] = dict(request.url.params)
         return response
 
-    client = KanbanClient("http://test", transport=httpx.MockTransport(handler))
+    client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
     monkeypatch.setattr(server, "_default_board_id", None)
     return seen
+
+
+def test_list_notifications_reads_inbox(monkeypatch):
+    seen = _capture_get(
+        monkeypatch, httpx.Response(200, json=[{"id": 1, "kind": "needs_human"}])
+    )
+    out = server.list_notifications()
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/notifications"
+    assert seen["params"] == {}  # not board-scoped; unread defaults off → no param
+    assert out == {"notifications": [{"id": 1, "kind": "needs_human"}]}
+
+
+def test_list_notifications_passes_unread_filter(monkeypatch):
+    seen = _capture_get(monkeypatch, httpx.Response(200, json=[]))
+    server.list_notifications(unread=True)
+    assert seen["params"] == {"unread": "true"}
+
+
+def test_mark_read_patches_notification_by_id(monkeypatch):
+    seen = _capture_get(
+        monkeypatch, httpx.Response(200, json={"id": 5, "read_at": "2026-01-01T00:00:00Z"})
+    )
+    out = server.mark_read(5)
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/notifications/5"
+    assert out["read_at"] == "2026-01-01T00:00:00Z"
 
 
 def test_activity_reads_board_feed(monkeypatch):
@@ -402,3 +440,67 @@ def test_template_tools_require_a_board(monkeypatch):
         server.list_templates()
     with pytest.raises(ValueError):
         server.apply_template(7)
+
+
+# --- cycle tools (V33, KAN-297) --------------------------------------------
+
+
+def test_list_cycles_reads_board_cycles(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(200, json=[{"id": 4}]))
+    out = server.list_cycles(board_id=3)
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/boards/3/cycles"
+    assert out == {"cycles": [{"id": 4}]}
+
+
+def test_create_cycle_posts_name_and_bounds(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(201, json={"id": 4}))
+    server.create_cycle("sprint-1", starts_on="2026-01-01T00:00:00Z", board_id=3)
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/boards/3/cycles"
+    assert json.loads(seen["content"]) == {
+        "name": "sprint-1",
+        "starts_on": "2026-01-01T00:00:00Z",
+    }
+
+
+def test_delete_cycle_deletes_path(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(204))
+    out = server.delete_cycle(4, board_id=3)
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/api/v1/boards/3/cycles/4"
+    assert out == {"deleted": 4}
+
+
+def test_cycle_metrics_reads_metrics_path(monkeypatch):
+    seen = _capture_client(
+        monkeypatch, httpx.Response(200, json={"velocity": 8, "unit": "points"})
+    )
+    out = server.cycle_metrics(4, board_id=3)
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/boards/3/cycles/4/metrics"
+    assert out == {"velocity": 8, "unit": "points"}
+
+
+def test_cycle_tools_require_a_board(monkeypatch):
+    _capture_client(monkeypatch, httpx.Response(200, json=[]))
+    import pytest
+
+    with pytest.raises(ValueError):
+        server.list_cycles()
+    with pytest.raises(ValueError):
+        server.create_cycle("x")
+    with pytest.raises(ValueError):
+        server.cycle_metrics(4)
+
+
+def test_list_cards_passes_cycle_id(monkeypatch):
+    seen = _capture_get(monkeypatch, httpx.Response(200, json=[]))
+    server.list_cards(board_id=3, cycle_id=4)
+    assert seen["params"] == {"board_id": "3", "cycle_id": "4"}
+
+
+def test_create_card_passes_cycle_id(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(201, json={"id": 1}))
+    server.create_card("T", board_id=3, cycle_id=4)
+    assert json.loads(seen["content"]) == {"board_id": 3, "title": "T", "cycle_id": 4}

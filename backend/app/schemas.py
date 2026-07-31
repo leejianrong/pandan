@@ -5,12 +5,50 @@ Epic{Create,Update,Read} are the contract for the separate epic entity (ADR 0009
 """
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+# --- Payload hardening caps (V28, KAN-292) ---------------------------------
+# ``max_length`` bounds on the write contract so no single string field can carry an
+# unbounded blob (defence-in-depth *behind* the body-size ceiling in ``app.main``).
+# For fields backed by a ``varchar(N)`` column (models.py) the cap is aligned to N,
+# so an over-long value is a clean **422** at validation rather than a 500 at INSERT
+# (a latent gap before this slice); ``Text`` columns have no DB limit, so those caps
+# are just a generous app-level ceiling. All additive — normal content is far below.
+MAX_TITLE_LEN = 255  # card.title varchar(255)
+MAX_NAME_LEN = 255  # epic/board/template/view/label/token name varchar(255)
+MAX_ASSIGNEE_LEN = 255  # card.assignee varchar(255)
+MAX_LEAD_LEN = 255  # epic.lead varchar(255)
+MAX_LINK_LABEL_LEN = 255  # card_link.label varchar(255)
+MAX_LABEL_COLOR_LEN = 32  # label.color varchar(32)
+MAX_EMAIL_LEN = 320  # RFC 5321 upper bound (member lookup)
+MAX_DESCRIPTION_LEN = 20_000  # Text column — long markdown
+MAX_TEXT_LEN = 10_000  # Text columns — comment body, attention note
+MAX_URL_LEN = 2_000  # card_link.url + board.outbound_webhook_url (Text columns)
+MAX_WEBHOOK_SECRET_LEN = 255  # board.outbound_webhook_secret (Text column — app cap)
+MAX_SEARCH_LEN = 500  # free-text search term (feeds the expensive full-text path)
+MAX_LABEL_IDS = 100  # labels attachable to one card in one request
+
+
+def _int_env(name: str, default: int) -> int:
+    """Read a positive int from the env, falling back to ``default`` when unset or
+    malformed (a bad value must never crash import — mirrors ``app.ratelimit``)."""
+    try:
+        value = int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+# Array-length caps — env-tunable (generous defaults) since batch/template size is
+# the real amplification lever. The body-size ceiling env var lives in ``app.main``.
+MAX_BATCH_ITEMS = _int_env("MAX_BATCH_ITEMS", 500)  # cards per PATCH /cards/batch
+MAX_TEMPLATE_CARDS = _int_env("MAX_TEMPLATE_CARDS", 200)  # cards per template
 
 
 class ColumnEnum(str, Enum):
@@ -35,14 +73,17 @@ STORY_POINTS = {1, 2, 3, 5, 8, 13}
 
 
 class CardCreate(BaseModel):
-    title: Annotated[str, Field(min_length=1)]
-    description: str | None = None
+    title: Annotated[str, Field(min_length=1, max_length=MAX_TITLE_LEN)]
+    description: Annotated[str | None, Field(max_length=MAX_DESCRIPTION_LEN)] = None
     column: ColumnEnum = ColumnEnum.todo
     story_points: int | None = None
-    assignee: str | None = None
+    assignee: Annotated[str | None, Field(max_length=MAX_ASSIGNEE_LEN)] = None
     # Optional parent epic. That the id references an existing epic is checked in
     # the router (routers/cards.py), which returns 422 on violation.
     epic_id: int | None = None
+    # Optional cycle/iteration (V33, KAN-297) — mirrors ``epic_id``: the id must
+    # reference an existing cycle on the card's board (checked in the router, 422).
+    cycle_id: int | None = None
     # The target board (M3 V7). Optional for back-compat: when omitted the router
     # falls back to the default board, so pre-board clients (the MCP server, older
     # tests) keep working. The referenced board must exist (422 otherwise).
@@ -52,7 +93,7 @@ class CardCreate(BaseModel):
     # to the card's board (checked in the router, 422 otherwise). Omitted → no labels.
     priority: PriorityEnum = PriorityEnum.none
     due_date: datetime | None = None
-    label_ids: list[int] | None = None
+    label_ids: Annotated[list[int] | None, Field(max_length=MAX_LABEL_IDS)] = None
 
     @field_validator("title")
     @classmethod
@@ -77,20 +118,23 @@ class CardUpdate(BaseModel):
     not be set empty/null; description/story_points/assignee accept null to clear.
     """
 
-    title: str | None = None
-    description: str | None = None
+    title: Annotated[str | None, Field(max_length=MAX_TITLE_LEN)] = None
+    description: Annotated[str | None, Field(max_length=MAX_DESCRIPTION_LEN)] = None
     story_points: int | None = None
-    assignee: str | None = None
+    assignee: Annotated[str | None, Field(max_length=MAX_ASSIGNEE_LEN)] = None
     # Re-link the story to a different epic, or clear it with null. The referenced
     # epic must exist; enforced in the router.
     epic_id: int | None = None
+    # Re-assign the story to a different cycle/iteration, or clear it with null
+    # (V33, KAN-297). The referenced cycle must exist on the card's board; router.
+    cycle_id: int | None = None
     # Card fields (M5 V11). All optional (only sent fields apply, like the rest):
     # ``priority`` re-ranks; ``due_date`` accepts null to clear; ``label_ids``
     # **replaces** the card's label set (``[]`` clears them). Each label id must
     # belong to the card's board (checked in the router, 422 otherwise).
     priority: PriorityEnum | None = None
     due_date: datetime | None = None
-    label_ids: list[int] | None = None
+    label_ids: Annotated[list[int] | None, Field(max_length=MAX_LABEL_IDS)] = None
 
     @field_validator("title")
     @classmethod
@@ -127,7 +171,7 @@ class NeedsHumanRequest(BaseModel):
     note is optional and, when given, must not be blank; omit it (or send null) to
     flag the card without a note."""
 
-    attention_note: str | None = None
+    attention_note: Annotated[str | None, Field(max_length=MAX_TEXT_LEN)] = None
 
     @field_validator("attention_note")
     @classmethod
@@ -142,8 +186,8 @@ class LinkCreate(BaseModel):
     ``label`` (e.g. "PR", "branch", "CI") and a ``url`` (the PR URL, branch, CI run,
     …). Both are required and non-empty."""
 
-    label: Annotated[str, Field(min_length=1)]
-    url: Annotated[str, Field(min_length=1)]
+    label: Annotated[str, Field(min_length=1, max_length=MAX_LINK_LABEL_LEN)]
+    url: Annotated[str, Field(min_length=1, max_length=MAX_URL_LEN)]
 
     @field_validator("label", "url")
     @classmethod
@@ -167,8 +211,8 @@ class LabelCreate(BaseModel):
     with a non-empty ``name`` and a ``color`` (an arbitrary string, typically a hex
     like ``#0ea5e9``). The board comes from the path, not the body."""
 
-    name: Annotated[str, Field(min_length=1)]
-    color: Annotated[str, Field(min_length=1)]
+    name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
+    color: Annotated[str, Field(min_length=1, max_length=MAX_LABEL_COLOR_LEN)]
 
     @field_validator("name", "color")
     @classmethod
@@ -194,7 +238,7 @@ class CommentCreate(BaseModel):
     SYSTEM activity log. Required and non-empty; the author is taken from the
     request principal, never the body."""
 
-    body: Annotated[str, Field(min_length=1)]
+    body: Annotated[str, Field(min_length=1, max_length=MAX_TEXT_LEN)]
 
     @field_validator("body")
     @classmethod
@@ -227,6 +271,8 @@ class CardRead(BaseModel):
     story_points: int | None
     assignee: str | None
     epic_id: int | None
+    # The story's cycle/iteration (V33, KAN-297), or null when unassigned.
+    cycle_id: int | None
     # Card fields (M5 V11, KAN-244). ``priority`` + ``due_date`` are real columns;
     # ``labels`` is populated by the router from the card_label join (not an ORM
     # column), mirroring ``links`` — empty when the card has none.
@@ -277,10 +323,14 @@ class EpicCreate(BaseModel):
     """Create an epic (ADR 0009). Epics carry only a name + optional description —
     no column/position/assignee/story_points."""
 
-    name: Annotated[str, Field(min_length=1)]
-    description: str | None = None
+    name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
+    description: Annotated[str | None, Field(max_length=MAX_DESCRIPTION_LEN)] = None
     # Target board (M3 V7); optional → default board when omitted (see CardCreate).
     board_id: int | None = None
+    # Lightweight project fields (V31, KAN-295). ``target_date`` is an optional
+    # target/ship date; ``lead`` an optional free-text owner. Both optional → NULL.
+    target_date: datetime | None = None
+    lead: Annotated[str | None, Field(max_length=MAX_LEAD_LEN)] = None
 
     @field_validator("name")
     @classmethod
@@ -291,10 +341,15 @@ class EpicCreate(BaseModel):
 
 
 class EpicUpdate(BaseModel):
-    """Field edits for an epic. All optional — only sent fields are applied."""
+    """Field edits for an epic. All optional — only sent fields are applied.
 
-    name: str | None = None
-    description: str | None = None
+    ``target_date`` / ``lead`` (V31, KAN-295) accept a value to set, or ``null`` to
+    clear (the router applies only the fields actually sent, via ``exclude_unset``)."""
+
+    name: Annotated[str | None, Field(max_length=MAX_NAME_LEN)] = None
+    description: Annotated[str | None, Field(max_length=MAX_DESCRIPTION_LEN)] = None
+    target_date: datetime | None = None
+    lead: Annotated[str | None, Field(max_length=MAX_LEAD_LEN)] = None
 
     @field_validator("name")
     @classmethod
@@ -302,6 +357,26 @@ class EpicUpdate(BaseModel):
         if v is not None and not v.strip():
             raise ValueError("name must not be empty")
         return v
+
+
+class EpicHealth(str, Enum):
+    """Derived health signal for an epic (V32, KAN-296). ``on_track`` / ``at_risk``
+    / ``overdue`` — computed from ``target_date`` vs. remaining child work; ``null``
+    (absent) when the epic has no ``target_date``. See ``app.epic_rollup``."""
+
+    on_track = "on_track"
+    at_risk = "at_risk"
+    overdue = "overdue"
+
+
+class EpicProgress(BaseModel):
+    """Derived rollup over an epic's **non-deleted** child cards (V32, KAN-296):
+    ``done`` of ``total``, and ``percent`` = round(done/total*100) (``0`` when the
+    epic has no children). Computed on read — no stored column, no migration."""
+
+    total: int
+    done: int
+    percent: int
 
 
 class EpicRead(BaseModel):
@@ -312,6 +387,14 @@ class EpicRead(BaseModel):
     board_id: int
     name: str
     description: str | None
+    # Lightweight project fields (V31, KAN-295) — real columns, read directly.
+    target_date: datetime | None
+    lead: str | None
+    # Derived progress rollup + health signal (V32, KAN-296) — NOT stored columns;
+    # the epics router attaches them per read from a grouped child-card COUNT +
+    # ``app.epic_rollup.compute_rollup``. ``health`` is null when target_date is unset.
+    progress: EpicProgress
+    health: EpicHealth | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -327,7 +410,7 @@ class BoardCreate(BaseModel):
     """Create a board (M3 V7, ADR 0012). Carries only a name; the owner is set
     from the session, not the request body."""
 
-    name: Annotated[str, Field(min_length=1)]
+    name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
 
     @field_validator("name")
     @classmethod
@@ -342,17 +425,36 @@ class BoardUpdate(BaseModel):
     only renamable field; ownership isn't reassignable here. ``autosync_enabled``
     turns the GitHub-webhook card auto-sync on for this board (default OFF);
     ``autosync_advance_to_done`` separately allows PR-merge to move a card to
-    ``done``. All optional — only the fields sent are applied."""
+    ``done``. All optional — only the fields sent are applied.
 
-    name: str | None = None
+    Outbound signed webhook (V38, KAN-302) — mirrors the autosync opt-in:
+    ``outbound_webhook_enabled`` turns on a signed ``POST`` on every notification-create;
+    ``outbound_webhook_url`` is the target; ``outbound_webhook_secret`` keys the
+    HMAC-SHA256 signature and is **write-only** (accepted here, never echoed back in
+    ``BoardRead``). Send ``null`` for the url/secret to clear it."""
+
+    name: Annotated[str | None, Field(max_length=MAX_NAME_LEN)] = None
     autosync_enabled: bool | None = None
     autosync_advance_to_done: bool | None = None
+    outbound_webhook_url: Annotated[str | None, Field(max_length=MAX_URL_LEN)] = None
+    outbound_webhook_secret: Annotated[
+        str | None, Field(max_length=MAX_WEBHOOK_SECRET_LEN)
+    ] = None
+    outbound_webhook_enabled: bool | None = None
 
     @field_validator("name")
     @classmethod
     def name_non_empty(cls, v: str | None) -> str | None:
         if v is not None and not v.strip():
             raise ValueError("name must not be empty")
+        return v
+
+    @field_validator("outbound_webhook_url", "outbound_webhook_secret")
+    @classmethod
+    def webhook_field_non_blank(cls, v: str | None) -> str | None:
+        # Allow ``null`` (clear), but a provided value must not be blank whitespace.
+        if v is not None and not v.strip():
+            raise ValueError("must not be empty (send null to clear)")
         return v
 
 
@@ -373,6 +475,12 @@ class BoardRead(BaseModel):
     # Auto-sync opt-ins (KAN-43); both default false.
     autosync_enabled: bool
     autosync_advance_to_done: bool
+    # Outbound signed webhook (V38, KAN-302): the opt-in flag + the target URL are
+    # readable (a settings UI needs them), but ``outbound_webhook_secret`` is
+    # **deliberately absent** — it is write-only (set via BoardUpdate, never returned),
+    # exactly like a password.
+    outbound_webhook_url: str | None
+    outbound_webhook_enabled: bool
     # The *caller's* effective role on this board (KAN-15): "owner" if they own it,
     # else their board_member role (viewer/editor). Attached transiently by the
     # list router (not an ORM column), mirroring MemberRead.email; the switcher
@@ -388,7 +496,7 @@ class MemberCreate(BaseModel):
     must already exist; the router resolves the identity and returns 404 otherwise."""
 
     user_id: uuid.UUID | None = None
-    email: str | None = None
+    email: Annotated[str | None, Field(max_length=MAX_EMAIL_LEN)] = None
     role: RoleEnum = RoleEnum.viewer
 
     @field_validator("email")
@@ -447,6 +555,25 @@ class ActivityRead(BaseModel):
     ts: datetime
 
 
+class NotificationRead(BaseModel):
+    """One inbox notification for a board owner (V37, KAN-301). Mirrors the
+    ``Notification`` model's real columns. ``kind`` ∈ {needs_human, blocked,
+    ci_failed, assigned}; ``read_at`` is null while unread. Poll/pull only (ADR
+    0007) — there is no push channel; a client polls ``GET /notifications``."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    # The recipient (UUID) — always the current caller on the owner-scoped list.
+    user_id: uuid.UUID
+    board_id: int
+    card_id: int | None
+    kind: str
+    body: str
+    read_at: datetime | None
+    created_at: datetime
+
+
 class TokenScope(str, Enum):
     """A PAT's capability (M5 V18, KAN-251). ``read`` = observer (GET only);
     ``write`` = operator (the owning user's full board access, the default)."""
@@ -460,7 +587,7 @@ class TokenCreate(BaseModel):
     scope (default ``write`` for back-compat), and an optional expiry; the secret is
     server-generated, never client-supplied."""
 
-    name: Annotated[str, Field(min_length=1)]
+    name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
     scope: TokenScope = TokenScope.write
     expires_at: datetime | None = None
 
@@ -501,7 +628,7 @@ class DispatchRequest(BaseModel):
     **minimum** priority — cards at that rank or above) narrow which ready card is
     chosen. An empty/absent body dispatches the next ready card to the caller."""
 
-    assignee: str | None = None
+    assignee: Annotated[str | None, Field(max_length=MAX_ASSIGNEE_LEN)] = None
     label: int | None = None
     priority: PriorityEnum | None = None
 
@@ -631,16 +758,18 @@ class CardQuery(BaseModel):
 
     column: ColumnEnum | None = None
     epic_id: int | None = None
+    # Filter to stories in one cycle/iteration (V33, KAN-297); mirrors ``epic_id``.
+    cycle_id: int | None = None
     priority: PriorityEnum | None = None
     label: int | None = None
     due_before: datetime | None = None
     overdue: bool | None = None
     needs_human: bool | None = None
-    assignee: str | None = None
+    assignee: Annotated[str | None, Field(max_length=MAX_ASSIGNEE_LEN)] = None
     # Free-text search over title+description (M5 V15, KAN-248). A plain string —
     # ``GET /cards`` treats empty/whitespace as absent, so a saved view can carry a
     # search term and replay verbatim.
-    q: str | None = None
+    q: Annotated[str | None, Field(max_length=MAX_SEARCH_LEN)] = None
     sort: str | None = None
 
     @field_validator("sort")
@@ -657,7 +786,7 @@ class SavedViewCreate(BaseModel):
     grammar (``CardQuery``), stored as JSON and replayable against ``GET /cards``.
     Omit ``query`` for an unfiltered "all cards" view."""
 
-    name: Annotated[str, Field(min_length=1)]
+    name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
     query: CardQuery = Field(default_factory=CardQuery)
 
     @field_validator("name")
@@ -685,15 +814,15 @@ class TemplateCardItem(BaseModel):
     minus ``board_id`` (the board comes from the template's path on apply). Mirrors
     :class:`CardCreate`'s field set + validation; ``title`` is required non-empty."""
 
-    title: Annotated[str, Field(min_length=1)]
-    description: str | None = None
+    title: Annotated[str, Field(min_length=1, max_length=MAX_TITLE_LEN)]
+    description: Annotated[str | None, Field(max_length=MAX_DESCRIPTION_LEN)] = None
     column: ColumnEnum = ColumnEnum.todo
     story_points: int | None = None
-    assignee: str | None = None
+    assignee: Annotated[str | None, Field(max_length=MAX_ASSIGNEE_LEN)] = None
     epic_id: int | None = None
     priority: PriorityEnum = PriorityEnum.none
     due_date: datetime | None = None
-    label_ids: list[int] | None = None
+    label_ids: Annotated[list[int] | None, Field(max_length=MAX_LABEL_IDS)] = None
 
     @field_validator("title")
     @classmethod
@@ -713,11 +842,13 @@ class TemplateCardItem(BaseModel):
 class CardTemplateCreate(BaseModel):
     """Create a card template (M5 V19, KAN-252): a named, reusable plan of cards on a
     board. ``name`` is required non-empty; ``cards`` is a non-empty list of
-    :class:`TemplateCardItem`. Applying the template instantiates those cards on the
-    board in one transaction."""
+    :class:`TemplateCardItem`, capped at ``MAX_TEMPLATE_CARDS`` (V28, KAN-292).
+    Applying the template instantiates those cards on the board in one transaction."""
 
-    name: Annotated[str, Field(min_length=1)]
-    cards: Annotated[list[TemplateCardItem], Field(min_length=1)]
+    name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
+    cards: Annotated[
+        list[TemplateCardItem], Field(min_length=1, max_length=MAX_TEMPLATE_CARDS)
+    ]
 
     @field_validator("name")
     @classmethod
@@ -736,3 +867,82 @@ class CardTemplateRead(BaseModel):
     # The stored list of card payloads as JSON — round-trips exactly what was stored.
     cards: list[dict[str, Any]]
     created_at: datetime
+
+
+# --- cycles / iterations (V33, KAN-297) ------------------------------------
+
+
+class CycleCreate(BaseModel):
+    """Create a cycle (a board-scoped, time-boxed iteration). ``name`` is required
+    non-empty; ``starts_on`` / ``ends_on`` are optional ISO-8601 iteration bounds.
+    The board comes from the path (``/boards/{id}/cycles``), not the body."""
+
+    name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
+    starts_on: datetime | None = None
+    ends_on: datetime | None = None
+
+    @field_validator("name")
+    @classmethod
+    def name_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name must not be empty")
+        return v
+
+
+class CycleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    board_id: int
+    name: str
+    starts_on: datetime | None
+    ends_on: datetime | None
+    created_at: datetime
+
+
+# --- cycle metrics: burndown / velocity (V34, KAN-298) ---------------------
+# Derived from the cycle's card state (story points + column) + the ``done``
+# transition times in the activity feed — no stored metric, no migration. See
+# ``app.metrics.compute_cycle_metrics`` and
+# ``GET /api/v1/boards/{id}/cycles/{cid}/metrics`` (routers/cycles.py).
+
+
+class WorkTotals(BaseModel):
+    """A count of stories and their summed story points (``points`` treats an
+    unestimated story as 0)."""
+
+    count: int
+    points: int
+
+
+class BurndownPoint(BaseModel):
+    """One calendar day of the cycle window: work still ``remaining``, work
+    ``completed`` cumulatively by that day, and the linear ``ideal`` reference
+    line. All in the cycle's chosen unit (points, or card count when unestimated)."""
+
+    date: str  # ISO-8601 calendar day (YYYY-MM-DD, UTC)
+    remaining: float
+    completed: float
+    ideal: float
+
+
+class CycleMetricsRead(BaseModel):
+    """Derived burndown / velocity metrics for one cycle (V34, KAN-298).
+
+    Entirely computed from the cycle's current card state + the activity feed —
+    no stored metric, no migration. ``committed`` is the work assigned to the
+    cycle; ``completed`` the subset currently ``done``; ``velocity`` the completed
+    story points. ``unit`` is ``"points"`` when the cycle has any estimated work,
+    else ``"count"`` — the unit ``burndown`` is expressed in. ``burndown`` is empty
+    when the cycle has no dated ``starts_on`` / ``ends_on`` window."""
+
+    board_id: int
+    cycle_id: int
+    generated_at: datetime
+    starts_on: datetime | None = None
+    ends_on: datetime | None = None
+    committed: WorkTotals
+    completed: WorkTotals
+    velocity: int
+    unit: str
+    burndown: list[BurndownPoint] = []

@@ -9,7 +9,13 @@ import {
 // Every card these tests create is prefixed so they can be cleaned up and so the
 // suite tolerates pre-existing dev data (tests run against the docker-compose DB).
 export const E2E_PREFIX = "e2e-";
-const API_ORIGIN = "http://localhost:8000";
+// The backend origin the cleanup helpers hit directly (not through the Vite proxy).
+// ENV-overridable (KAN-391) so a worktree run on non-default ports resolves the
+// right backend: an explicit API_ORIGIN wins, else it's derived from BACKEND_PORT,
+// both defaulting to today's http://localhost:8000 so CI + normal dev are unchanged.
+const API_ORIGIN =
+  process.env.API_ORIGIN ??
+  `http://localhost:${Number(process.env.BACKEND_PORT) || 8000}`;
 
 export function uniqueTitle(label = "card"): string {
   return `${E2E_PREFIX}${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -49,7 +55,7 @@ export async function createBoardViaSwitcher(page: Page, name: string): Promise<
   await switcher.getByRole("button", { name: "New board" }).click();
   await page.getByLabel("Board name").fill(name);
   await switcher.getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.getByLabel("Board", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Switch board", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Todo", exact: true })).toBeVisible();
   return name;
 }
@@ -62,6 +68,29 @@ export async function openFreshBoard(page: Page): Promise<string> {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Todo", exact: true })).toBeVisible();
   return createBoardViaSwitcher(page, uniqueTitle("board"));
+}
+
+// Pick an option from a U2 Select primitive (Bits UI, KAN-317) — NOT a native
+// <select>, so Playwright's selectOption() doesn't apply. Click the labelled
+// trigger (role=combobox), then the option (role=option, portalled to <body>, so
+// queried off the page). `scope` narrows which labelled trigger (a dialog/column).
+export async function pickSelect(
+  page: Page,
+  scope: Page | Locator,
+  triggerLabel: string,
+  optionLabel: string,
+): Promise<void> {
+  await scope.getByLabel(triggerLabel, { exact: true }).click();
+  await page.getByRole("option", { name: optionLabel, exact: true }).click();
+}
+
+// Navigate to a secondary view via the hamburger side-nav drawer (KAN-319/U4).
+// Dashboard/Epics/Activity/Tokens/Members/Trash moved out of the always-visible
+// top bar into a drawer: open it (hamburger), then click the item, which navigates
+// and closes the drawer. Board stays a top-bar pill (click "Board" directly).
+export async function openView(page: Page, name: string): Promise<void> {
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await page.getByRole("button", { name, exact: true }).click();
 }
 
 export function column(page: Page, label: string): Locator {
@@ -102,7 +131,7 @@ export function epicItem(page: Page, name: string): Locator {
 // Create an epic via the Epics view; returns its assigned ticket (e.g. "EPIC-1")
 // so callers can assert a linked story's epic tag. Leaves the Epics view open.
 export async function createEpic(page: Page, name: string): Promise<string> {
-  await page.getByRole("button", { name: "Epics", exact: true }).click();
+  await openView(page, "Epics");
   await page.getByRole("button", { name: "New epic" }).click();
   await page.getByPlaceholder("Epic name (required)").fill(name);
   await page.getByRole("button", { name: "Create" }).click();
@@ -123,7 +152,7 @@ export async function createStoryUnder(
   const col = column(page, columnLabel);
   await col.getByRole("button", { name: "Add card" }).click();
   await col.getByPlaceholder("Title (required)").fill(title);
-  await col.getByLabel("Epic", { exact: true }).selectOption({ label: `${epicTicket} · ${epicName}` });
+  await pickSelect(page, col, "Epic", `${epicTicket} · ${epicName}`);
   await col.getByRole("button", { name: "Create" }).click();
   await expect(cardInColumn(page, columnLabel, title)).toBeVisible();
 }

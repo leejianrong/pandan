@@ -98,7 +98,7 @@ class PersonalAccessToken(Base):
     token_hash: Mapped[str] = mapped_column(
         String(64), unique=True, nullable=False, index=True
     )
-    # A short, non-secret prefix of the raw token (e.g. ``kanban_pat_ab12``) shown
+    # A short, non-secret prefix of the raw token (e.g. ``pandan_pat_ab12``) shown
     # in the UI list so a user can tell their tokens apart. Never the full secret.
     token_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
     # ``read`` = observer (GET only), ``write`` = operator (full access). Default

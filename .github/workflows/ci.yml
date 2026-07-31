@@ -3,7 +3,7 @@ name: CI
 # Validate every PR and every push to main (ADR 0004). Nine independent jobs:
 # lint, fast unit tests (no Docker), integration tests (real Postgres via
 # testcontainers), the frontend build/type-check, Playwright e2e smoke tests
-# (real Postgres via a service container), the shared kanban-client's lint +
+# (real Postgres via a service container), the shared pandan-client's lint +
 # tests, the MCP server's lint + tests, the `kan` CLI's lint + tests (the
 # middle three all mocked httpx, no DB), and a supply-chain `security` scan
 # (secret scan over history + dependency vulnerability audit). The Deploy
@@ -12,7 +12,7 @@ name: CI
 # CI path filtering (KAN-37): a leading `changes` job computes which areas of
 # the repo a PR touched; each of the eight jobs then guards its *heavy steps*
 # on the relevant output. On a docs-only change (nothing under backend/,
-# frontend/, mcp/, kanban-client/, kanban-cli/ — e.g. this workflow file itself,
+# frontend/, mcp/, pandan-client/, pandan-cli/ — e.g. this workflow file itself,
 # docs/, .claude/, root *.md) every job still RUNS and REPORTS SUCCESS under its
 # existing `name:`, but skips the expensive install/test work in seconds.
 #
@@ -54,6 +54,8 @@ jobs:
       mcp: ${{ steps.filter.outputs.mcp }}
       client: ${{ steps.filter.outputs.client }}
       cli: ${{ steps.filter.outputs.cli }}
+      cli_code: ${{ steps.filter.outputs.cli_code }}
+      cli_version: ${{ steps.filter.outputs.cli_version }}
       app: ${{ steps.filter.outputs.app }}
     steps:
       # Needed so paths-filter can diff on `push` events (on `pull_request` it
@@ -72,15 +74,26 @@ jobs:
             mcp:
               - 'mcp/**'
             client:
-              - 'kanban-client/**'
+              - 'pandan-client/**'
             cli:
-              - 'kanban-cli/**'
+              - 'pandan-cli/**'
+            # Bump-on-fix guard (V50, KAN-435): `cli_code` is a change to CLI
+            # BEHAVIOUR, `cli_version` is a change to a version declaration. The
+            # `cli` job fails when the first is true and the second is not — a
+            # user-visible fix that never bumps the version ships a binary
+            # indistinguishable from source, which caused two false bug reports.
+            # Note a pure bump touches __init__.py, so it satisfies both.
+            cli_code:
+              - 'pandan-cli/pandan_cli/**'
+            cli_version:
+              - 'pandan-cli/pyproject.toml'
+              - 'pandan-cli/pandan_cli/__init__.py'
             app:
               - 'backend/**'
               - 'frontend/**'
               - 'mcp/**'
-              - 'kanban-client/**'
-              - 'kanban-cli/**'
+              - 'pandan-client/**'
+              - 'pandan-cli/**'
 
   lint:
     name: Lint (ruff)
@@ -146,13 +159,13 @@ jobs:
         run: uv run --frozen --group dev pytest tests/integration -q
 
   client:
-    name: Kanban client (lint + tests)
+    name: Pandan client (lint + tests)
     needs: changes
     runs-on: ubuntu-latest
     steps:
-      - name: Skip (no kanban-client changes)
+      - name: Skip (no pandan-client changes)
         if: needs.changes.outputs.client != 'true'
-        run: echo "No kanban-client changes — skipping client lint + tests."
+        run: echo "No pandan-client changes — skipping client lint + tests."
       - uses: actions/checkout@v7
         if: needs.changes.outputs.client == 'true'
       - name: Install uv
@@ -164,11 +177,11 @@ jobs:
       # mocked httpx transport, so no backend or database is needed.
       - name: Ruff lint
         if: needs.changes.outputs.client == 'true'
-        working-directory: kanban-client
+        working-directory: pandan-client
         run: uv run --frozen --group dev ruff check .
       - name: Pytest
         if: needs.changes.outputs.client == 'true'
-        working-directory: kanban-client
+        working-directory: pandan-client
         run: uv run --frozen --group dev pytest -q
 
   mcp:
@@ -202,9 +215,9 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     steps:
-      - name: Skip (no kanban-cli changes)
+      - name: Skip (no pandan-cli changes)
         if: needs.changes.outputs.cli != 'true'
-        run: echo "No kanban-cli changes — skipping CLI lint + tests."
+        run: echo "No pandan-cli changes — skipping CLI lint + tests."
       - uses: actions/checkout@v7
         if: needs.changes.outputs.cli == 'true'
       - name: Install uv
@@ -216,12 +229,26 @@ jobs:
       # transport, so no backend or database is needed.
       - name: Ruff lint
         if: needs.changes.outputs.cli == 'true'
-        working-directory: kanban-cli
+        working-directory: pandan-cli
         run: uv run --frozen --group dev ruff check .
       - name: Pytest
         if: needs.changes.outputs.cli == 'true'
-        working-directory: kanban-cli
+        working-directory: pandan-cli
         run: uv run --frozen --group dev pytest -q
+      # Bump-on-fix (V50, KAN-435). Lives in CI as well as the pre-push hook
+      # because the hook is opt-in (a symlink per clone) and bypassable with
+      # --no-verify, and this rule is exactly the kind that gets bypassed "just
+      # this once" — which is how 0.3.0 shipped twice with different behaviour.
+      # Uses the `changes` job's paths-filter outputs rather than git plumbing, so
+      # it needs no deepened checkout and works on both pull_request and push.
+      - name: CLI version bump
+        if: needs.changes.outputs.cli_code == 'true'
+        run: |
+          if [ "${{ needs.changes.outputs.cli_version }}" != "true" ]; then
+            echo "::error::pandan-cli/pandan_cli/ changed but the CLI version did not. Bump __version__ in pandan-cli/pandan_cli/__init__.py AND version in pandan-cli/pyproject.toml (then re-run \`uv lock\`) in this same PR — otherwise \`pandan --version\` cannot distinguish a stale build from current source (V50, KAN-435)."
+            exit 1
+          fi
+          echo "CLI behaviour changed and the version was bumped — OK."
 
   frontend:
     name: Frontend build & type-check
@@ -402,8 +429,8 @@ jobs:
       # --- Python dependency audit (pip-audit) ------------------------------
       # Audit the locked deps of every uv project against the PyPI advisory DB.
       # `--no-emit-project` drops the project itself; `--no-emit-package
-      # kanban-client` drops the local path dependency (an editable requirement
-      # pip-audit can't resolve — kanban-client is audited as its own project);
+      # pandan-client` drops the local path dependency (an editable requirement
+      # pip-audit can't resolve — pandan-client is audited as its own project);
       # `--no-hashes` because pip-audit only needs versions, not integrity hashes.
       # Threshold: pip-audit fails the step on ANY known vulnerability. That is
       # intentionally strict — the lockfiles are currently clean, and because this
@@ -413,10 +440,10 @@ jobs:
       - name: Python dependency audit (pip-audit)
         run: |
           set -euo pipefail
-          for d in backend mcp kanban-client kanban-cli; do
+          for d in backend mcp pandan-client pandan-cli; do
             echo "::group::pip-audit $d"
             ( cd "$d" && uv export --frozen --no-emit-project \
-                --no-emit-package kanban-client --no-hashes \
+                --no-emit-package pandan-client --no-hashes \
                 --format requirements-txt > /tmp/req.txt )
             uvx pip-audit -r /tmp/req.txt
             echo "::endgroup::"

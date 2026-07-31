@@ -16,6 +16,9 @@
   --agent: #7c3aed;
   --agent-soft: #eee6fd;
   --success: #16a34a;
+  --success-soft: #dcf3e3;
+  --warning: #b45309;
+  --warning-soft: #fbeccd;
   --danger: #dc2626;
   --danger-soft: #fde4e4;
   --hover: rgba(20, 25, 30, 0.06);
@@ -28,6 +31,9 @@
   --scrim: rgba(18, 22, 26, 0.42);
   --shadow-lg: 0 24px 60px -18px rgba(15, 20, 25, 0.45), 0 4px 12px -6px rgba(15, 20, 25, 0.25);
 
+  /* Tell the UA to paint native controls/popups/date-pickers/scrollbars light. */
+  color-scheme: light;
+
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--text);
 }
@@ -36,6 +42,7 @@
    [data-theme] overrides let a future manual toggle force either theme. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #101315;
     --col-bg: #15191c;
     --card-bg: #1a1f23;
@@ -48,6 +55,9 @@
     --agent: #b794f6;
     --agent-soft: #241a3d;
     --success: #4ade80;
+    --success-soft: #14301f;
+    --warning: #fbbf24;
+    --warning-soft: #3a2c10;
     --danger: #f87171;
     --danger-soft: #3a1717;
     --hover: rgba(255, 255, 255, 0.06);
@@ -58,6 +68,7 @@
   }
 }
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #101315;
   --col-bg: #15191c;
   --card-bg: #1a1f23;
@@ -70,6 +81,9 @@
   --agent: #b794f6;
   --agent-soft: #241a3d;
   --success: #4ade80;
+  --success-soft: #14301f;
+  --warning: #fbbf24;
+  --warning-soft: #3a2c10;
   --danger: #f87171;
   --danger-soft: #3a1717;
   --hover: rgba(255, 255, 255, 0.06);
@@ -133,21 +147,21 @@ body {
   height: 9px;
 }
 
-.topbar-nav {
-  display: flex;
-  gap: 0.4rem;
-}
-.topbar-nav button {
+/* Primary Board view — a pill kept in the top bar (KAN-319/U4). Secondary views
+   moved into the hamburger side-nav drawer (SideNav.svelte). */
+.board-tab {
   border: 1px solid transparent;
   background: none;
   color: var(--muted);
-  padding: 0.3rem 0.7rem;
+  padding: 0.3rem 0.8rem;
   font-size: 0.85rem;
+  border-radius: 7px;
+  cursor: pointer;
 }
-.topbar-nav button:hover {
+.board-tab:hover {
   color: var(--text);
 }
-.topbar-nav button.active {
+.board-tab.active {
   background: var(--accent-soft);
   border-color: var(--border);
   color: var(--accent);
@@ -159,7 +173,8 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  /* Single row — the New(+)/actions(…) buttons must not wrap to a 2nd row (U4). */
+  flex-wrap: nowrap;
 }
 .board-switcher select {
   font: inherit;
@@ -252,25 +267,22 @@ body {
   align-items: center;
   gap: 0.6rem;
 }
+/* The avatar is the DropdownMenu trigger (KAN-319/U4) — a real <button>, so reset
+   the native button chrome and make it read as the circular avatar. */
 .user-avatar {
   flex: none;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
   border-radius: 50%;
   background: var(--accent);
   color: #fff;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-.topbar-user .user-email {
   font-size: 0.8rem;
-  color: var(--muted);
-  max-width: 22ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 main {
@@ -728,20 +740,24 @@ button.danger {
   border-radius: 6px;
   padding: 0.6rem;
 }
-.card-form input,
-.card-form textarea,
-.card-form select {
+/* Legacy raw controls — excludes the U2 primitives (.ui-input/.ui-textarea/
+   .ui-select style themselves). Radius unified to 7px (KAN-317). */
+.card-form input:not(.ui-input),
+.card-form textarea:not(.ui-textarea),
+.card-form select:not(.ui-select) {
   font: inherit;
   padding: 0.4rem;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 7px;
   width: 100%;
+  background-color: var(--card-bg);
+  color: var(--text);
 }
 .card-form .row {
   display: flex;
   gap: 0.4rem;
 }
-.card-form .row select {
+.card-form .row select:not(.ui-select) {
   width: auto;
 }
 .card-form .actions {
@@ -1034,6 +1050,8 @@ button.primary:disabled {
 .rail-select {
   appearance: none;
   -webkit-appearance: none;
+  background-color: var(--card-bg);
+  color: var(--text);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a828b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.55rem center;
@@ -1078,6 +1096,14 @@ button.primary:disabled {
 .card[role="button"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+/* Keyboard-navigation focus ring (V36, KAN-300): a persistent, high-contrast ring
+   on the card the keyboard is acting on, so the "focused card" stays visible even
+   when the browser wouldn't paint :focus-visible for a programmatic .focus(). */
+.card.kbd-focused {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 .card.is-blocked {
   border-left: 3px solid var(--danger);
@@ -1233,6 +1259,47 @@ button.primary:disabled {
   border-color: var(--accent);
   background: var(--card-bg);
 }
+/* Description: label + Edit/Preview toggle on one row */
+.desc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.desc-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--card-bg);
+}
+.desc-tab {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  line-height: 1.6;
+}
+.desc-tab + .desc-tab {
+  border-left: 1px solid var(--border);
+}
+.desc-tab:hover {
+  color: var(--text);
+}
+.desc-tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+.desc-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .desc-input {
   width: 100%;
   font: inherit;
@@ -1245,11 +1312,100 @@ button.primary:disabled {
   margin-top: 0.4rem;
   background: var(--card-bg);
   resize: vertical;
-  min-height: 5.5rem;
+  min-height: 11rem;
 }
 .desc-input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* Rendered (sanitized) markdown preview */
+.desc-rendered {
+  margin-top: 0.4rem;
+  min-height: 5.5rem;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.desc-empty {
+  margin: 0.4rem 0 0;
+  min-height: 5.5rem;
+  font-size: 0.92rem;
+  color: var(--muted);
+  font-style: italic;
+}
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+.markdown-body p {
+  margin: 0 0 0.7rem;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin: 1rem 0 0.5rem;
+  line-height: 1.3;
+  font-weight: 650;
+}
+.markdown-body h1 {
+  font-size: 1.3rem;
+}
+.markdown-body h2 {
+  font-size: 1.15rem;
+}
+.markdown-body h3 {
+  font-size: 1.02rem;
+}
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0 0 0.7rem;
+  padding-left: 1.4rem;
+}
+.markdown-body li {
+  margin: 0.15rem 0;
+}
+.markdown-body a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.markdown-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+}
+.markdown-body pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  overflow-x: auto;
+  margin: 0 0 0.7rem;
+}
+.markdown-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+.markdown-body blockquote {
+  margin: 0 0 0.7rem;
+  padding-left: 0.8rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.9rem 0;
 }
 
 /* Rail fields */
@@ -1262,6 +1418,8 @@ button.primary:disabled {
 .rail-field select {
   width: 100%;
   border-radius: 7px;
+  background-color: var(--card-bg);
+  color: var(--text);
 }
 .rail-field input:focus-visible,
 .rail-field select:focus-visible,
@@ -1404,6 +1562,43 @@ button.primary:disabled {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+/* Progress-bar fill tinted by health (V32, KAN-296): teal/on-track by default,
+   amber at-risk, red overdue; a complete epic (`.full`) always reads success. */
+.progress .bar i.fill-at_risk {
+  background: var(--warning);
+}
+.progress .bar i.fill-overdue {
+  background: var(--danger);
+}
+
+/* Health pill (V32, KAN-296) — small RAG badge on the epic card head. */
+.health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.health-pill.on_track {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+.health-pill.at_risk {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+}
+.health-pill.overdue {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 }
 
 /* ---- Shared page header (Epics + Tokens) ---- */
@@ -1634,4 +1829,705 @@ button.primary:disabled {
   .epic-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* =====================================================================
+   UI primitives (KAN-317 / U2) — standardized form + menu controls.
+   In-house wrappers over Bits UI (headless), styled here with the tokens
+   above. Kept global (like .rail-select / .board-switcher) because Bits
+   portals popups/listboxes to <body>, out of any component's <style> scope.
+   One shared look: 7px radius, 1px --border, teal 2px focus ring, --muted
+   placeholder/hint, custom caret. No hard-coded colors — tokens only.
+   ===================================================================== */
+
+/* ---- Field wrapper: label + control + hint/error ---- */
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.ui-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.ui-label .req {
+  color: var(--danger);
+  margin-left: 0.15rem;
+  font-weight: 700;
+}
+.ui-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.ui-error {
+  font-size: 0.72rem;
+  color: var(--danger);
+  line-height: 1.4;
+}
+
+/* ---- TextInput / Textarea ---- */
+.ui-input,
+.ui-textarea {
+  font: inherit;
+  font-size: 0.88rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  color: var(--text);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.ui-textarea {
+  resize: vertical;
+  min-height: 4.5rem;
+  line-height: 1.55;
+}
+.ui-input::placeholder,
+.ui-textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+.ui-input:focus-visible,
+.ui-textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: var(--accent);
+}
+.ui-input.is-error,
+.ui-textarea.is-error {
+  border-color: var(--danger);
+}
+.ui-input.is-error:focus-visible,
+.ui-textarea.is-error:focus-visible {
+  outline-color: var(--danger);
+}
+.ui-input:disabled,
+.ui-textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--surface-2);
+}
+
+/* ---- Select trigger (matches the old .rail-select: custom caret) ---- */
+.ui-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font: inherit;
+  font-size: 0.88rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  color: var(--text);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.ui-select:hover {
+  border-color: var(--muted);
+}
+/* Compact variant: auto-width to content (filter row, inline pickers). */
+.ui-select.compact {
+  width: auto;
+  min-width: 7rem;
+}
+.ui-select:focus-visible,
+.ui-select[data-state="open"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: var(--accent);
+}
+.ui-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--surface-2);
+}
+.ui-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-select-value.placeholder {
+  color: var(--muted);
+}
+.ui-select-caret {
+  flex: none;
+  color: var(--muted);
+  transition: transform 0.12s ease, color 0.12s ease;
+}
+.ui-select[data-state="open"] .ui-select-caret {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+
+/* ---- Popup surface (Select listbox / DropdownMenu content) ---- */
+.ui-popup {
+  z-index: 120;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  padding: 0.25rem;
+  min-width: var(--bits-select-anchor-width, 180px);
+  max-height: min(320px, var(--bits-floating-available-height, 320px));
+  overflow-y: auto;
+}
+.ui-popup.detached {
+  min-width: 180px;
+}
+.ui-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.55rem;
+  border: none;
+  background: none;
+  text-align: left;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.ui-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-item-check {
+  margin-left: auto;
+  flex: none;
+  color: var(--accent);
+}
+/* Trailing shortcut hint on a menu item (e.g. `?` on Keyboard shortcuts, KAN-392). */
+.ui-item-hint {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1;
+  min-width: 1.2rem;
+  text-align: center;
+  padding: 0.2rem 0.35rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.ui-item[data-highlighted],
+.ui-item[data-selected],
+.ui-item:hover {
+  background: var(--hover);
+  outline: none;
+}
+/* Select listbox only: the chosen value reads teal (+ a trailing check). */
+.ui-select-item[data-selected] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.ui-select-item[data-selected][data-highlighted] {
+  background: var(--accent-soft);
+}
+.ui-item[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ui-item.danger {
+  color: var(--danger);
+}
+.ui-item.danger[data-highlighted],
+.ui-item.danger:hover {
+  background: var(--danger-soft);
+}
+.ui-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 0.25rem 0.15rem;
+  border: 0;
+}
+.ui-menu-label {
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 0.35rem 0.55rem 0.2rem;
+}
+/* Secondary line under a menu heading (e.g. the signed-in email, KAN-319/U4). */
+.ui-menu-subtitle {
+  font-size: 0.8rem;
+  color: var(--text);
+  padding: 0 0.55rem 0.35rem;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Checkbox ---- */
+.ui-check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.ui-check-row:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.ui-checkbox {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: #fff;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.ui-checkbox.is-checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.ui-check-row:focus-visible {
+  outline: none;
+}
+.ui-check-row:focus-visible .ui-checkbox {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- Popover panel (richer floating content) ---- */
+.ui-popover {
+  z-index: 120;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  padding: 0.85rem;
+  width: 240px;
+}
+
+/* ---- Command palette (reused by V35 ⌘K) ---- */
+.ui-command {
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.ui-command-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.ui-command-search input {
+  font: inherit;
+  font-size: 0.9rem;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--text);
+  outline: none;
+}
+.ui-command-search input::placeholder {
+  color: var(--muted);
+}
+.ui-command-list {
+  padding: 0.35rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.ui-command .kbd {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+}
+.ui-command-empty {
+  padding: 1.25rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* =====================================================================
+   Notification inbox (V39, KAN-303) — a bell + unread badge in the top
+   bar (Inbox.svelte) opening an anchored popover of notifications.
+   Global (like .ui-popup / .board-switcher) because Bits portals the
+   popover content to <body>, out of the component's <style> scope. One
+   shared look with the rest of the app: tokens only, no hard-coded
+   colours; the icon chips reuse Activity.svelte's feed-icon pattern.
+   ===================================================================== */
+
+/* ---- Bell trigger + unread badge (sits in .topbar-user) ---- */
+.bell-btn {
+  position: relative;
+}
+.bell-btn[data-state="open"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--border);
+}
+.unread-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  /* Teal to match the app's "attention to a person" language; danger red stays
+     reserved for the blocked/CI rows inside the panel (KAN-303 approved design). */
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  border-radius: 999px;
+  border: 2px solid var(--card-bg);
+}
+
+/* ---- Panel surface (Popover.Content) ---- */
+.inbox-panel {
+  z-index: 120;
+  width: 384px;
+  max-width: calc(100vw - 2rem);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: min(560px, var(--bits-floating-available-height, 560px));
+}
+
+.inbox-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.8rem 0.9rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+.inbox-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.inbox-count {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  font-variant-numeric: tabular-nums;
+}
+.inbox-count.zero {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+.inbox-mark-all {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.28rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+}
+.inbox-mark-all:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+.inbox-mark-all:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.inbox-mark-all:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- All / Unread filter ---- */
+.inbox-filter {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+.inbox-tab {
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+}
+.inbox-tab:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.inbox-tab.active {
+  background: var(--accent-soft);
+  border-color: var(--border);
+  color: var(--accent);
+}
+.inbox-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- Status / loading / error line ---- */
+.inbox-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 1.5rem 1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* ---- List + rows ---- */
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+.note {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 0.65rem;
+  padding: 0.6rem 0.55rem 0.6rem 0.7rem;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+  transition: background 0.12s ease;
+}
+.note:hover {
+  background: var(--hover);
+}
+/* Unread: a teal left rail + faint accent wash so it reads at a glance. */
+.note.unread {
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+  border-left-color: var(--accent);
+  padding-left: 0.55rem;
+}
+.note.unread:hover {
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+}
+.note.read {
+  opacity: 0.72;
+}
+
+.note-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  flex: none;
+  margin-top: 0.05rem;
+}
+.note-icon.needs_human {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.note-icon.blocked {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.note-icon.ci_failed {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.note-icon.assigned {
+  background: var(--agent-soft);
+  color: var(--agent);
+}
+
+.note-body {
+  min-width: 0;
+}
+.note-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+}
+.note-kind.needs_human {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.note-kind.blocked {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.note-kind.ci_failed {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.note-kind.assigned {
+  background: var(--agent-soft);
+  color: var(--agent);
+}
+.note-text {
+  margin: 0.3rem 0 0;
+  font-size: 0.83rem;
+  line-height: 1.4;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.note-time {
+  display: block;
+  margin-top: 0.28rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.note-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+.unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+  margin-top: 0.35rem;
+}
+.note-mark {
+  display: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.note-mark:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.note-mark:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Reveal the mark-read button on hover/focus, hiding the dot in its place. Touch /
+   no-hover devices keep the button visible (they can't hover). */
+.note.unread:hover .note-mark,
+.note.unread:focus-within .note-mark {
+  display: grid;
+}
+.note.unread:hover .unread-dot,
+.note.unread:focus-within .unread-dot {
+  display: none;
+}
+@media (hover: none) {
+  .note.unread .note-mark {
+    display: grid;
+  }
+  .note.unread .unread-dot {
+    display: none;
+  }
+}
+
+.inbox-foot {
+  padding: 0.55rem 0.9rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.74rem;
+  color: var(--muted);
+  flex: none;
+}
+
+/* ---- Empty state ---- */
+.inbox-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 2.2rem 1.5rem 2.4rem;
+  text-align: center;
+}
+.inbox-empty-ring {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.inbox-empty h4 {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+.inbox-empty p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  max-width: 26ch;
+  line-height: 1.45;
 }

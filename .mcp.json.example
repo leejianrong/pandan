@@ -1,33 +1,35 @@
 {
-  "//": "Copy to .mcp.json (repo root) for Claude Code, then keep ONE of the two 'kanban' servers below and delete the other. See mcp/README.md.",
-  "//token": "Since V8 (ADR 0013) /api/v1 is auth-required, and V10 (ADR 0015) removed the shared API_TOKENS bypass. Create a personal access token in the SPA (Tokens tab, V9) and put the kanban_pat_... secret in KANBAN_TOKEN. It acts as your user and is owner-gated. An empty/invalid token yields 401.",
-  "//boards": "KANBAN_BOARD_ID sets the default board (an integer id) for calls that omit board_id — it is preset to 1 (the seeded default board) so a wired agent doesn't accidentally target the wrong board. Call list_boards to find your board id and change 1 to it. Leave it empty to fall back to the API default (list = all your boards, create = your earliest).",
-  "//prod": "Set KANBAN_API_URL to https://simple-kanban-jian.fly.dev and KANBAN_TOKEN to your kanban_pat_... secret.",
-  "//run-modes": "Two ways to run the server: (1) 'kanban' runs it from source with uv (needs a checkout + uv). (2) 'kanban-docker' runs the prebuilt image from ghcr.io (KAN-47) — no Python/uv/checkout, just Docker. Pick one; rename it to whatever you like.",
+  "//": "Copy to .mcp.json (repo root) for Claude Code, then keep ONE of the two 'pandan' servers below and delete the other. See mcp/README.md.",
+  "//tool-names": "The mcpServers key is what MCP tool names are namespaced with, so this server being called 'pandan' makes its tools 'mcp__pandan__*' (they were 'mcp__kanban__*' before the V40 rebrand, ADR 0018). Anything referencing a tool by name — skills, prompts, a settings.json allowlist — must use the same key you choose here.",
+  "//token": "Since V8 (ADR 0013) /api/v1 is auth-required, and V10 (ADR 0015) removed the shared API_TOKENS bypass. Create a personal access token in the SPA (Tokens tab, V9) and put the pandan_pat_... secret in PANDAN_TOKEN. It acts as your user and is owner-gated. An empty/invalid token yields 401. A pre-rebrand kanban_pat_... token still authenticates.",
+  "//legacy-env": "PANDAN_API_URL / PANDAN_TOKEN / PANDAN_BOARD_ID are the current names. The pre-rebrand KANBAN_* spellings still work as a deprecated fallback (read second, with a one-line notice on stderr) so an existing .mcp.json keeps working through the cutover; they will be removed in a later milestone.",
+  "//boards": "PANDAN_BOARD_ID sets the default board (an integer id) for calls that omit board_id — it is preset to 1 (the seeded default board) so a wired agent doesn't accidentally target the wrong board. Call list_boards to find your board id and change 1 to it. Leave it empty to fall back to the API default (list = all your boards, create = your earliest).",
+  "//prod": "Set PANDAN_API_URL to https://simple-kanban-jian.fly.dev and PANDAN_TOKEN to your pandan_pat_... secret. (That origin keeps the old name on purpose — the Fly app rename is deferred, see ADR 0018 and KAN-424.)",
+  "//run-modes": "Two ways to run the server: (1) 'pandan' runs it from source with uv (needs a checkout + uv). (2) 'pandan-docker' runs the prebuilt image from ghcr.io (KAN-47) — no Python/uv/checkout, just Docker. Pick one; rename it to whatever you like — but see //tool-names first.",
   "mcpServers": {
-    "kanban": {
+    "pandan": {
       "command": "uv",
-      "args": ["run", "--directory", "./mcp", "python", "-m", "kanban_mcp"],
+      "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
-        "KANBAN_API_URL": "http://localhost:8000",
-        "KANBAN_TOKEN": "",
-        "KANBAN_BOARD_ID": "1"
+        "PANDAN_API_URL": "http://localhost:8000",
+        "PANDAN_TOKEN": "",
+        "PANDAN_BOARD_ID": "1"
       }
     },
-    "kanban-docker": {
-      "//": "Prebuilt OCI image (KAN-47). `-i` keeps stdin open for the stdio transport; `--rm` cleans up. The -e flags forward the values from the env block below into the container. Pin a version instead of :latest if you prefer (e.g. :0.1). Use host.docker.internal instead of localhost to reach a backend on the host.",
+    "pandan-docker": {
+      "//": "Prebuilt OCI image (KAN-47). `-i` keeps stdin open for the stdio transport; `--rm` cleans up. The -e flags forward the values from the env block below into the container. Pin a version instead of :latest if you prefer (e.g. :0.4). Use host.docker.internal instead of localhost to reach a backend on the host. The image path still carries the old name — retargeting it is KAN-437.",
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
-        "-e", "KANBAN_API_URL",
-        "-e", "KANBAN_TOKEN",
-        "-e", "KANBAN_BOARD_ID",
+        "-e", "PANDAN_API_URL",
+        "-e", "PANDAN_TOKEN",
+        "-e", "PANDAN_BOARD_ID",
         "ghcr.io/leejianrong/simple-kanban-mcp:latest"
       ],
       "env": {
-        "KANBAN_API_URL": "https://simple-kanban-jian.fly.dev",
-        "KANBAN_TOKEN": "",
-        "KANBAN_BOARD_ID": "1"
+        "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
+        "PANDAN_TOKEN": "",
+        "PANDAN_BOARD_ID": "1"
       }
     }
   }

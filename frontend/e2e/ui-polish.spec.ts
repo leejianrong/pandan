@@ -8,6 +8,8 @@ import {
   epicItem,
   login,
   openFreshBoard,
+  openView,
+  pickSelect,
   uniqueTitle,
 } from "./helpers";
 
@@ -52,7 +54,7 @@ test("card modal status select moves the card to another column", async ({ page 
   await cardInColumn(page, "Todo", title).locator(".card-title").click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel("Status").selectOption({ label: "Done" });
+  await pickSelect(page, dialog, "Status", "Done");
 
   // Move is server-authoritative (refetch): the card leaves Todo for Done.
   await expect(cardInColumn(page, "Done", title)).toBeVisible();
@@ -81,12 +83,12 @@ test("epics page groups Active vs Completed", async ({ page }) => {
 
   // Move the done epic's only story to Done via the card modal.
   await cardInColumn(page, "Todo", doneStory).locator(".card-title").click();
-  await page.getByRole("dialog").getByLabel("Status").selectOption({ label: "Done" });
+  await pickSelect(page, page.getByRole("dialog"), "Status", "Done");
   await expect(cardInColumn(page, "Done", doneStory)).toBeVisible();
   await page.keyboard.press("Escape");
 
   // Open the Epics view and assert the two grouped sections.
-  await page.getByRole("button", { name: "Epics", exact: true }).click();
+  await openView(page, "Epics");
   await expect(page.locator(".section-label", { hasText: "Active" })).toBeVisible();
   await expect(page.locator(".section-label", { hasText: "Completed" })).toBeVisible();
 
@@ -116,7 +118,7 @@ test("epic modal opens on click; edit name and save persists across reload", asy
 
   await expect(epicItem(page, renamed)).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "Epics", exact: true }).click();
+  await openView(page, "Epics");
   await expect(epicItem(page, renamed)).toBeVisible();
 });
 

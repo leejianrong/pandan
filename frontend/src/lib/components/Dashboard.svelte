@@ -16,6 +16,7 @@
     ChevronRight,
     Clock,
     ExternalLink,
+    Flame,
     Gauge,
     History,
     Pencil,
@@ -34,6 +35,7 @@
     inflightByAssignee,
     loadMoreDashboardActivity,
     refetchDashboard,
+    setActiveCycle,
     setActivityFilters,
     setDashboardWindow,
     WINDOW_OPTIONS,
@@ -90,6 +92,40 @@
   // with a label — never colour alone).
   const STALE_SECONDS = 2 * 24 * 3600;
 
+  // --- cycle burndown / velocity (V34) ---------------------------------------
+  const cycleMetrics = $derived(dashboardStore.cycleMetrics);
+  const cycleUnitLabel = $derived(cycleMetrics?.unit === "count" ? "cards" : "points");
+  // Committed vs completed use the metric's own unit so an unestimated cycle still
+  // reads (falls back to card counts). Committed is always the larger — scale to it.
+  const cycleCommitted = $derived(
+    cycleMetrics
+      ? cycleMetrics.unit === "count"
+        ? cycleMetrics.committed.count
+        : cycleMetrics.committed.points
+      : 0,
+  );
+  const cycleCompleted = $derived(
+    cycleMetrics
+      ? cycleMetrics.unit === "count"
+        ? cycleMetrics.completed.count
+        : cycleMetrics.completed.points
+      : 0,
+  );
+  const burndown = $derived(cycleMetrics?.burndown ?? []);
+  // Scale burndown bars to the committed total (day 0's ideal), so remaining reads
+  // as a fraction of the whole and the series visibly burns down.
+  const burndownMax = $derived(Math.max(1, ...burndown.map((p) => p.ideal), cycleCommitted));
+
+  function shortDay(iso: string): string {
+    // iso is YYYY-MM-DD (UTC calendar day) — render as e.g. "Jul 1" without a TZ shift.
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+  }
+
   // --- formatting helpers ----------------------------------------------------
   function fmtDuration(seconds: number | null | undefined): string {
     if (seconds == null) return "—";
@@ -119,6 +155,7 @@
     restored: RotateCcw,
     attention: AlertTriangle,
     resolved: Check,
+    purged: Flame,
   };
 
   function actorInitial(label: string | null): string {
@@ -413,6 +450,118 @@
         {/if}
       </div>
     </div>
+  </section>
+
+  <!-- Cycle burndown / velocity (V34): the selected iteration's committed-vs-
+       completed + a per-day burndown, matching the flow-metrics chart style. -->
+  <section class="panel metrics-panel" aria-labelledby="dash-cycle">
+    <header class="panel-head">
+      <TrendingUp size={15} aria-hidden="true" />
+      <h3 id="dash-cycle">Cycle burndown</h3>
+      {#if dashboardStore.cycles.length > 0}
+        <label class="cycle-select">
+          <span class="sr-only">Active cycle</span>
+          <select
+            class="rail-select"
+            aria-label="Active cycle"
+            value={dashboardStore.activeCycleId}
+            onchange={(e) =>
+              setActiveCycle(Number((e.currentTarget as HTMLSelectElement).value))}
+          >
+            {#each dashboardStore.cycles as c (c.id)}
+              <option value={c.id}>{c.name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+    </header>
+
+    {#if dashboardStore.cycles.length === 0}
+      <p class="empty">No cycles on this board yet — create one to track a burndown.</p>
+    {:else if !cycleMetrics}
+      <p class="empty">Select a cycle to see its burndown.</p>
+    {:else}
+      <div class="metrics-grid">
+        <!-- Committed vs completed: 2-series bars + the velocity headline. -->
+        <div class="chart-block">
+          <h4 class="chart-title">Committed vs completed ({cycleUnitLabel})</h4>
+          <div class="legend" aria-hidden="true">
+            <span class="legend-item"><i class="swatch committed"></i>Committed</span>
+            <span class="legend-item"><i class="swatch completed"></i>Completed</span>
+          </div>
+          <ul class="bar-rows">
+            <li class="bar-row">
+              <span class="bar-label">Committed</span>
+              <div class="bar-line">
+                <div
+                  class="bar committed"
+                  style="width: {pct(cycleCommitted, Math.max(1, cycleCommitted))}%"
+                  role="img"
+                  aria-label="Committed: {cycleCommitted} {cycleUnitLabel}"
+                ></div>
+                <span class="bar-val">{cycleCommitted}</span>
+              </div>
+            </li>
+            <li class="bar-row">
+              <span class="bar-label">Completed</span>
+              <div class="bar-line">
+                <div
+                  class="bar completed"
+                  style="width: {pct(cycleCompleted, Math.max(1, cycleCommitted))}%"
+                  role="img"
+                  aria-label="Completed: {cycleCompleted} {cycleUnitLabel}"
+                ></div>
+                <span class="bar-val">{cycleCompleted}</span>
+              </div>
+            </li>
+          </ul>
+          <dl class="stat-readout">
+            <div><dt>Velocity</dt><dd>{cycleMetrics.velocity} pts</dd></div>
+            <div>
+              <dt>Stories done</dt>
+              <dd>{cycleMetrics.completed.count} / {cycleMetrics.committed.count}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <!-- Burndown: per-day remaining (teal bar), with the ideal line marked as a
+             tick on the track — never colour alone (the tick carries a label). -->
+        <div class="chart-block">
+          <h4 class="chart-title">Burndown ({cycleUnitLabel} remaining)</h4>
+          {#if burndown.length === 0}
+            <p class="empty">This cycle has no start/end dates — set them for a burndown.</p>
+          {:else}
+            <div class="legend" aria-hidden="true">
+              <span class="legend-item"><i class="swatch committed"></i>Remaining</span>
+              <span class="legend-item"><i class="ideal-swatch"></i>Ideal</span>
+            </div>
+            <ul class="bar-rows">
+              {#each burndown as point (point.date)}
+                <li class="bar-row">
+                  <span class="bar-label mono">{shortDay(point.date)}</span>
+                  <div class="bar-line">
+                    <div class="bar-track">
+                      <div
+                        class="bar committed"
+                        style="width: {pct(point.remaining, burndownMax)}%"
+                        role="img"
+                        aria-label="{shortDay(point.date)}: {point.remaining} {cycleUnitLabel} remaining (ideal {point.ideal})"
+                      ></div>
+                      <span
+                        class="ideal-tick"
+                        style="left: {Math.min(100, (point.ideal / burndownMax) * 100)}%"
+                        aria-hidden="true"
+                      ></span>
+                    </div>
+                    <span class="bar-val">{point.remaining}</span>
+                  </div>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      </div>
+    {/if}
   </section>
 
   <!-- Recent activity: the deepened feed, filterable by actor + action. -->
@@ -829,6 +978,59 @@
   .bar.done {
     background: var(--agent);
   }
+  /* Cycle burndown series (V34): committed = accent (teal), completed = agent
+     (violet) — the same CVD-safe pair as WIP/done, so the dashboard reads as one
+     system. Identity is carried by the legend + direct value labels, not colour. */
+  .swatch.committed,
+  .bar.committed {
+    background: var(--accent);
+  }
+  .swatch.completed,
+  .bar.completed {
+    background: var(--agent);
+  }
+  /* Burndown ideal reference: a neutral tick on a recessive track (not a colour-
+     coded status), positioned at the ideal remaining for that day. */
+  .bar-track {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 9px;
+    background: var(--surface-2);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+  }
+  .bar-track .bar {
+    border-radius: 4px;
+  }
+  .ideal-tick {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--muted);
+    transform: translateX(-1px);
+  }
+  .ideal-swatch {
+    width: 2px;
+    height: 12px;
+    border-radius: 1px;
+    display: inline-block;
+    background: var(--muted);
+  }
+  .cycle-select {
+    margin-left: auto;
+  }
+  .cycle-select .rail-select {
+    font-size: 0.78rem;
+    padding: 0.25rem 1.6rem 0.25rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background-color: var(--card-bg);
+    color: var(--text);
+  }
   .bar-rows {
     list-style: none;
     margin: 0;
@@ -959,6 +1161,11 @@
   .feed-icon[data-action="resolved"] {
     background: color-mix(in srgb, var(--success) 16%, transparent);
     color: var(--success);
+  }
+  /* purged = permanent destruction: filled danger, more final than soft `deleted`. */
+  .feed-icon[data-action="purged"] {
+    background: var(--danger);
+    color: #fff;
   }
   .feed-icon[data-action="created"],
   .feed-icon[data-action="restored"] {

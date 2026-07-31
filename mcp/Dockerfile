@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 # Package the MCP server (V5, board-scoped in V10) as an OCI image (KAN-47) so an
 # agent can `docker run` it with no local Python/uv. The server is a thin stdio
-# adapter over the shared `kanban-client`, which lives in a SIBLING directory
-# (../kanban-client) and is a uv *path* dependency — so BOTH mcp/ and
-# kanban-client/ must be in the image and the docker BUILD CONTEXT must be the
+# adapter over the shared `pandan-client`, which lives in a SIBLING directory
+# (../pandan-client) and is a uv *path* dependency — so BOTH mcp/ and
+# pandan-client/ must be in the image and the docker BUILD CONTEXT must be the
 # REPO ROOT, not mcp/:
 #
 #     docker build -f mcp/Dockerfile -t kanban-mcp .     # run from the repo root
 #
-# The `../kanban-client` path source is resolved at build time by `uv sync`,
+# The `../pandan-client` path source is resolved at build time by `uv sync`,
 # exactly as it is for a local `uv sync` in mcp/.
 FROM python:3.12-slim AS runtime
 
@@ -23,12 +23,12 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/app/mcp/.venv/bin:$PATH"
 
 # The sibling path dep changes rarely — copy it first so its layer caches well.
-COPY kanban-client/ ./kanban-client/
+COPY pandan-client/ ./pandan-client/
 # Then the MCP project, and install against the lockfile (no dev group).
 COPY mcp/ ./mcp/
 WORKDIR /app/mcp
 RUN uv sync --frozen --no-dev
 
 # The MCP server speaks over stdio, so an agent launches it with `docker run -i`.
-# It needs only KANBAN_API_URL / KANBAN_TOKEN / KANBAN_BOARD_ID at runtime.
-ENTRYPOINT ["python", "-m", "kanban_mcp"]
+# It needs only PANDAN_API_URL / PANDAN_TOKEN / PANDAN_BOARD_ID at runtime.
+ENTRYPOINT ["python", "-m", "pandan_mcp"]

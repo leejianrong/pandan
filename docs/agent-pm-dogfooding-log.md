@@ -47,7 +47,7 @@ The short path to a working `kanban` MCP server in Claude Code:
      `docker run -i --rm -e KANBAN_API_URL -e KANBAN_TOKEN -e KANBAN_BOARD_ID
      ghcr.io/leejianrong/simple-kanban-mcp:latest`. (Requires a published release; if the image
      isn't available yet, use the source path below.)
-   - **From source with `uv`:** `uv run --directory ./mcp python -m kanban_mcp` from a checkout.
+   - **From source with `uv`:** `uv run --directory ./mcp python -m pandan_mcp` from a checkout.
 3. **Set env:** `KANBAN_API_URL` (`https://simple-kanban-jian.fly.dev` or a self-host origin),
    `KANBAN_TOKEN` (the PAT), and **`KANBAN_BOARD_ID`** (set it, or list/create tools span all your
    boards / land on the earliest). Restart Claude Code, then verify with the `warmup` then
@@ -216,7 +216,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
 - **Docs pin exact tool counts in prose** ("10 tools") in CLAUDE.md + mcp README/docstrings, so every
   parity slice silently staleness them. As PM, either budget a doc-sweep card or stop pinning counts.
 - **What works well:** the MCP/backend is genuinely pleasant to extend — API-first means feature cards
-  like KAN-10/11 are pure thin-adapter slices (add a `KanbanClient` method + a `@mcp.tool()`, mirror
+  like KAN-10/11 are pure thin-adapter slices (add a `PandanClient` method + a `@mcp.tool()`, mirror
   the `_clean`/`{"deleted": id}` conventions, bump the exact-match `EXPECTED_TOOLS` test). Sub-agents
   finish these in one pass. Lean into small, self-contained parity/tooling cards early.
 - **Worktree sub-agents start from your CURRENT local `main`, not `origin/main`.** After you merge a
@@ -244,8 +244,8 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   checkout parked on `main` and re-check `git branch --show-current` after each agent returns (both
   times it self-restored, but verify — don't assume).
 - **Shared-package pattern in this uv monorepo: path source, not a root workspace.** KAN-21 extracted
-  `kanban-client/` as a standalone uv package that `mcp` depends on via
-  `[tool.uv.sources] kanban-client = { path = "../kanban-client", editable = true }`. A repo-root uv
+  `pandan-client/` as a standalone uv package that `mcp` depends on via
+  `[tool.uv.sources] pandan-client = { path = "../pandan-client", editable = true }`. A repo-root uv
   *workspace* would be auto-discovered when running `uv` from `backend/` and force `backend` into the
   workspace, breaking its independent `--frozen` flow. Each package stays independently locked; the
   lockfile records a *relative* path so CI's fresh checkout stays portable. Any new shared package
@@ -272,11 +272,11 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   too. Observed: #45 (backend, KAN-29) Deploy `cancelled` when #46 merged right after, but #46's
   Deploy (`success`) shipped HEAD which included KAN-29 — prod-verified live. A `cancelled` Deploy
   superseded by a newer merge is a non-event; verify prod reflects HEAD rather than re-running it.
-- **`kanban-cli/`-only merges still trigger a real (harmless) Deploy.** The Deploy skip-filter treats
-  docs/.claude/.github/mcp/client as non-deployable but did NOT exclude `kanban-cli/`, so #46 (cli-only)
+- **`pandan-cli/`-only merges still trigger a real (harmless) Deploy.** The Deploy skip-filter treats
+  docs/.claude/.github/mcp/client as non-deployable but did NOT exclude `pandan-cli/`, so #46 (cli-only)
   ran a full ~46s Deploy though nothing in the Fly image changed. Harmless (no-op image), but an
   avoidable rollout window — worth extending the Deploy skip-filter to cli/mcp/client (none are in the
-  deployed artifact). Separate from CI's `changes` filter (which KAN-24 did extend to `kanban-cli/**`).
+  deployed artifact). Separate from CI's `changes` filter (which KAN-24 did extend to `pandan-cli/**`).
 - **Right-side of the "MCP restart" nuance, reconfirmed at scale.** KAN-29's new `blocked` FIELD showed
   up in `claim_card`/`list_cards` MCP output the same session, no restart (JSON passthrough). But
   KAN-31's new TOOLS (`add_dependency`/`remove_dependency`/`list_dependencies`) are NOT callable until
@@ -285,20 +285,20 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
 - **3-wide measured parallel works cleanly when disjointness is verified against the CODE first.**
   Extended the KAN-28+KAN-22 two-agent precedent to three concurrent Wave-1 agents (backend / mcp+client
   / cli) with zero conflicts, then serialized landing. The enabler was checking file sets in the source,
-  not the plan: KAN-23 (cli) does NOT touch `kanban-client/` even though KAN-31 does — the client's
+  not the plan: KAN-23 (cli) does NOT touch `pandan-client/` even though KAN-31 does — the client's
   board/epic methods already existed — so cli-vs-client were genuinely disjoint. Don't trust a
   "same-ish area" hunch; grep the actual imports/methods before declaring two cards parallel-safe.
 - **A monorepo path-source package installs cleanly over `git+…#subdirectory=`.** Contrary to the
-  assumption that the `../kanban-client` path dependency would break a git install,
-  `uv tool install "git+https://…/simple-kanban.git#subdirectory=kanban-cli"` resolves the sibling path
+  assumption that the `../pandan-client` path dependency would break a git install,
+  `uv tool install "git+https://…/simple-kanban.git#subdirectory=pandan-cli"` resolves the sibling path
   source from the same fetched clone. uv's monorepo resolution over git is more capable than expected —
   relevant to the distribution cards (KAN-46 binary / KAN-47 OCI image).
 - **CI is now the `changes` gate + 8 work jobs = 9 checks** (added `cli` in KAN-24). Only Lint/Unit/
   Integration/Frontend are branch-protection *required*; `cli`/`mcp`/`client`/`e2e` report green but
-  aren't individually required (per KAN-37). A gotcha this created: a `kanban-cli/`-only PR *before*
+  aren't individually required (per KAN-37). A gotcha this created: a `pandan-cli/`-only PR *before*
   KAN-24 (e.g. KAN-23's #46) wasn't mapped, so its heavy jobs pass-*skipped* — green CI there meant
   nothing; the sub-agent's local `ruff`+`pytest` was the real signal. KAN-24 closed that by mapping
-  `kanban-cli/**`, so its own #47 was the first PR where the `cli` job actually ran (8s, real work).
+  `pandan-cli/**`, so its own #47 was the first PR where the `cli` job actually ran (8s, real work).
 
 ## Session log (what's been run through this playbook)
 
@@ -306,19 +306,19 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   and KAN-11 (MCP read parity → PR #27, tools 14→16) both merged + `done`. Net: the MCP server now
   has full CRUD parity for cards, epics, and boards (16 tools) — the `delete_board` gap that
   triggered KAN-10 during dogfooding is closed.
-- **KAN-21 (Epic 6, kan CLI): shared `kanban_client` extracted** → PR #29, `done`. The httpx client
-  moved out of `mcp/` into a standalone `kanban-client/` uv package (path source, see gotcha above);
+- **KAN-21 (Epic 6, kan CLI): shared `pandan_client` extracted** → PR #29, `done`. The httpx client
+  moved out of `mcp/` into a standalone `pandan-client/` uv package (path source, see gotcha above);
   CI grew a 7th `client` job. Unblocks the CLI cards (KAN-22/23/24) and KAN-25.
 - **KAN-25 (Epic 7, cold-start): retry + generous timeout in the shared client** → PR #31, `done`.
   35s read / 5s connect timeout, 1s backoff, one retry — connect/handshake errors retried for all
   methods, `ReadTimeout` only for idempotent GET, never on 4xx/5xx (LWW → no double writes). Directly
   targets the cold-start failures logged above.
   - **Caveat: this does NOT fix cold starts for THIS session.** Claude Code loads the MCP server once
-    at session start, so its `kanban_client` is the pre-merge code until the user restarts the session
+    at session start, so its `pandan_client` is the pre-merge code until the user restarts the session
     (and re-`uv sync`s `mcp/`). The retry benefits *future* sessions + the future CLI. Keep warming by
     hand for the rest of this session. **KAN-27 (keep-alive cron) is the complementary server-side fix.**
 - **Known doc-drift to clean up (flagged by 2 sub-agents):** `CLAUDE.md`'s MCP section still says
-  "10 tools" (now 16) and references `mcp/kanban_mcp/api.py` (moved to `kanban-client/` in KAN-21).
+  "10 tools" (now 16) and references the MCP server's old `api.py` (moved to `pandan-client/` in KAN-21).
   Good PM hygiene: file it or fix it rather than let it rot.
 - **Backlog groomed from dogfooding.** The "board can't tell the whole story" friction (no
   dependency field; no PR-link/notes field; column = "an agent is on it" ≠ real work state) was turned
@@ -362,7 +362,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   - **`update_card` silently ignores `column`** — column changes go through `move_card` only. (Live
     proof of why KAN-38's `claim_card` exists.)
 - **KAN-28 + KAN-22 in PARALLEL (measured parallel):** two agents coded concurrently in worktrees
-  (backend deps model vs new `kanban-cli/` package — disjoint files, zero conflict), then **landed
+  (backend deps model vs new `pandan-cli/` package — disjoint files, zero conflict), then **landed
   serially**. Refinement to the "one at a time" rule: parallelize *implementation* freely when files
   don't overlap; **serialize the *landing*** (review + merge one PR at a time). **A card carrying a
   production migration lands ALONE and gets verified on prod** — after KAN-28 deployed, confirmed
@@ -398,11 +398,11 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   - **KAN-23** (#46, EPIC-6) — `kan board list/create` + `kan epic list/create/update/delete` as
     nested subcommand groups (client methods already existed; cli-only, disjoint from KAN-31).
   - **KAN-24** (#47, EPIC-6) — CLI README + `readme` pointer + `--help` polish + a CI `cli` job
-    mirroring `mcp`, and extended KAN-37's `changes` filter to map `kanban-cli/**`. CI now 9 checks.
+    mirroring `mcp`, and extended KAN-37's `changes` filter to map `pandan-cli/**`. CI now 9 checks.
 - **Two distribution cards filed** from a user design discussion (how to ship the CLI + MCP so end
   users need no toolchain): **KAN-46** (EPIC-6) — ship `kan` as a standalone PyInstaller `--onefile`
   binary via a per-OS CI release matrix → GitHub Releases (no Python needed); **KAN-47** (EPIC-5) —
-  publish the MCP server as an OCI image to **ghcr.io** (`docker run`, bundles `kanban-client` at build
+  publish the MCP server as an OCI image to **ghcr.io** (`docker run`, bundles `pandan-client` at build
   time). Rationale worth keeping: **GitHub Packages has NO native pip index** (it hosts npm / Container
   / Maven / Gradle / NuGet / RubyGems), so for our Python packages the GitHub-hosted options are a
   container image (ghcr.io) or loose files on Releases — not a `pip install`-by-name index. PyPI would
@@ -467,10 +467,10 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   vs frontend). All landed + prod-verified.
   - **KAN-46** (#54) — `kan` PyInstaller `--onefile` binary + tag-triggered `release-cli.yml` matrix.
     **KAN-47** (#55) — MCP server OCI image to ghcr.io (`mcp/Dockerfile` at REPO-ROOT context, bundling
-    `kanban-client`) + tag-triggered publish workflow. Both CI/packaging-only (no deploy). **Closed
+    `pandan-client`) + tag-triggered publish workflow. Both CI/packaging-only (no deploy). **Closed
     EPIC-6 (kan CLI).** Key gotchas the agent surfaced: PyInstaller must freeze a dedicated
     absolute-import entry file (`__main__.py`'s relative import breaks frozen); the mcp Docker build
-    context MUST be the repo root to COPY the sibling `kanban-client/`; publishing is tag-gated only
+    context MUST be the repo root to COPY the sibling `pandan-client/`; publishing is tag-gated only
     (no artifact on PR/merge) and the first ghcr push is PRIVATE until made public.
   - **NEW epic EPIC-16 "M4: UI/UX Polish"** (filed this session) + cards **KAN-65/66/67**, all done in
     ONE PR (#56): card detail modal (click-anywhere, edit-in-place, Status via move endpoint), epic
@@ -515,7 +515,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
     unversioned `/api/cards`) and added `docs/guides/agent-onboarding.md` (mint a PAT → wire MCP into
     Claude Code via the uv-from-source path → example agent workflows → CLI for CI → self-host →
     single-owner note). Docs-only; verified against source.
-  - **Docs-honesty catch worth reusing:** the sub-agent flagged that `mcp/README.md` + `kanban-cli/README.md`
+  - **Docs-honesty catch worth reusing:** the sub-agent flagged that `mcp/README.md` + `pandan-cli/README.md`
     already presented the ghcr image + a `curl …/releases/latest/download/…` binary as if they WORK
     TODAY (dead 404s until a release is cut). Since the release was deferred, I had it soften both to
     "available once a versioned release is published" in the SAME PR. Lesson: when writing onboarding
@@ -699,7 +699,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   - **The parallelism reality for this repo: cores are disjoint, adapters are not.** Two full-stack
     slices can always split their *substantive* work (e.g. `boards.py`+`ordering.py` vs
     `cards.py`+`models.py`), but they *always* collide on the thin shared adapters
-    (`kanban-cli/cli.py`, `mcp/server.py`, `kanban-client/client.py`), `schemas.py`, and the frontend
+    (`pandan-cli/cli.py`, `mcp/server.py`, `pandan-client/client.py`), `schemas.py`, and the frontend
     shell (`App.svelte`, `api.ts`). So "provably disjoint" is never literally true here — the working
     rule is: **land the first PR, then the second does a mechanical keep-both rebase** of the adapter
     files (V13-after-V12, V14-after-V17). Brief both agents to APPEND/localize adapter additions (new
@@ -740,7 +740,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   doesn't), so parallelism is migration-bound: the plan is Wave 1 parallel then KAN-260/251/252 solo,
   each starting only *after* the prior migration card merges (so it branches off a main that already
   has the prior migration → linear chain, never sibling heads). Wave 1 was the one clean disjoint
-  pair: KAN-261 is adapter-only (`kanban-client`/`mcp`/`cli`, no backend, no deploy) and KAN-239 is
+  pair: KAN-261 is adapter-only (`pandan-client`/`mcp`/`cli`, no backend, no deploy) and KAN-239 is
   backend-only (routers + migration), so zero shared files and only one migration in flight.
   - **The disjoint axis here is adapter-package vs backend, not just backend-vs-frontend.** KAN-261
     touched only the three thin client packages; KAN-239 only `backend/`. They never met — no rebase,
@@ -771,7 +771,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
     itself a clean backend+migration slice and did *not* patch one action into a map missing three
     (would be an incomplete fix). A small "Activity panel: complete the action icon/badge map
     (attention/resolved/purged)" frontend card is worth filing.
-  - **`kanban-cli/README.md` command table is stale** — documents only core CRUD, missing the M5
+  - **`pandan-cli/README.md` command table is stale** — documents only core CRUD, missing the M5
     verbs `next`/`needs-human`/`resolve`/`metrics`/`view` (KAN-261 added just its own `activity` row,
     in scope). Worth a docs card to backfill.
 - **M5 tail — Wave 2: KAN-260 (structured activity transitions, migration) solo: merged + `done`.**
@@ -829,7 +829,7 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   (`0021`) with an apply endpoint that seeds a plan in one call.
   - **The card's premise about existing batch-create was wrong, and the agent's correction was the
     right one.** The card assumed a backend batch-create endpoint existed (from KAN-40) to build on.
-    It doesn't — KAN-40's "batch create" is a **client-side fail-fast loop** in `KanbanClient.create_cards`
+    It doesn't — KAN-40's "batch create" is a **client-side fail-fast loop** in `PandanClient.create_cards`
     (loops `POST /cards`), explicitly non-atomic. The agent did not add a redundant public batch-create
     endpoint; instead it got atomic multi-card creation for free by extracting `_create_card_row`
     (flush-not-commit) and reusing it inside template-apply's single transaction. Lesson: "build on the
@@ -858,5 +858,580 @@ Dogfooding observations about driving this board as an agent PM. Seeded from the
   batch-create endpoint" → it's a client loop). Every agent caught it by grepping the code first and
   corrected the docs in-PR. The standing "trust the code over the card" brief is doing real work —
   keep briefing agents to verify the premise before implementing, and to fix the stale doc in the same
-  slice. Two frontend/docs follow-ups filed (Activity panel action-badge map; kanban-cli README verb
+  slice. Two frontend/docs follow-ups filed (Activity panel action-badge map; pandan-cli README verb
   table).
+- **Post-M5 cleanup batch — KAN-267/269/270 (‖) + KAN-268 & a discovered bug KAN-277 (‖): all merged
+  + `done`; turned 2 GitHub issues into cards first.** A housekeeping round: pruned stale branches (59
+  merged remote + 7 local; kept only `main` + the 3 open-PR branches — merged-vs-unmerged cleanly
+  separated in-use from stale), then converted the two open issues (#76 story-points, #77 CLI deps)
+  into cards KAN-269/KAN-270 (linked to EPIC-6, each with a GitHub-issue work-link), and cleared all
+  four backlog cards.
+  - **`gh issue view` / `gh pr edit` are broken by GitHub's classic-Projects GraphQL deprecation.**
+    Both error with `Projects (classic) is being deprecated … (repository.issue.projectCards)`. Use
+    the REST API instead: `gh api repos/OWNER/REPO/issues/N` to read an issue,
+    `gh api -X PATCH …/pulls/N -F body=@file` to edit a PR body. (The dogfooding log already flagged
+    the `gh pr edit` variant for KAN-14; it bites `gh issue view` too.)
+  - **The disjoint axis was frontend / backend-less-CLI: 3 of 4 cards lived in `pandan-cli/`.** Only
+    KAN-267 (frontend) was collision-free. KAN-269 (points) & KAN-270 (dep verbs) both edit `cli.py`;
+    KAN-268 (README) & KAN-270 both edit `README.md`. Ran 267‖269‖270 in Wave 1, landed 269 first, and
+    269/270 **git-auto-merged with no manual rebase** because each kept its edits localized (269 in the
+    render helpers ~L130, 270 appended subparsers/handlers ~L800+ and appended README rows). Briefing
+    "append, don't reflow; another slice is editing region X" is what makes concurrent same-file work
+    auto-merge. KAN-268 (README) ran in Wave 2 after 270 so its backfill didn't fight 270's new rows.
+  - **A card's stated root-cause can be wrong — verify before implementing (again).** KAN-269's issue
+    (#76) claimed the API returns an always-null `points` field. It doesn't — the API has ONLY
+    `story_points`; the reporter's `jq '{points}'` returned null for a MISSING KEY (jq fills absent
+    keys with null). The real gap was CLI-side: `_card_line` never displayed points and `--points`
+    didn't obviously map to `story_points`. Fix was CLI-only (`pts=N`), NOT an API change (adding a
+    `points` alias would've been the wrong direction). Brief agents with the corrected diagnosis when
+    you already know the issue misdiagnosed it — it stops them re-deriving or over-reaching.
+  - **Dogfooding found what unit tests structurally couldn't (KAN-277).** KAN-270's LIVE prod check
+    surfaced that `kan get`/`create`/`update`/`move` print `(no labels)` on real cards: `_humanize()`
+    checked `"labels" in result` (list_labels) BEFORE the single-card branch, and every real
+    `CardRead` carries `labels: []`. It also silently **masked KAN-269's just-shipped `pts=`** for
+    those commands (`kan list` was fine — different branch). The unit tests passed because the test
+    fixtures OMITTED `labels` — the exact shape difference that hid the bug. Lesson: **CLI/adapter
+    tests must use fixtures that match the REAL API response shape** (all keys the server actually
+    returns), and a live smoke against prod catches dispatch bugs a hand-built fixture never will. Fix
+    (KAN-277): guard the branch with `"labels" in result and "ticket_number" not in result`, and the
+    regression test now bakes `labels: []` into the single-card fixtures so the omission can't recur.
+  - **Fold a same-file follow-up into the open PR instead of a new card when it's the identical bug on
+    a sister component.** KAN-267's agent flagged that `Dashboard.svelte` had the same missing-`purged`
+    icon gap as `Activity.svelte`. Rather than file a card, I resumed the SAME agent to add the
+    one-line parity fix on the SAME PR (#148) — full fix, one review, no extra tracking. (Contrast:
+    KAN-277 got its OWN card because it's a distinct dispatch bug in different code, discovered after
+    269 had already merged.)
+  - **Land policy note: none of these four deployed except KAN-267 (frontend).** The `kan` CLI + docs
+    changes ship to users only via a `v*` release tag (distribution is tag-gated), so "merged + CI
+    green + live-checked from source" = `done`; a release tag is a separate, deliberate step. Prod-
+    verified KAN-267 by grepping the deployed bundle for `purged`/`data-action`; verified the CLI
+    fixes by running `kan` from the merged source against prod (`kan get 260` → card line with `pts=3`,
+    not `(no labels)`).
+- **Release v0.3.0 — cut the first tag since v0.2.3, shipping the whole M5 CLI surface + `kan
+  --version`.** `v0.2.3` turned out to point at c546358 (2026-07-14, PRE-M5), so every M5 CLI verb
+  (`dispatch`/`next`, `needs-human`/`resolve`, `metrics`, `activity`, `view`, `dep`/`link`/`comment`,
+  `batch-update`, `template`, labels, card-field flags, search) had accumulated undownloadable behind
+  the tag (cli.py +775 lines since v0.2.3). Bumped **minor → v0.3.0** (not another patch) to signal
+  the dozen-plus new commands.
+  - **The release is tag-driven; the in-code version strings were dead and stale.** `release-cli.yml`
+    fires on `push: tags: v*` and builds the binary from the code AT THE TAG — it never reads the
+    version from `pyproject`/`__init__`, which is why v0.2.1→v0.2.3 were all tagged while
+    `pyproject` sat at `0.2.0` and `__init__.__version__` at `0.1.0`. There was **no `kan --version`**,
+    so the only "version" a user could see was the GitHub release/tag name.
+  - **Added `kan --version`/`-v` mid-cut, so the binary can self-report.** User asked for it right
+    after the first tag push. Since the tag was seconds old and nothing was published yet, the clean
+    move was: **cancel the in-flight `release-cli.yml` run (`gh run cancel`), delete the unreleased tag
+    (`git push origin :refs/tags/v0.3.0` + `git tag -d`), land the `--version` PR, then re-tag on the
+    new HEAD.** Wired via argparse `action="version"` on the ROOT parser (`version=f"kan {__version__}"`,
+    reading a hardcoded `__version__`) — pure argparse, no `importlib.metadata`, because the
+    PyInstaller onefile has no reliable package metadata at runtime. Synced `__init__.__version__` +
+    `pyproject` to `0.3.0` so the frozen binary self-reports correctly. (Standing debt to consider: the
+    release should assert `__version__` matches the tag, or derive one from the other, so they can't
+    drift again — today it's a manual bump.)
+  - **`git push <tag>` is the reliable trigger** (not `gh release create`, whose API-created tag may
+    not fire `on: push: tags`). The workflow's `softprops/action-gh-release@v3` then created the
+    release and attached both assets. Shipped legs are `kan-linux-x86_64` (glibc-2.28 container, runs
+    on Ubuntu 20.04+/Debian 11+/RHEL 8+, KAN-81) and `kan-macos-arm64`; the Intel-mac leg stays
+    dropped (KAN-225, Rosetta/from-source/MCP-image for those users).
+  - **Verified the downloaded binary end-to-end, not just that it built.** `gh release download
+    v0.3.0 --pattern kan-linux-x86_64` → `kan --version` → `kan 0.3.0`; then functional proof against
+    prod that the FIXES are actually in the artifact: `kan get 260` → `KAN-260  done  …  pts=3` (not
+    `(no labels)`), `kan list` shows `pts=` per row, `kan dep/activity/comment --help` all present.
+    Building green ≠ shipped-and-working — download the real asset and run it.
+- **M6 planning + Wave 1a (hardening + CLI bugs): 3 agents ‖, all merged + `done`.** After a full
+  `kan` CLI exercise surfaced 4 real bugs (filed KAN-285…288), shaped M6 "Harden & Sharpen" (5 epics
+  EPIC-46…50, cards KAN-290…304; docs PR #156) and ran the first parallel wave. Land policy:
+  auto-merge on green, serialized landing.
+  - **The disjoint axis was subsystem, and `main.py` is the hardening chokepoint.** Wave 1a =
+    V27 rate-limiting (KAN-291: `main.py`+routers+new `ratelimit.py`) ‖ V30 DB resilience (KAN-294:
+    `db.py` only) ‖ CLI batch (KAN-285…288: `pandan-cli/` only) — three provably non-overlapping file
+    sets. Every M6 *middleware* card touches `backend/app/main.py`, so those must serialize; V27 owned
+    it this wave and V28/V29 were deferred to Wave 1b to rebase on V27's merged version.
+  - **Two Deploy `workflow_run` events fire per PR merge — poll the right one.** A merge triggers the
+    Deploy workflow twice: once from the *PR-branch* CI completion (gated out by the workflow's
+    `head_branch == 'main'` check → shows `completed/skipped`) and once from the *main-push* CI (the
+    real deploy). A naïve `gh run list … | head -1` grabs the skipped twin and falsely reports
+    "deployed/skipped". Select the run whose triggering CI was on `main` (or simply: wait for a deploy
+    run with `conclusion == success`, ignore `skipped`). Cost me one false "skip" read on V30.
+  - **`isolation: worktree` sandboxes Edit/Write but NOT Bash — all three agents hit it.** Each
+    agent's first `Edit` targeted the *shared*-checkout path (from the CLAUDE.md context) and was
+    correctly rejected (Edit is confined to the worktree); but two agents also ran `uv lock`/`uv sync`
+    via `cd …/backend` against the shared checkout before catching themselves. No harm (verified the
+    primary checkout `git status` clean after each returned), but the brief's "run all git/uv against
+    your worktree only" line is load-bearing — keep it, and re-verify the primary checkout is clean on
+    every agent return.
+  - **Adding a global middleware must not break the existing suite — ship it off by default.** V27's
+    limiter is gated behind `RATE_LIMIT_ENABLED` (unset = no-op), because the module-singleton app
+    shares one in-memory `limits` store across the whole pytest session, so a default-on limiter with
+    cumulative hits would trip existing tests. Off-by-default + a targeted test that injects a low
+    limit is the clean pattern; it also means the prod deploy is a no-op until the Fly secret is set.
+    (V30 followed the same "configurable, safe defaults" shape for `DB_*`.)
+  - **Two PRs editing CLAUDE.md's Configuration section did NOT conflict** — V30 added its `DB_*`
+    bullet after the `DATABASE_URL` paragraph, V27 its rate-limit bullet near the auth/E2E env vars, so
+    the edits were far enough apart that GitHub reported `MERGEABLE`. Adjacent-line edits still would
+    (the KAN-9/#10 lesson); non-adjacent same-section edits are fine.
+  - **Verify by the change's actual observable.** V30/V27 (DB timeouts / off-by-default limiter) can't
+    be seen externally, so prod-verify = readiness+liveness `ok` + an authenticated read served (proves
+    the new engine connect-args / installed middleware didn't regress serving). The CLI batch is
+    tag-gated (no deploy), so it was verified by running the CLI **from merged source** against prod
+    (`kan get KAN-250` by ticket, `--sort -priority` space form, human `template list`, `label
+    --color`) — not from the on-PATH v0.3.0 binary, which predates the fixes.
+  - **`kan` friction the CLI exercise surfaced (now fixed in KAN-285…288, PR #159):** every id-taking
+    command rejected the `KAN-`/`EPIC-` ticket it displays and demanded the numeric DB id; `--sort
+    -x` failed unless written `--sort=-x` (argparse eats the leading dash); `template list` dumped raw
+    JSON in human mode; `label create --color` was undocumented (color was positional). Also confirmed
+    the CLI has **no** purge/restore/trash, no `board delete`, and no comment delete — so smoke-test
+    cards soft-delete but their ticket numbers (KAN-278…284, 289) are permanently burned; called out,
+    not a bug.
+- **M6 Wave 1b + Wave 2 (hardening finish + Projects + Cycles): the migration-serialized spine, and CI
+  earning its keep.** Wave 1b landed the remaining hardening (V26 edge/fly.toml + a Cloudflare human
+  runbook; V28 payload caps + V29 report-only-CSP headers bundled since both touch `main.py`). Wave 2
+  shipped Projects (V31 fields + V32 rollup) and Cycles (V33 model + V34 burndown), all auto-merged on
+  green + prod-verified. **M6 must-haves complete**; EPIC-49/50 (palette, notifications) left as the
+  Nice-to-have tail by choice.
+  - **Two migrations can't be implemented in parallel — the alembic head serialises them.** V33's
+    `alembic revision --autogenerate` has to run off V31's *merged* head (0022) or it branches a second
+    head and alembic gets two heads. So the migration cards go strictly one-at-a-time (V31 merged →
+    then V33 starts), and land ALONE with prod-verify. The **derived** follow-ups (V32 rollup, V34
+    burndown — no migration) are what you parallelise: V32 ‖ V33, then V34 solo. Migration-alone is a
+    *landing* rule; the head-dependency is an even harder *implementation* rule.
+  - **Parallel edits to one shared file (`schemas.py`) stayed conflict-free by region discipline.**
+    V32 (EpicRead area) ‖ V33 (card `cycle_id` + a new Cycle section appended at EOF) — briefing each
+    "stay in your region, don't reflow the rest" made GitHub report MERGEABLE with zero manual rebase,
+    even landing them a migration apart. Same lesson as the CLI batch: localized appends auto-merge.
+  - **CI caught a real regression a narrow local test missed (V32).** The agent ran only its own new
+    `epic-rollup.spec.ts` locally, not the full e2e suite, and shipped a green-looking PR that broke an
+    *existing* ui-polish test. Root cause was a genuine bug: V32 made the Epics grouping read the
+    server-derived `epic.progress`, but the card-mutation helpers only `refetch()`-ed cards, never
+    `refetchEpics()` — so `epicStore` went stale after a move and the "Completed" group never rendered.
+    Fix: `addCard/editCard/removeCard/moveCard` now `refetch()` **and** `refetchEpics()` (server-
+    authoritative + fresh, mirroring the `refetchLabels` pattern). **Standing rule: a change to a shared
+    UI component must run the FULL `npm run e2e`, not just its new spec.** The green gate did its job.
+  - **`alembic --autogenerate` has phantom index churn in this repo — every migration must review +
+    strip it.** Both V31 and V33 saw autogen emit spurious drop/create_index for existing indexes
+    (`ix_card_search_vector`, `ix_card_comment_card_id`, the two `card_dependency` FK indexes,
+    `ix_card_link_card_id`) — pre-existing model-vs-DB drift, unrelated to the slice. Both hand-stripped
+    to only their real ops and re-ran autogen to confirm a clean diff. Filed a tech-debt card to
+    reconcile the model `Index()` declarations so future autogen is clean.
+  - **Worktree e2e can silently bind to the WRONG backend on fixed ports.** V34's full-suite e2e failed
+    all 31 at login because ports 8000/5173 were held by an *unrelated* local project and Playwright's
+    `reuseExistingServer` connected to it (test-login 404). The agent did NOT kill the user's app —
+    it retargeted the e2e stack to free ports, ran green, then reverted the config (verified the PR had
+    no stray `vite.config`/`playwright.config`). Worth a per-worktree port offset if this recurs.
+  - **Dogfooded the feature mid-build:** used V32's just-shipped epic progress rollup (`GET /epics/{id}`
+    → `progress {done,total,percent}`) to report M6 epic completion back to the user. The prod-verify of
+    each migration/derived slice was an API round-trip against the live app (set→read→clear for epic
+    fields; create→assign→filter→delete for cycles; endpoint-shape for metrics), not just "CI green".
+
+- **EPIC-49 (M6 "UI Enhancement & Design System") — Wave 1: U1 (KAN-316) dark-mode form controls.**
+  The visible white-in-dark-mode bug across all native controls (filter-row selects, card-modal
+  form, date picker, checkbox). Root cause was a *missing* declaration, not a wrong one: `color-scheme`
+  was set nowhere, so every native control fell back to the UA light default regardless of theme.
+  One-agent CSS-only slice, merged as PR #168 → `c13e494`, deployed + prod-verified. Learnings:
+  - **The fix is `color-scheme` on `:root`, in all THREE theme contexts.** This repo themes via
+    `:root`/`[data-theme="light"]` (light), `@media (prefers-color-scheme: dark) :root:not([data-theme="light"])`
+    (OS dark), and `:root[data-theme="dark"]` (forced dark). A `color-scheme` fix has to land in each
+    of the three, not just one — easy to under-fix by only touching the media query.
+  - **Use `background-color`, not the `background` shorthand, on `.rail-select`.** The custom select
+    carries its dropdown-caret as a `background-image`; the shorthand wipes it. The agent caught this
+    itself and used `background-color` to theme the control while preserving the caret. Worth a
+    reviewer's eye whenever an `appearance:none` control gets a themed background.
+  - **Headless Chromium lies about open native `<select>` popups.** An opened option menu screenshots
+    as *light* even when `color-scheme: dark` is correctly applied — the popup chrome ignores
+    `color-scheme` in headless. The reliable dark-mode signals are the *closed* control's rendering and
+    the computed `color-scheme`/`background-color` via `page.evaluate`, not an open-popup screenshot.
+    This exact artifact could produce a false "still broken" report on the very bug being fixed.
+  - **Prod-verify for a CSS card = grep the deployed hashed `/assets/index-*.css`** (not the JS bundle)
+    for the new declarations (`color-scheme:dark`/`light`, `.rail-select{…background-color:var(--card-bg)`).
+  - **e2e "screenshot" specs dirty the tree.** The activity/dashboard/trash specs overwrite tracked
+    baseline PNGs in the repo root on every run; the agent reverted them to keep the PR scoped to
+    `app.css`. Standing friction — those baseline artifacts arguably shouldn't be git-tracked.
+
+- **EPIC-49 Wave 2: U2 (KAN-317) design system — Bits UI primitives.** The foundation the rest of the
+  epic adopts. Ran **design-first, two phases, one agent** (PR #170 → `d17bed2`, deployed + verified):
+  Phase 1 the agent built a self-contained `mockup.html` (both themes side by side, real extracted
+  tokens); the PM screenshotted it, confirmed it matched the locked decisions (Bits UI headless,
+  Zinc/Teal tokens, NO Tailwind, Command primitive for V35), then resumed the SAME agent via
+  SendMessage for Phase 2. Learnings:
+  - **Design-first phases in one agent is the right shape for a big UI refactor.** The mockup locked
+    the visual spec (radius unified to 7px, teal focus ring, custom caret) and surfaced 4 real design
+    questions (native date input vs Bits DatePicker; radius unification; labels multi-select scope;
+    Command-wrapper-only vs ⌘K wiring) *before* any code was written — cheap to decide, expensive to
+    rework. Resuming the same agent kept full mockup context into implementation.
+  - **Full e2e was load-bearing (again).** The Bits `Select` trigger renders a `<button>`; the agent
+    gave the board switcher `aria-label="Board"`, which collided with the **"Board" view-nav tab**
+    under `getByRole("button", {name:"Board"})` and broke a *shared* helper (`createStoryUnder`) used
+    across epic specs. Only the FULL suite caught it (fixed by relabelling to "Switch board"). A
+    subset run would have shipped a broken `main`. This is the second consecutive shared-UI card where
+    the full-suite requirement paid for itself.
+  - **Bits UI e2e pattern:** a Bits `Select` is NOT a native `<select>`, so Playwright `selectOption`
+    and `toHaveValue`/`<option>` assertions don't work. The new `pickSelect()` helper (click combobox →
+    click `role=option`) + `toContainText` on the trigger is the pattern future specs (incl. V35) reuse.
+  - **`bits-ui@^2.18.1`** is the current Svelte-5-native line; its `@internationalized/date` peer is
+    only for Calendar/DatePicker (unused — we kept native `<input type=date>`), so it's not installed
+    and npm's peer warning is harmless. Commit BOTH `package.json` + `package-lock.json`.
+  - **Portalled popups justify keeping primitive CSS global.** Bits portals its Select/menu content to
+    `<body>`, so the `.ui-*` styles were appended as a token-only block in `app.css` (not per-component
+    scoped `<style>`), matching how `.rail-select`/`.board-switcher` already lived.
+  - **Scope discipline on a "standardize everything" card:** the agent replaced the genuinely ad-hoc
+    native `<select>`s but left CardModal's title/description/assignee inputs (already deliberately
+    styled in the KAN-65/66 modal redesign) native — forcing the wrapper there risked regressing a
+    tuned layout for zero visual change. Reasonable; U3 reworks the description into markdown anyway.
+
+- **EPIC-49 Wave 3: U3 ‖ U4 ‖ U5 — three slices in parallel, serialized landing.** Ran U3 (KAN-318
+  card-modal markdown, PR #174), U4 (KAN-319 top-nav reorg, PR #175), U5 (KAN-320 filter/sort clarity,
+  PR #173) concurrently, all off post-U2 `main`. U4 was **design-first (mockup → PM review → resume
+  same agent)** like U2; U3/U5 went straight to implementation. All merged + deployed + prod-verified.
+  Learnings:
+  - **Disjointness held because the target files were genuinely distinct**, verified by grepping actual
+    imports before launch — U3 = `CardModal.svelte` + `package.json` (its own new deps) + the `.desc-*`
+    section of `app.css`; U5 = `ViewSwitcher.svelte`'s **own scoped `<style>`** only; U4 = `App.svelte`
+    + new `SideNav.svelte` + `ui/DropdownMenu.svelte` + the **top-bar section** of `app.css`. `app.css`
+    is one 1700-line global sheet touched by two slices (U3, U4), but in far-apart sections
+    (`.desc-*` vs `.topbar`/`.board-tab`), so git auto-merged with zero conflicts. The trick was
+    briefing each agent on exactly which files/sections it owned and which to stay out of.
+  - **Launch UI-heavy design-first slices as mockup-only while the others implement.** U4's Phase 1
+    (mockup, no real code) ran concurrently with U3/U5's implementation — three agents, fully disjoint,
+    because a mockup-only agent writes nothing that can collide. Then resumed U4 for Phase 2 once its
+    mockup was approved. Kept the pipeline full without risking a merge conflict.
+  - **The last parallel PR to land needs an update-branch + full-suite re-CI even when GitHub says
+    CLEAN.** This repo's protection doesn't force "up to date", so U4 (#175) showed `MERGEABLE` on a CI
+    run that had **never executed U3's new `card-markdown.spec.ts`** (U4 branched before U3 merged). Since
+    U4 rewires how *every* secondary view is reached (drawer nav), a spec added by a sibling slice could
+    have broken semantically with no textual conflict. `gh pr update-branch` merged current `main` in and
+    forced the **combined** full suite (U3+U5+U4) to re-run green before merge — the documented
+    serialized-landing safeguard, worth doing on the tail PR of any parallel batch that changes shared
+    navigation/behavior. (Here it was provably safe — `card-markdown.spec.ts` is Board-only — but "prove
+    it green on the combined tree" beats "reason about why it's probably fine".)
+  - **`isolation: worktree` does NOT sandbox Bash — an agent's muscle-memory `cd .../frontend` hit the
+    PARENT checkout.** U3 ran `npm install` in the primary checkout by reflex; the Edit-tool worktree
+    guard caught it before any source write, and the agent reverted the parent's `package.json`/lock. The
+    PM re-verified the primary tree was clean (`git status` + `git diff` on the lockfiles) after the agent
+    returned. Mitigation applied: briefs now name the exact worktree `frontend/` path. Always re-check the
+    primary checkout is clean after each worktree agent.
+  - **U3 XSS handling is the reference pattern for `{@html}` user text:** `marked.parse` → `DOMPurify.sanitize`
+    with a narrow `ALLOWED_TAGS`/`ALLOWED_ATTR`, `ALLOWED_URI_REGEXP` locking link schemes to
+    http(s)/mailto/#, and an `afterSanitizeAttributes` hook forcing `rel="noopener noreferrer"`. The e2e
+    proves it by injecting `<script>`/`<img onerror>` and asserting they're stripped + `window.__pwned`
+    is undefined. Stays clean under V29's report-only CSP (rendered DOM only, no inline handlers).
+  - **Prod-verify a frontend card by grepping the deployed hashed `/assets/index-*.js`** for a distinctive
+    NEW string per slice: `group-label`/`Filter cards` (U5), `No comments yet`/`markdown-body`/`dompurify`
+    (U3), `drawer-scrim`/`Account menu`/`Account settings are coming soon` (U4).
+
+- **EPIC-49 Wave 4: V35 (⌘K palette) → V36 (keyboard shortcuts + help) — serialized, and EPIC-49 DONE.**
+  Ran V35 (KAN-299, PR #177) then V36 (KAN-300, PR #178) **serially, not in parallel**, because both add
+  a global `<svelte:window onkeydown>` handler to the same area (App.svelte / Board.svelte) — conceptually
+  coupled (V36's help overlay must list V35's ⌘K) and touching overlapping files. Both merged + deployed +
+  prod-verified. **All 7 EPIC-49 cards (U1–U5, V35, V36) shipped; EPIC-50 notifications stays deferred.**
+  Learnings:
+  - **A slice whose design was already locked upstream skips the mockup phase.** V35's palette visuals were
+    approved back in U2's mockup (the Command panel), and `ui/Command.svelte` shipped styled-but-unmounted
+    for exactly this — so V35 went straight to implementation (wiring the registry + Cmd-K + overlay). The
+    agent confirmed the primitive was "genuinely drop-in per its declarative `groups` API; the only real
+    work was the registry + overlay/keybind." Building the reusable primitive one slice early (U2) paid off.
+  - **Two global keydown handlers coexist cleanly by owning disjoint key sets.** App.svelte's ⌘K handler
+    fires only on the Cmd/Ctrl-`K` chord; V36's board handler bails on the FIRST line for any
+    Cmd/Ctrl/Alt chord. Neither clobbers the other. The pattern to repeat: chord-shortcuts and
+    single-key-shortcuts live in separate handlers that each early-return on the other's trigger shape.
+  - **The anti-typing-hijack guard is the load-bearing correctness property of a single-key-shortcut
+    feature** — a regression breaks typing in every form. V36's guard early-returns when: a Cmd/Ctrl/Alt
+    modifier is present; the target is `INPUT`/`TEXTAREA`/`SELECT`/`isContentEditable`/closest
+    `[contenteditable]`; OR any overlay is open (`.modal-backdrop`, Bits UI floating wrapper, `[role=listbox]`).
+    Prove it with an e2e that **types the shortcut letters into a field** (`jklheonc`) and asserts they land
+    as text, not navigation — not just that the happy-path shortcuts work.
+  - **Bits UI focus quirk (V35):** selecting a Command item by MOUSE moves focus to the `role=application`
+    root; with `shouldFilter=false` (a free-text sub-mode, e.g. typing a new card title) root-level
+    keystrokes aren't routed to the search value, so typed text silently dropped. Fix = refocus the input
+    on sub-mode entry. Keyboard flow (arrow/Enter) never lost focus; only mouse-select did.
+  - **`reuseExistingServer: !CI` in `playwright.config.ts` is a multi-project-machine trap.** Locally it
+    silently reuses whatever holds :8000/:5173 — here an unrelated app — so worktree e2e binds to the wrong
+    backend (login 404s). Both V35 and V36 worked around it by retargeting to free ports + a per-worktree
+    Postgres and reverting the config before commit. **Standing tech-debt: make the e2e port/API-origin
+    env-overridable** so worktree runs need zero source edits (it currently requires editing 3 files:
+    vite config, playwright config, `helpers.ts` `API_ORIGIN`). This recurred across the whole epic.
+  - **Programmatic `.focus()` needs a visible ring of its own.** Browsers don't reliably paint
+    `:focus-visible` for a `.focus()` call, so V36 added a persistent teal `.kbd-focused` class to mark the
+    active card during keyboard nav — otherwise the "where am I" state is invisible.
+
+- **EPIC-49 follow-up: KAN-392 — expose the shortcuts help via a visible avatar-menu entry (PR #180).**
+  Prompted by a human (on Windows) asking how to try the shortcuts: V36's help overlay was reachable
+  ONLY by pressing `?` — a chicken-and-egg discoverability dead-end (you can't discover the `?` help
+  without knowing `?`). Fix (user-approved placement): a "Keyboard shortcuts" item (⌨ icon + teal `?`
+  hint chip) in U4's avatar `DropdownMenu`, opening the same `kbd.helpOpen` overlay. Learnings:
+  - **A keyboard-only entry point to a keyboard-help overlay is not discoverable** — always pair a
+    keyboard shortcut with a visible affordance for the same action. General UX rule, not specific to
+    this app.
+  - **The overlay was mounted inside `Board.svelte`, so a global trigger needed the mount moved to
+    `App.svelte`.** Triggering `kbd.helpOpen = true` from the always-visible avatar menu while on a
+    non-board view (Epics/Dashboard/…) flipped the flag but rendered nothing. Moving the
+    `{#if kbd.helpOpen}<ShortcutsHelp/>` mount up to `App.svelte` (and removing it from `Board.svelte`,
+    NOT leaving it in both — that double-renders on the board) made it work from any view; the board
+    `?` handler still opens it since it sets the same shared rune. The e2e asserts `toHaveCount(1)` for
+    the dialog to lock in "no double-render".
+  - **The help overlay is OS-aware:** it labels the palette chord `⌘K` on macOS and `Ctrl-K` elsewhere
+    (`/mac/i.test(navigator.platform)`), so Windows/Linux users see the right modifier.
+
+---
+
+## Milestone 7 — V40: the `simple-kanban` → `pandan` rebrand (KAN-423, PRs #197 + #200, v0.4.0)
+
+The first slice of M7, driven PM-style with one sub-agent in a worktree across two sequential PRs,
+then released as **v0.4.0** and re-verified using the *released* artifact rather than the source tree.
+Full decision record in [ADR 0018](adr/0018-pandan-rebrand.md).
+
+### Process learnings
+
+- **An ADR asserted a property the code never had, and "verified by inspection" made it sound like
+  evidence.** ADR 0018 claimed the PAT resolver had "no `startswith` guard anywhere", so flipping
+  `TOKEN_PREFIX` would be safe for existing tokens. The guard is at `backend/app/authz.py:85` and
+  would have `401`'d **every** already-issued `kanban_pat_…` token — the exact forced rotation the ADR
+  promised to avoid. The author had grepped the *literal* `kanban_pat` and `TOKEN_PREFIX` only within
+  `tokens.py`; a guard in another module referencing the constant was invisible to both greps.
+  **Rule adopted: a claim about code cites the `file:line` it inspected.** That mechanically forces a
+  repo-wide grep for the *symbol* instead of a scan of whichever file you happened to open. This is
+  the usual doc-drift failure mode inverted — not docs lagging code, but a doc asserting a code
+  property nobody ever checked.
+- **The sub-agent was briefed to STOP rather than patch if it found such a guard, and that paid off.**
+  It reported the contradiction instead of silently "fixing" the ADR's intent, which kept the decision
+  with the PM. Worth briefing explicitly on any slice where a doc makes a safety claim.
+- **Mutation-test a fix whose whole purpose is "don't break existing users."** The agent reverted the
+  repaired guard, confirmed the legacy-token test *failed*, then restored it. A passing test proves
+  nothing about a compatibility guarantee unless you've watched it fail.
+- **Split a rename by how each half is VERIFIED, not by size.** The slice note said "one PR"; the PM
+  overrode it. Structural (dirs, packaging, CI path filters, locks, image build) is provable *by CI*;
+  semantic (brand strings, env vars, prefixes) is only provable *by reading*. Mixed, the second half
+  drowns in ~700 lines of the first. Recorded as an amendment in ADR 0018.
+- **`dorny/paths-filter` is the highest-risk edit in any directory rename.** A stale filter makes CI
+  jobs report **skipped**, not failed — a broken package looks green. Demand positive evidence: for a
+  PR touching all three packages, the `CLI`/`client`/`MCP` jobs must each show the `Skip (…)` step
+  **skipped** and ruff+pytest **success**. "All checks green" alone does not distinguish the two.
+- **Ticket numbers are globally sequenced across ALL boards, not per board.** Filing four cards in a
+  row produced KAN-435, 437, 439, 442 — 436/438/440/441 went to other boards on the same instance.
+  Don't assume contiguity within a board, and don't guess an id when adding a dependency (`kan dep add`
+  rejects a cross-board blocker with `422: blocker must be on the same board`, which is how this was
+  discovered).
+
+### Rename-specific traps
+
+- **Longest-first replacement, or prefix overlap bites.** `kanban_client` contains `kanban_cli` as a
+  prefix, so a naive `kanban_cli→pandan_cli` sed happens to be correct *by coincidence*. The real
+  casualty was `simple-kanban-cli` → `simple-pandan-cli`, which slipped through twice (a dist name
+  caught in PR 1 review, then two `uv tool uninstall` strings in a README caught in PR 2). Replace
+  longest-first and re-read every `name =` afterwards.
+- **Decide up front what a rename must NOT touch, and comment it in the code.** V40's non-goals:
+  the `KAN-`/`EPIC-` ticket prefixes (immutable sequences — renaming splits the board's own history),
+  the `kanbanauth` cookie / `X-Kanban-Event` header / `kanban.*` loggers / `kanban.theme` localStorage
+  keys (each logs users out, breaks a consumer, or resets local state), the `kanban:kanban@…/kanban`
+  local Postgres creds (breaks every existing dev volume), and the **CI job display names** (branch
+  protection matches required checks against them — renaming makes required checks unresolvable, so
+  it's an ops step, never a PR).
+- **Leave dated records factually intact.** `docs/milestone-2…6/**`, UAT files, the blog, and
+  `REQS.md`/`FRAME.md`'s verbatim quotes of the original ask keep saying `simple-kanban`, because
+  rewriting them would make them lie about *when* the name changed — same reasoning as keeping `KAN-`.
+  *Path* references still get updated (a path must be accurate to be useful); *brand* references in a
+  dated record do not. This distinction is worth stating explicitly or a future sweep will "fix" them.
+- **A deprecated env fallback is cheap insurance during a rename.** `PANDAN_*` is read first, `KANBAN_*`
+  second with a one-line notice on **stderr** (never stdout — that's the machine-readable channel, and
+  for the MCP server it's the JSON-RPC transport). Precedence is *per value*, so a half-migrated
+  environment resolves correctly instead of failing confusingly.
+
+### Release + distribution learnings
+
+- **`[project.scripts]` aliases do not survive PyInstaller.** ADR 0018 promised `pandan` *and* a `pdn`
+  alias; `pyproject.toml` declares both. But `--onefile` produces exactly ONE executable, so anyone
+  using the documented primary install path (download the release asset onto `$PATH`) gets `pandan` and
+  no `pdn`. The alias only exists for `uv tool install`. Filed as **KAN-442**. General lesson: a
+  console-script alias is an *install-method-dependent* feature — verify it on the install path your
+  docs lead with, not the one your tests use.
+- **During a CLI rename, symlink the old name at the new binary instead of deleting or keeping it.**
+  `~/.local/bin/kan` was a stale 0.3.0 build; replacing it with a symlink to `pandan` preserves muscle
+  memory *and* eliminates the staleness, which deleting (breaks habits) and leaving it (the original
+  bug) both fail to do. `pandan`, `pdn` and `kan` now all report `pandan 0.4.0`.
+- **Verify a release by driving the board with the downloaded asset**, not the source tree. v0.4.0 was
+  confirmed by running `pandan warmup` / `board list` / `get KAN-423` / `label create --color` from
+  `~/.local/bin/pandan` — which also proved the two fixes that shipped *after* v0.3.0 and were never
+  released (KAN-285 ticket-refs-as-ids, KAN-288 `label --color`) are finally in a downloadable build.
+  Those two being unreleased for ten days is what caused two false bug reports; root cause carded as
+  **KAN-435**.
+- **The ghcr image path was deliberately left as `simple-kanban-mcp`.** Renaming it creates a *new*
+  package whose first push is **private** until a manual GitHub web-UI visibility flip, so it's folded
+  into **KAN-437** with the other in-place identity renames rather than blocking the release.
+
+### Incidental findings worth carding
+
+- **KAN-440** — `scripts/git-hooks/pre-push` has no `pandan-cli/` block, so CLI-only slices push with
+  no local signal even though CI has a dedicated `CLI` job. Matters immediately: nearly all of M7's
+  Wave 2 is CLI-only.
+- **A non-CI e2e run rewrites six tracked repo-root PNGs** (`dashboard.spec.ts` writes `../` copies
+  when `!CI`), so *any* local e2e run dirties the tree and reads as an accidental commit. Here it was
+  desirable — the baselines now show *Pandan* — but the coupling is a trap; writing to a gitignored
+  path and copying deliberately would be cleaner.
+- **`frontend/e2e/card-markdown.spec.ts` hardcodes a dead agent scratchpad path** from a previous
+  session, which exists on no other machine and will surface in every future leftover grep.
+- **`make worktree-e2e` fails on a missing Chromium** with 43 identical launch errors — a false red
+  that reads as a code failure until you read one line. `npx playwright install chromium` fixes it;
+  CLAUDE.md documents the one-time install for `npm run e2e` but not for the worktree target, which is
+  exactly where a fresh tree hits it.
+
+### M7 Wave 2, stage 3 — KAN-434 + KAN-435 run in parallel (PRs #202, #203, v0.5.0)
+
+First genuinely-parallel pair of M7: an envelope-documentation card and the release-discipline card,
+two agents in separate worktrees at once.
+
+- **"Two cards, disjoint files" needed checking, and failed the first check.** KAN-435 edits
+  `cli.py`'s `--version` action (~line 1077); KAN-434's `--json` help-text fix sits at ~line 1086 —
+  **nine lines apart in the same parser block**, a guaranteed same-hunk conflict. Fix was a **scope
+  fence recorded on both cards**: ownership split by file *and by README section*, with KAN-434's
+  one-line help change **delegated into KAN-435's PR** because that agent was already editing those
+  exact lines. Parallelism survived; the conflict never happened. Lesson: check adjacency inside
+  shared files, not just the file list — and when two cards genuinely need the same ten lines, move
+  the line, not the card.
+- **Write the scope fence to the board, not just to the agent.** Both cards carry a comment
+  explaining why one card's change ships in the other's PR. Without it the board looks like KAN-434
+  didn't do its job.
+- **A card can be "done" in the repo and not done in reality.** KAN-434's deliverable spanned
+  `pandan-cli/README.md` *and* the `pandan` skill — and the skill lives **outside the repo**
+  (`~/.claude/skills/pandan/`), so it can't ride a PR. Split that explicitly: the agent did the
+  README, the PM did the skill, and the card only closed once both landed.
+
+**Verification learnings**
+
+- **The `--json` envelope is CLIENT-side, which nobody had written down.** A raw `GET /api/v1/cards`
+  returns a **bare array**; `pandan_client/client.py` wraps it (`{"cards": …}` at `:272`,
+  `{"boards": …}` at `:156`, `{"epics": …}` at `:281`) and lifts `next_cursor` off the
+  `X-Next-Cursor` header, and `_emit` prints the client result verbatim. So the envelope is the
+  *shared client's* per-method return contract — which is why the shape differs per verb, and why the
+  MCP server returns identical shapes. Guessing that table would have produced a documented lie.
+- **Make the agent *execute* the doc examples, not eyeball them.** KAN-434 ran every verb against a
+  throwaway worktree Postgres and ran all four `jq` one-liners verbatim; the PM then re-spot-checked
+  six rows against **prod** with the released binary. A doc table is a claim about behaviour and
+  deserves the same evidence bar as a test.
+- **Demand positive evidence from CI, again.** KAN-435's agent checked the `CLI (lint + tests)` job
+  log to confirm the new `CLI version bump` step *ran* and printed its decision, rather than trusting
+  "all green" — the same discipline V40 needed for `paths-filter`. And note the filter list is now
+  load-bearing in a *second* way: `cli_code`/`cli_version` encode a **policy**, so a bad edit there
+  could silently disable the bump rule. Mitigation is the step logging its decision out loud.
+- **Mutation-test the guard, not just the feature.** The bump guard was exercised against synthetic
+  commits (behavioural diff without a bump → fail; docs-only → pass). Testing a **pre-push hook** is
+  awkward, though: switching branches swaps the hook itself, so it has to be extracted with
+  `git show <branch>:scripts/git-hooks/pre-push`. Also the hook's diff base is `origin/main…HEAD` for
+  the whole push range, so a branch that bumps in *any* commit passes — correct for a push, but it
+  means the guard can't be tested from a branch that already contains the bump.
+
+**Two of the PM's own M7 specs were wrong, and verification caught both**
+
+- **Exit codes (KAN-426 / V43).** The write-up said "0/1/2, already correct". The CLI actually has
+  **six** codes (`0`/`1`/`2`/`3`=401/`4`=403/`5`=404) — richer than AXI principle 6 asks for. Worse,
+  verifying it surfaced a **real inconsistency**: `pandan get 999999` (numeric, 404s server-side)
+  exits **5**, while `pandan get KAN-999999` (ticket ref, resolved client-side) exits **1**. Same
+  logical failure, different code depending on the *identifier form* — which defeats the purpose of
+  exit codes for an agent branching on them. Card repointed at "document and pin the existing scheme,
+  and make ref-resolution failure return 5", 3 → 5 points. The `403 → 4` row is flagged **unverified**
+  (no board exists that isn't ours), rather than asserted.
+- **Truncation (KAN-428 / V45)** had already been re-framed for the same reason in the V40 pass.
+
+The pattern across both: **a spec written from a read of the code is a hypothesis.** Every M7 slice
+whose spec asserted current behaviour has now had to be corrected on contact. Cheapest fix is the rule
+already adopted for ADRs — cite the `file:line`, which forces the grep.
+
+**Release/provenance learnings (v0.5.0)**
+
+- **Provenance belongs in the artifact, and the release must refuse to ship without it.**
+  `pandan --version` now prints `pandan 0.5.0 (5da9ace)` for a release and an explicit
+  `(source checkout, not a released build)` otherwise. The commit is stamped into a **generated,
+  git-ignored** module before PyInstaller freezes, with a unit test asserting `git ls-files` never
+  tracks it — a committed stamp would make every source checkout claim to be a release. And
+  `release-cli.yml`'s smoke test **fails the release** if the built asset's `--version` lacks the
+  release commit, so provenance can't silently regress.
+- **`git describe` lost to a plain short sha**: in the manylinux release container tag availability is
+  uncertain, while `$GITHUB_SHA` is always set and needs no `git` binary. The tag is already in the
+  version number, so `describe` added risk without information.
+- **A local build reporting `<sha>-dirty` is the feature, not a bug** — a build from uncommitted code
+  is exactly what the stamp exists to expose. Don't "fix" the suffix away.
+- **A version bump here is three files plus the lock** (`__init__.py`, `pyproject.toml`, `uv.lock`).
+  A single source of truth via `importlib.metadata` isn't available because a PyInstaller onefile has
+  no reliable package metadata — hence the duplication, and hence the unit test asserting the two
+  version strings agree (a half-bump has happened before).
+- **The container has none of this** (`:latest` is as unidentifiable as the old `kan` binary) — filed
+  as **KAN-452**; the container-native answer is OCI `image.revision` labels + digest pinning, not a
+  `--version` string.
+- **`[project.scripts]` aliases still don't survive PyInstaller** (KAN-442 open). Locally, `pandan`,
+  `pdn` and `kan` are all symlinks to the one released binary and report the same stamped version.
+
+**Smaller finds**
+
+- `pandan-cli/README.md`'s command table under-reports the CLI — the `notify` and `cycle` verb groups
+  are absent (**KAN-451**). Third doc/CLI drift of this class (KAN-35, KAN-433), so the card asks for
+  a verb-by-verb audit against `--help`, not another spot-fix.
+- **A `delete` verb without `--yes` exits 2 with empty stdout**, which reads as "returned nothing"
+  rather than "usage error" during a scripted sweep. Not a bug; a trap for automation.
+- **Agents in a worktree may hit `No anonymous write access` on `git push`** — the VS Code credential
+  socket isn't reachable from a sub-agent shell. `git -c credential.helper='!gh auth git-credential'
+  push` works; now documented in CLAUDE.md.
+
+### M7 Wave 2, stage 4 — KAN-425 + KAN-426 paired (PRs #205, #207, v0.6.0 → v0.7.0)
+
+Two slices, **one agent, two sequential PRs with a PM gate between them** — chosen because KAN-425's
+regression tests cover the identifier-resolution path KAN-426 then had to repair. Splitting them
+across agents would have meant two passes over `_parse_id_or_ticket`.
+
+**The pattern that finally became undeniable: a spec written from a read of the code is a hypothesis.**
+Four of the PM's M7 spec claims have now been falsified on contact, all in the same AXI audit:
+
+| Claimed | Actual |
+|---|---|
+| "no `startswith` guard in the PAT resolver" | one at `authz.py:85`; a prefix flip would have 401'd every token |
+| "the CLI prints identifiers it won't accept" | fixed ten days earlier by KAN-285 — the PM was on a stale binary |
+| "exit codes are 0/1/2, already correct" | a **six**-code scheme (`0/1/2/3=401/4=403/5=404`) |
+| "`login` prompts unconditionally" | never true — `getpass` was always behind `sys.stdin.isatty()` |
+
+Three of the four came from one row of one table. The mitigations now in force: **cite the `file:line`
+you verified at**, and **audit the source, never a binary on `$PATH`**. Worth noting the six-code scheme
+was *already documented correctly* in the `pandan` skill — the truth was written down; the audit just
+didn't look there. **When auditing, read the artefacts that describe the thing, not only the thing.**
+
+**Verification learnings**
+
+- **"Unverified" is a valid state to ship a spec in, and it paid off.** The PM flagged the `403 → 4`
+  row as unverified rather than asserting it (a probe with `--board 1` returned 5). The agent resolved
+  it properly: prod board **11** exists but isn't ours → `403` → exit **4**, while boards 1/2/3/4/12/14
+  → `404` → 5 — so the original probe had simply picked a board that doesn't exist. Policy confirmed at
+  `backend/app/authz.py:194-205`. Flagging the gap is what got it closed; asserting it would have
+  shipped a documented guess.
+- **Fix the class in the resolver, not the instances at the call sites.** The exit-code inconsistency
+  (`get 999999` → 5 but `get KAN-999999` → 1) was repaired inside `_resolve_card_id`/`_resolve_epic_id`,
+  so it covers **every** ref-taking verb including `dep --blocked-by` — not just the verbs someone
+  thought to test.
+- **Fix the text that misled you, not just the code.** `list --help` carried a bare `Fields:` line that
+  was `--sort`'s vocabulary and was the direct cause of the PM misreporting `--fields` as existing. It
+  became `Sort keys:` **with a test asserting the old wording is gone**. Closing the door behind a bug
+  is worth more than the bug fix.
+- **Named error codes beat numeric ones at the raise site.** One add-only `ERROR_CODES` table maps 14
+  names → exit numbers, so a raise site picks a *meaning* and never a number; 24 generic `ConfigError`
+  sites were converted. The 1-vs-2 rule (*argparse rejected argv → 2; the CLI rejected a runtime value
+  → 1*) lives in the table's comments, where the next person raising an error will actually read it.
+
+**Traps**
+
+- **`git checkout -- <file>` during a mutation test nearly destroyed a whole implementation.** It
+  restores from the **index**, and unstaged work never entered the object database, so no reflog or
+  `git fsck` recovers it. Survived only on a scratch copy. Now a documented rule in `CLAUDE.md` and in
+  the `dev-playbook` skill (*Testing and correctness* §5): commit or `git stash push -- <file>` first,
+  edit a copy, or `git apply` the mutation and `git apply -R` to reverse exactly it. The second PR
+  mutation-tested both halves *after committing* — reverting the exit-5 fix failed 16 tests, sending
+  errors back to stderr failed 50.
+- **Bulk-editing Python by regex dropped a trailing comma in six call sites.** Ruff caught it, but the
+  sequencing lesson stands: a regex sweep over source needs a syntax/lint pass as its own explicit step.
+- **The harness's worktree guard refuses shell complexity** — `for` loops with pipelines, heredocs
+  followed by `&&`, `VAR=… cmd` env injection, and `$( )` combined with redirects. The reliable pattern
+  is one plain command per call, or write a script to the scratchpad first. This has now cost time in
+  three consecutive slices; brief agents on it up front.
+- **`uv run` in a worktree prints a `VIRTUAL_ENV does not match` warning on every invocation** because
+  the parent checkout's `backend/.venv` is exported. Noise, not an error, but it pollutes captured
+  output — filter it when parsing command output programmatically.
+
+**Release cadence decision.** V50 makes a version bump *mandatory* per behavioural CLI change, but a
+**tag is still discretionary**. These two slices were batched into one release (`v0.7.0`) rather than
+cutting `v0.6.0` separately — the bump keeps provenance honest, the tag is for when something
+user-facing warrants distribution. Verified against the downloaded asset each time: `pandan 0.7.0
+(bd28cf0)`, both identifier forms exiting 5, and the structured error on stdout.

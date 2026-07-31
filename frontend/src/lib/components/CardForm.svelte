@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Column, Priority } from "../api";
   import { addCard, epicStore, labelStore } from "../board.svelte";
+  import { Select, TextInput, Textarea } from "./ui";
 
   // Create-only: the add-card affordance inside a column. Editing an existing
   // card now happens in CardModal (opened from the card face), so this form no
@@ -9,6 +10,15 @@
 
   const STORY_POINTS = [1, 2, 3, 5, 8, 13];
   const PRIORITIES: Priority[] = ["none", "low", "medium", "high", "urgent"];
+
+  const pointOptions = $derived([
+    { value: "", label: "— pts" },
+    ...STORY_POINTS.map((p) => ({ value: String(p), label: String(p) })),
+  ]);
+  const priorityOptions = PRIORITIES.map((p) => ({
+    value: p,
+    label: p === "none" ? "— priority" : p,
+  }));
 
   let title = $state("");
   let description = $state("");
@@ -22,6 +32,13 @@
   let error = $state<string | null>(null);
 
   const epicOptions = $derived(epicStore.epics);
+  const epicSelectOptions = $derived([
+    { value: "", label: "— no epic" },
+    ...epicOptions.map((e) => ({
+      value: String(e.id),
+      label: `${e.ticket_number} · ${e.name}`,
+    })),
+  ]);
   const labelOptions = $derived(labelStore.labels);
   const canSubmit = $derived(title.trim().length > 0 && !submitting);
 
@@ -59,33 +76,31 @@
 
 <form class="card-form" onsubmit={submit}>
   <!-- svelte-ignore a11y_autofocus -->
-  <input type="text" placeholder="Title (required)" bind:value={title} autofocus />
-  <textarea placeholder="Description (optional)" rows="2" bind:value={description}
-  ></textarea>
+  <input type="text" class="ui-input" placeholder="Title (required)" bind:value={title} autofocus />
+  <Textarea placeholder="Description (optional)" rows={2} bind:value={description} />
   <div class="row">
-    <input type="text" placeholder="Assignee" bind:value={assignee} />
-    <select bind:value={storyPoints} aria-label="Story points">
-      <option value="">— pts</option>
-      {#each STORY_POINTS as p}
-        <option value={String(p)}>{p}</option>
-      {/each}
-    </select>
+    <div class="grow">
+      <TextInput placeholder="Assignee" bind:value={assignee} aria-label="Assignee" />
+    </div>
+    <div class="pts">
+      <Select bind:value={storyPoints} options={pointOptions} aria-label="Story points" />
+    </div>
   </div>
 
-  <select bind:value={epicId} aria-label="Epic">
-    <option value="">— no epic</option>
-    {#each epicOptions as epic (epic.id)}
-      <option value={String(epic.id)}>{epic.ticket_number} · {epic.name}</option>
-    {/each}
-  </select>
+  <Select bind:value={epicId} options={epicSelectOptions} aria-label="Epic" />
 
   <div class="row">
-    <select bind:value={priority} aria-label="Priority">
-      {#each PRIORITIES as p}
-        <option value={p}>{p === "none" ? "— priority" : p}</option>
-      {/each}
-    </select>
-    <input type="date" bind:value={dueDate} aria-label="Due date" />
+    <div class="grow">
+      <Select
+        value={priority}
+        options={priorityOptions}
+        onValueChange={(v) => (priority = v as Priority)}
+        aria-label="Priority"
+      />
+    </div>
+    <div class="grow">
+      <input type="date" class="ui-input" bind:value={dueDate} aria-label="Due date" />
+    </div>
   </div>
 
   {#if labelOptions.length > 0}
@@ -113,3 +128,15 @@
     <button type="button" onclick={onclose} disabled={submitting}>Cancel</button>
   </div>
 </form>
+
+<style>
+  /* Row layout for the primitive controls (they render width:100%). */
+  .grow {
+    flex: 1;
+    min-width: 0;
+  }
+  .pts {
+    flex: none;
+    width: 5.5rem;
+  }
+</style>

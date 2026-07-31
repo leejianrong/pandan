@@ -35,8 +35,8 @@ test("add a work-link chip and a comment, then delete both", async ({ page }) =>
   // The link lands in the form's list immediately (server-authoritative refetch).
   await expect(form.locator(".link-item")).toContainText("PR");
 
-  // Post a note into the thread.
-  await form.getByPlaceholder("Add a note…").fill("first note");
+  // Post a comment into the thread.
+  await form.getByPlaceholder("Add a comment…").fill("first note");
   await form.getByRole("button", { name: "Post" }).click();
   await expect(form.locator(".comment-item")).toContainText("first note");
 
@@ -53,8 +53,8 @@ test("add a work-link chip and a comment, then delete both", async ({ page }) =>
   await expect(form.locator(".comment-item")).toContainText("first note");
   await expect(form.locator(".link-item")).toContainText("PR");
 
-  // Delete the note (our own — the delete affordance is shown for the author).
-  await form.locator(".comment-item").getByRole("button", { name: "Delete note" }).click();
+  // Delete the comment (our own — the delete affordance is shown for the author).
+  await form.locator(".comment-item").getByRole("button", { name: "Delete comment" }).click();
   await expect(form.locator(".comment-item")).toHaveCount(0);
   await expect(form.locator(".comment-empty")).toBeVisible();
 

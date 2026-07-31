@@ -49,7 +49,7 @@
   </header>
 
   <main class="hero">
-    <p class="eyebrow reveal">Open-source kanban</p>
+    <p class="eyebrow reveal">Pandan &middot; open-source kanban</p>
     <h1 class="reveal">Task tracking humans and <span class="hl">AI agents</span> share.</h1>
     <p class="subhead reveal">
       A board your team runs by hand &mdash; and your coding agents keep up to date over MCP. One

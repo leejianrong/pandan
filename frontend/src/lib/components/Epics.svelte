@@ -1,20 +1,20 @@
 <script lang="ts">
   import { Plus } from "lucide-svelte";
-  import { cardsForEpic, epicStore, refetchEpics } from "../board.svelte";
+  import type { Epic } from "../api";
+  import { epicStore, refetchEpics } from "../board.svelte";
   import EpicForm from "./EpicForm.svelte";
   import EpicItem from "./EpicItem.svelte";
 
   let adding = $state(false);
 
-  // Grouping (server-authoritative via the store): an epic is "Completed" iff it
-  // has ≥1 story AND every story is in the done column. Everything else — including
-  // epics with no stories yet — is "Active".
-  function isCompleted(epicId: number): boolean {
-    const s = cardsForEpic(epicId);
-    return s.length > 0 && s.every((c) => c.column === "done");
+  // Grouping is server-authoritative (V32, KAN-296): an epic is "Completed" iff its
+  // derived rollup reports every non-deleted child done (total > 0 && done == total).
+  // Everything else — including epics with no stories yet — is "Active".
+  function isCompleted(epic: Epic): boolean {
+    return epic.progress.total > 0 && epic.progress.done === epic.progress.total;
   }
-  const activeEpics = $derived(epicStore.epics.filter((e) => !isCompleted(e.id)));
-  const completedEpics = $derived(epicStore.epics.filter((e) => isCompleted(e.id)));
+  const activeEpics = $derived(epicStore.epics.filter((e) => !isCompleted(e)));
+  const completedEpics = $derived(epicStore.epics.filter((e) => isCompleted(e)));
 </script>
 
 <div class="epics-view page-view">

@@ -1,4 +1,4 @@
-# BREADBOARD — Simple Kanban (MVP)
+# BREADBOARD — Pandan (MVP)
 
 Breadboarding (Shape Up) of the selected **Shape A — "Thin Slice"**. Sources: FRAME.md, SHAPING.md.
 Built **piecemeal, one section per turn** to stay within token limits.

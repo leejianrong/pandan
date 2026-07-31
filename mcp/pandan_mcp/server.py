@@ -1,0 +1,773 @@
+"""MCP server exposing the Pandan API as agent tools (stdio transport).
+
+Each tool is a thin wrapper over one ``/api/v1`` endpoint via ``PandanClient``.
+Type hints + docstrings here become the tool schema + description the agent sees
+(FastMCP). Since M3 V8 (ADR 0013) ``/api/v1`` is auth-required, so ``PANDAN_TOKEN``
+must be a valid personal access token (V9/ADR 0014); it authenticates as its
+owning user and can only reach boards that user owns.
+
+**Board scoping (V10, ADR 0015):** the agent works across multiple boards
+dynamically. ``list_boards``/``create_board`` discover and make boards; the
+board-scoped tools take an optional per-call ``board_id`` (defaulting to
+``PANDAN_BOARD_ID`` when set, else the API's own fallback — list = all your
+boards, create = your earliest board). Card-id-addressed tools
+(``get_card``/``update_card``/``move_card``/``delete_card``) need no ``board_id``:
+the server authorizes via the card's own board.
+
+Run with ``python -m pandan_mcp`` (or the ``pandan-mcp`` script); Claude Code
+launches it over stdio per the .mcp.json snippet in the README.
+"""
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from mcp.server.fastmcp import FastMCP
+from pandan_client import PandanClient
+
+from .config import load_config
+
+Column = Literal["todo", "in_progress", "done"]
+Priority = Literal["none", "low", "medium", "high", "urgent"]
+
+mcp = FastMCP("pandan")
+
+_client: PandanClient | None = None
+_default_board_id: int | None = None
+
+
+def _client_instance() -> PandanClient:
+    """Lazily build the API client from the environment on first tool use."""
+    global _client, _default_board_id
+    if _client is None:
+        config = load_config()
+        _client = PandanClient(config.api_url, config.token)
+        _default_board_id = config.board_id
+    return _client
+
+
+def _board(board_id: int | None) -> int | None:
+    """Resolve the target board: the per-call ``board_id`` wins, else the
+    ``PANDAN_BOARD_ID`` default, else ``None`` (let the API apply its fallback)."""
+    return board_id if board_id is not None else _default_board_id
+
+
+def _require_board(board_id: int | None) -> int:
+    """Like :func:`_board`, but the target board id is **required** (the path-scoped
+    board tools have no API-side fallback). Raises when neither a per-call
+    ``board_id`` nor ``PANDAN_BOARD_ID`` is set."""
+    resolved = _board(board_id)
+    if resolved is None:
+        raise ValueError("board_id is required (set PANDAN_BOARD_ID or pass board_id)")
+    return resolved
+
+
+# --- ops: warmup ------------------------------------------------------------
+
+
+@mcp.tool()
+def warmup() -> dict[str, Any]:
+    """Wake the API if it has scaled to zero (Fly free tier). Pings the health
+    endpoint using the shared cold-start retry/timeout and returns a status
+    without throwing: ``{"status": "ok", ...}`` once healthy, ``{"status":
+    "waking", ...}`` if it's still coming up (call again shortly), or ``{"status":
+    "error", ...}``. Call this before a burst of work to absorb the cold start in
+    one place instead of on your first real tool call.
+    """
+    return _client_instance().warmup()
+
+
+# --- boards: discover + create (V10) ---------------------------------------
+
+
+@mcp.tool()
+def list_boards() -> dict[str, Any]:
+    """List the boards you own (id + name). Call this first to discover which
+    boards you can target with ``board_id`` on the other tools."""
+    return _client_instance().list_boards()
+
+
+@mcp.tool()
+def create_board(name: str) -> dict[str, Any]:
+    """Create a new board owned by you; returns it (including its id)."""
+    return _client_instance().create_board(name)
+
+
+@mcp.tool()
+def get_board(board_id: int) -> dict[str, Any]:
+    """Fetch a single board by its numeric id (id + name). Authorized via the
+    board's own id — you must own it."""
+    return _client_instance().get_board(board_id)
+
+
+@mcp.tool()
+def update_board(
+    board_id: int,
+    name: str | None = None,
+    outbound_webhook_url: str | None = None,
+    outbound_webhook_secret: str | None = None,
+    outbound_webhook_enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Update a board's settings (only the arguments you pass are changed): ``name``,
+    and the V38 signed outbound webhook opt-in — ``outbound_webhook_url`` (the target),
+    ``outbound_webhook_secret`` (the write-only HMAC-SHA256 key; never read back), and
+    ``outbound_webhook_enabled`` (turn delivery on/off). When enabled with a URL set,
+    every notification is POSTed there, signed like the inbound GitHub webhook.
+    Authorized via the board's own id — you must own it."""
+    return _client_instance().update_board(
+        board_id,
+        name=name,
+        outbound_webhook_url=outbound_webhook_url,
+        outbound_webhook_secret=outbound_webhook_secret,
+        outbound_webhook_enabled=outbound_webhook_enabled,
+    )
+
+
+@mcp.tool()
+def delete_board(board_id: int) -> dict[str, Any]:
+    """Delete a board by id; its cards + epics cascade away. Authorized via the
+    board's own id — you must own it."""
+    return _client_instance().delete_board(board_id)
+
+
+# --- cards + epics (board-scoped) ------------------------------------------
+
+
+@mcp.tool()
+def list_cards(
+    board_id: int | None = None,
+    column: Column | None = None,
+    epic_id: int | None = None,
+    cycle_id: int | None = None,
+    updated_since: str | None = None,
+    priority: Priority | None = None,
+    label: int | None = None,
+    due_before: str | None = None,
+    overdue: bool | None = None,
+    needs_human: bool | None = None,
+    assignee: str | None = None,
+    q: str | None = None,
+    sort: str | None = None,
+    limit: int | None = None,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    """List/query stories. ``board_id`` targets one board (defaults to
+    PANDAN_BOARD_ID; omit both to span all your boards). Other filters (AND-ed):
+    column, epic_id, cycle_id (stories in that cycle/iteration),
+    updated_since (an ISO-8601 timestamp — stories changed
+    at/after it), priority, label (a label id), due_before (an ISO-8601 timestamp —
+    stories due strictly before it), overdue (true → past-due and not done),
+    needs_human (true → cards flagged for a human via needs_human; false → the rest),
+    and assignee (exact match). ``q`` is a free-text full-text search over
+    title+description (websearch grammar: bare terms AND-ed, "quoted" = phrase,
+    ``-term`` = exclude); with no explicit ``sort`` it ranks by relevance (best
+    first, a title hit above a description-only hit). ``sort`` re-orders the result —
+    comma-separated keys with an optional ``-`` for descending (e.g. ``-priority``,
+    ``-due_date,position``; fields: position/priority/due_date/created_at/updated_at/
+    story_points/assignee/title/column/id). ``priority`` sorts by rank (none→urgent);
+    an explicit ``sort`` overrides ``q`` ranking. Paginate with limit; if more results
+    remain the response includes ``next_cursor`` to pass back as ``cursor`` (not
+    available together with ``sort`` or ``q``).
+    """
+    return _client_instance().list_cards(
+        board_id=_board(board_id),
+        column=column,
+        epic_id=epic_id,
+        cycle_id=cycle_id,
+        updated_since=updated_since,
+        priority=priority,
+        label=label,
+        due_before=due_before,
+        overdue=overdue,
+        needs_human=needs_human,
+        assignee=assignee,
+        q=q,
+        sort=sort,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+@mcp.tool()
+def list_epics(board_id: int | None = None) -> dict[str, Any]:
+    """List epics. ``board_id`` targets one board (defaults to PANDAN_BOARD_ID;
+    omit both to span all your boards)."""
+    return _client_instance().list_epics(board_id=_board(board_id))
+
+
+@mcp.tool()
+def get_card(card_id: int) -> dict[str, Any]:
+    """Fetch a single story by its numeric id."""
+    return _client_instance().get_card(card_id)
+
+
+@mcp.tool()
+def get_epic(epic_id: int) -> dict[str, Any]:
+    """Fetch a single epic by its numeric id. Authorized via the epic's own
+    board — no ``board_id`` needed."""
+    return _client_instance().get_epic(epic_id)
+
+
+@mcp.tool()
+def create_card(
+    title: str,
+    board_id: int | None = None,
+    description: str | None = None,
+    column: Column | None = None,
+    story_points: int | None = None,
+    assignee: str | None = None,
+    epic_id: int | None = None,
+    cycle_id: int | None = None,
+    priority: Priority | None = None,
+    due_date: str | None = None,
+    label_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Create a story. Only ``title`` is required; it lands at the end of its
+    column (default ``todo``). ``board_id`` targets one board (defaults to
+    PANDAN_BOARD_ID; omit both to use your earliest board). ``story_points`` must
+    be one of 1/2/3/5/8/13. ``epic_id`` links it to an existing epic on the same
+    board; ``cycle_id`` assigns it to a cycle/iteration on the same board.
+    ``priority`` is one of none/low/medium/high/urgent (default none);
+    ``due_date`` is an ISO-8601 timestamp; ``label_ids`` attaches board labels
+    (each must belong to the card's board — see create_label/list_labels).
+    """
+    return _client_instance().create_card(
+        title,
+        board_id=_board(board_id),
+        description=description,
+        column=column,
+        story_points=story_points,
+        assignee=assignee,
+        epic_id=epic_id,
+        cycle_id=cycle_id,
+        priority=priority,
+        due_date=due_date,
+        label_ids=label_ids,
+    )
+
+
+@mcp.tool()
+def create_cards(cards: list[dict[str, Any]]) -> dict[str, Any]:
+    """Batch-create several stories in one call — hand it a list of card objects,
+    each with the same fields as ``create_card`` (``title`` required; optional
+    ``board_id``/``description``/``column``/``story_points``/``assignee``/
+    ``epic_id``). Ideal for filing a whole epic's worth of stories at once: one
+    tool call over a warm connection instead of N. A card that omits ``board_id``
+    falls back to PANDAN_BOARD_ID (then the API default), same as ``create_card``.
+    Returns ``{"created": [<card>, ...]}`` in the order given.
+
+    **Fail-fast, not atomic:** if one card is rejected (e.g. a bad ``story_points``)
+    the call errors and the cards created *before* it stay created — resubmit only
+    the remainder.
+    """
+    resolved = []
+    for card in cards:
+        merged = dict(card)
+        merged["board_id"] = _board(merged.get("board_id"))
+        resolved.append(merged)
+    return _client_instance().create_cards(resolved)
+
+
+@mcp.tool()
+def create_epic(
+    name: str,
+    board_id: int | None = None,
+    description: str | None = None,
+    target_date: str | None = None,
+    lead: str | None = None,
+) -> dict[str, Any]:
+    """Create an epic (a per-board grouping stories can link to via epic_id).
+    ``board_id`` targets one board (defaults to PANDAN_BOARD_ID; omit both to use
+    your earliest board). ``target_date`` is an optional ISO-8601 target/ship date;
+    ``lead`` is an optional free-text owner (a person/agent handle).
+    """
+    return _client_instance().create_epic(
+        name,
+        board_id=_board(board_id),
+        description=description,
+        target_date=target_date,
+        lead=lead,
+    )
+
+
+@mcp.tool()
+def update_card(
+    card_id: int,
+    title: str | None = None,
+    description: str | None = None,
+    story_points: int | None = None,
+    assignee: str | None = None,
+    epic_id: int | None = None,
+    cycle_id: int | None = None,
+    priority: Priority | None = None,
+    due_date: str | None = None,
+    label_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    """Edit a story's fields (only the arguments you pass are changed). Use
+    move_card to change column/position, not this. ``priority`` re-ranks;
+    ``due_date`` is an ISO-8601 timestamp; ``epic_id`` re-links the parent epic and
+    ``cycle_id`` (re)assigns the cycle/iteration (both on the card's board; pass
+    them to move the card, or clear with a separate call); ``label_ids``
+    **replaces** the card's label set (``[]`` clears it — each id must belong to the
+    card's board). Authorized via the card's own board — no ``board_id`` needed.
+    """
+    return _client_instance().update_card(
+        card_id,
+        title=title,
+        description=description,
+        story_points=story_points,
+        assignee=assignee,
+        epic_id=epic_id,
+        cycle_id=cycle_id,
+        priority=priority,
+        due_date=due_date,
+        label_ids=label_ids,
+    )
+
+
+@mcp.tool()
+def move_card(card_id: int, column: Column, position: int | None = None) -> dict[str, Any]:
+    """Move a story to a column (and optionally to an index within it; omit
+    ``position`` to append to the end). Authorized via the card's own board — no
+    ``board_id`` needed.
+    """
+    return _client_instance().move_card(card_id, column, position=position)
+
+
+@mcp.tool()
+def claim_card(card_id: int, assignee: str) -> dict[str, Any]:
+    """Claim a story in one step: move it to ``in_progress`` **and** set its
+    ``assignee`` together. A convenience over calling move_card then update_card
+    yourself. Returns the updated card. Authorized via the card's own board — no
+    ``board_id`` needed.
+    """
+    return _client_instance().claim_card(card_id, assignee)
+
+
+@mcp.tool()
+def delete_card(card_id: int) -> dict[str, Any]:
+    """Delete a story by id. Authorized via the card's own board."""
+    return _client_instance().delete_card(card_id)
+
+
+@mcp.tool()
+def update_epic(
+    epic_id: int,
+    name: str | None = None,
+    description: str | None = None,
+    target_date: str | None = None,
+    lead: str | None = None,
+) -> dict[str, Any]:
+    """Edit an epic's fields (only the arguments you pass are changed). ``target_date``
+    is an ISO-8601 target/ship date; ``lead`` is a free-text owner. Authorized via the
+    epic's own board — no ``board_id`` needed.
+    """
+    return _client_instance().update_epic(
+        epic_id,
+        name=name,
+        description=description,
+        target_date=target_date,
+        lead=lead,
+    )
+
+
+@mcp.tool()
+def delete_epic(epic_id: int) -> dict[str, Any]:
+    """Delete an epic by id; its child stories are detached (their epic_id is
+    cleared), not deleted. Authorized via the epic's own board.
+    """
+    return _client_instance().delete_epic(epic_id)
+
+
+# --- card-to-card dependencies (KAN-28 API / KAN-31 tools) -----------------
+
+
+@mcp.tool()
+def add_dependency(card_id: int, blocker_id: int) -> dict[str, Any]:
+    """Mark story ``card_id`` as **blocked-by** story ``blocker_id`` (blocker_id
+    must finish first). Both must be on the same board (which you own). Returns the
+    now-blocked card with its refreshed ``blocked_by`` / ``blocks`` arrays.
+    Authorized via the card's own board — no ``board_id`` needed. Rejected (422) on
+    a self-link, a duplicate edge, or one that would create a cycle.
+    """
+    return _client_instance().add_dependency(card_id, blocker_id)
+
+
+@mcp.tool()
+def remove_dependency(card_id: int, blocker_id: int) -> dict[str, Any]:
+    """Remove the blocked-by link so story ``card_id`` is no longer blocked-by
+    story ``blocker_id``. Returns the card with refreshed dependency arrays.
+    Authorized via the card's own board — no ``board_id`` needed. 404 if that link
+    doesn't exist.
+    """
+    return _client_instance().remove_dependency(card_id, blocker_id)
+
+
+@mcp.tool()
+def list_dependencies(card_id: int) -> dict[str, Any]:
+    """List a story's dependencies: ``{"card_id": id, "blocked_by": [...],
+    "blocks": [...]}``. ``blocked_by`` = ids of stories that block this one (must
+    finish first); ``blocks`` = ids it blocks. Reads the card itself (the API
+    surfaces these arrays on the card, so ``get_card``/``list_cards`` already
+    include them too). Authorized via the card's own board.
+    """
+    return _client_instance().list_dependencies(card_id)
+
+
+# --- card work-links (KAN-32 API / KAN-34 tools) ---------------------------
+
+
+@mcp.tool()
+def add_link(card_id: int, label: str, url: str) -> dict[str, Any]:
+    """Attach a work-link to story ``card_id`` — a ``label`` (e.g. "PR", "branch",
+    "CI") and a ``url`` (the PR URL, branch, CI run, …) — closing the board↔git gap.
+    Returns the card with its refreshed ``links`` array. Authorized via the card's
+    own board — no ``board_id`` needed. 404 if the card doesn't exist.
+    """
+    return _client_instance().add_link(card_id, label, url)
+
+
+@mcp.tool()
+def remove_link(card_id: int, link_id: int) -> dict[str, Any]:
+    """Detach work-link ``link_id`` from story ``card_id``. Returns the card with its
+    refreshed ``links`` array. Authorized via the card's own board — no ``board_id``
+    needed. 404 if no such link belongs to the card.
+    """
+    return _client_instance().remove_link(card_id, link_id)
+
+
+# --- card notes / comments (KAN-33 API / KAN-34 tools) ---------------------
+
+
+@mcp.tool()
+def add_comment(card_id: int, body: str) -> dict[str, Any]:
+    """Post a note (comment) to story ``card_id`` — human/agent-authored context
+    like a decision, a handoff, or why something is blocked. The author is the
+    acting user (your PAT's owner), never the body. Returns the created comment.
+    Authorized via the card's own board — no ``board_id`` needed. 404 if the card
+    doesn't exist.
+    """
+    return _client_instance().add_comment(card_id, body)
+
+
+@mcp.tool()
+def list_comments(card_id: int) -> dict[str, Any]:
+    """List a story's notes (comments), oldest-first: ``{"comments": [...]}``. Each
+    comment carries id, body, author_id, and created_at. Comments are not inlined on
+    card reads (a card can accumulate many), so this is a dedicated read. Authorized
+    via the card's own board — no ``board_id`` needed.
+    """
+    return _client_instance().list_comments(card_id)
+
+
+# --- board labels (M5 V11 API / KAN-244 tools) ----------------------------
+
+
+@mcp.tool()
+def list_labels(board_id: int | None = None) -> dict[str, Any]:
+    """List a board's labels (id, name, color). ``board_id`` targets one board
+    (defaults to PANDAN_BOARD_ID). Use the returned ids in ``label_ids`` on
+    create_card/update_card, or as the ``label`` filter on list_cards."""
+    resolved = _board(board_id)
+    if resolved is None:
+        raise ValueError("board_id is required (set PANDAN_BOARD_ID or pass board_id)")
+    return _client_instance().list_labels(resolved)
+
+
+@mcp.tool()
+def create_label(name: str, color: str, board_id: int | None = None) -> dict[str, Any]:
+    """Create a board-scoped label — a ``name`` and a ``color`` (e.g. a hex like
+    ``#0ea5e9``). ``board_id`` targets one board (defaults to PANDAN_BOARD_ID).
+    Returns the created label; attach it to cards via ``label_ids``."""
+    resolved = _board(board_id)
+    if resolved is None:
+        raise ValueError("board_id is required (set PANDAN_BOARD_ID or pass board_id)")
+    return _client_instance().create_label(resolved, name, color)
+
+
+@mcp.tool()
+def delete_label(label_id: int) -> dict[str, Any]:
+    """Delete a label by id; it detaches from every card that carried it.
+    Authorized via the label's own board — no ``board_id`` needed."""
+    return _client_instance().delete_label(label_id)
+
+
+# --- dispatch + fleet-safe claim (M5 V12 API / KAN-245 tools) --------------
+
+
+@mcp.tool()
+def dispatch(
+    board_id: int | None = None,
+    assignee: str | None = None,
+    label: int | None = None,
+    priority: Priority | None = None,
+) -> dict[str, Any]:
+    """Atomically claim the next ready-to-work story on a board and start it — the
+    agent's "give me something to do" call. The API picks the next unblocked
+    ``todo`` story (highest ``priority`` first, then board order), sets its
+    ``assignee`` (defaults to you), and moves it to ``in_progress`` in one
+    ``FOR UPDATE SKIP LOCKED`` transaction, so many agents can dispatch at once and
+    never grab the same card. ``board_id`` targets one board (defaults to
+    PANDAN_BOARD_ID). ``label`` / ``priority`` (a *minimum*) narrow the selection.
+    Returns ``{"card": <story>}``, or ``{"card": null}`` when nothing is ready.
+    """
+    return _client_instance().dispatch(
+        _require_board(board_id), assignee=assignee, label=label, priority=priority
+    )
+
+
+@mcp.tool(name="next")
+def next_ready(
+    board_id: int | None = None,
+    label: int | None = None,
+    priority: Priority | None = None,
+) -> dict[str, Any]:
+    """Peek at the next ready-to-work story on a board **without** claiming it — the
+    same selection as ``dispatch`` (next unblocked ``todo`` story, highest
+    ``priority`` first) but read-only, so you can see what's up next before pulling
+    it. ``board_id`` targets one board (defaults to PANDAN_BOARD_ID). ``label`` /
+    ``priority`` (a *minimum*) narrow the selection. Returns ``{"card": <story>}``,
+    or ``{"card": null}`` when nothing is ready.
+    """
+    return _client_instance().next_ready(
+        _require_board(board_id), label=label, priority=priority
+    )
+
+
+# --- needs-human handoff (M5 V13 API / KAN-246 tools) ----------------------
+
+
+@mcp.tool()
+def needs_human(card_id: int, attention_note: str | None = None) -> dict[str, Any]:
+    """Flag story ``card_id`` as needing a human — use this when you hit something
+    only a person can settle (a decision, missing access, a stuck PR). Pass an
+    optional ``attention_note`` describing the ask. Returns the updated card
+    (``needs_human=true``); it then shows on the board with a needs-human badge and
+    is findable via ``list_cards(needs_human=true)``. A human clears it with
+    ``resolve`` and typically replies via a comment — poll the card's flag +
+    comments to see the resolution. Authorized via the card's own board.
+    """
+    return _client_instance().flag_needs_human(card_id, attention_note=attention_note)
+
+
+@mcp.tool()
+def resolve(card_id: int) -> dict[str, Any]:
+    """Clear the needs-human flag on story ``card_id`` (``needs_human=false``, the
+    attention note is cleared). The human-facing counterpart to ``needs_human``;
+    typically you also add a comment explaining the resolution. Returns the updated
+    card. Authorized via the card's own board — no ``board_id`` needed.
+    """
+    return _client_instance().resolve_card(card_id)
+
+
+# --- fleet reporting / metrics (M5 V17 API / KAN-250 tools) ----------------
+
+
+@mcp.tool()
+def metrics(
+    board_id: int | None = None,
+    since: str | None = None,
+    window: str | None = None,
+) -> dict[str, Any]:
+    """Report derived flow metrics for a board — throughput (cards done in the
+    period), cycle time (first in_progress → done: avg/median/p90 seconds), aging
+    WIP (how long each in-flight card has sat in progress), and a per-assignee
+    breakdown (completed + open WIP per agent). All computed from the activity feed
+    + card timestamps; nothing is written. ``board_id`` targets one board (defaults
+    to PANDAN_BOARD_ID). Bound the period with ``since`` (an ISO-8601 timestamp) or
+    ``window`` (``7d`` / ``24h`` / ``30m``); omit both for all time. Authorized via
+    the board (you must be able to read it).
+    """
+    return _client_instance().board_metrics(
+        _require_board(board_id), since=since, window=window
+    )
+
+
+@mcp.tool()
+def activity(
+    board_id: int | None = None,
+    limit: int | None = None,
+    cursor: str | None = None,
+    actor: str | None = None,
+    action: str | None = None,
+) -> dict[str, Any]:
+    """Read a board's activity feed (KAN-18), newest-first — one row per successful
+    create / update / delete / move of a card, epic or board. ``board_id`` targets
+    one board (defaults to PANDAN_BOARD_ID). Optional filters (M5 V16, KAN-249,
+    AND-ed): ``actor`` (exact match on an actor's email / agent handle) and
+    ``action`` (the action verb — created/updated/deleted/moved/restored/…).
+    Paginate with ``limit``; if more rows remain the response includes
+    ``next_cursor`` to pass back as ``cursor``. Authorized via the board (you must
+    be able to read it). Returns ``{"activity": [...], "next_cursor"?: str}``.
+    """
+    return _client_instance().list_activity(
+        _require_board(board_id),
+        limit=limit,
+        cursor=cursor,
+        actor=actor,
+        action=action,
+    )
+
+
+# --- notification inbox (V37 API / KAN-301 tools) --------------------------
+
+
+@mcp.tool()
+def list_notifications(unread: bool = False) -> dict[str, Any]:
+    """List YOUR notification inbox (V37) — items for events a human shouldn't miss:
+    a card flagged needs_human, a card newly blocked by a dependency, a linked PR's
+    CI failing, or a card being assigned. Notifications are **per-user, not
+    board-scoped** (no board_id): you only ever see your own, addressed to you as a
+    board owner. ``unread=true`` returns only unread ones; default returns all,
+    newest-first. Poll/pull only (ADR 0007 — there is no push channel; poll this).
+    Returns ``{"notifications": [...]}``."""
+    return _client_instance().list_notifications(unread=unread or None)
+
+
+@mcp.tool()
+def mark_read(notification_id: int) -> dict[str, Any]:
+    """Mark one of YOUR notifications read (stamp its read_at); idempotent —
+    re-marking leaves the timestamp untouched. 404 if it doesn't exist or isn't
+    yours. Returns the updated notification."""
+    return _client_instance().mark_notification_read(notification_id)
+
+
+# --- saved views (M5 V14 API / KAN-247 tools) ------------------------------
+
+
+@mcp.tool()
+def list_views(board_id: int | None = None) -> dict[str, Any]:
+    """List a board's saved views (id, name, query). ``board_id`` targets one board
+    (defaults to PANDAN_BOARD_ID). A view's ``query`` is the same filter+sort grammar
+    ``list_cards`` takes — spread it as ``list_cards`` args to reproduce the view's
+    cards. Returns ``{"views": [...]}``."""
+    return _client_instance().list_views(_require_board(board_id))
+
+
+@mcp.tool()
+def create_view(
+    name: str, query: dict[str, Any] | None = None, board_id: int | None = None
+) -> dict[str, Any]:
+    """Create a saved view — a named, persisted card query on a board. ``query`` is
+    the structured filter+sort grammar (any of column/epic_id/priority/label/
+    due_before/overdue/needs_human/assignee/sort — same keys as ``list_cards``), e.g.
+    ``{"assignee": "agent-7", "sort": "-priority"}``; omit it for an unfiltered view.
+    ``board_id`` targets one board (defaults to PANDAN_BOARD_ID). Returns the created
+    view."""
+    return _client_instance().create_view(_require_board(board_id), name, query)
+
+
+@mcp.tool()
+def delete_view(view_id: int, board_id: int | None = None) -> dict[str, Any]:
+    """Delete a saved view by id on a board. ``board_id`` targets one board (defaults
+    to PANDAN_BOARD_ID). 404 if no such view is on that board."""
+    return _client_instance().delete_view(_require_board(board_id), view_id)
+
+
+# --- batch update + card templates (M5 V19, KAN-252) -----------------------
+
+
+@mcp.tool()
+def update_cards(updates: list[dict[str, Any]]) -> dict[str, Any]:
+    """Batch-update several cards **atomically** in one call — hand it a list of
+    ``{"id": <id>, ...fields}`` objects, each taking the same field edits as
+    ``update_card`` (title/description/story_points/assignee/epic_id/priority/
+    due_date/label_ids; **not** column/position — use ``move_card`` for those). Hits
+    ``PATCH /cards/batch``, so it is **all-or-nothing**: if any id is missing the whole
+    batch fails and no card changes (unlike ``create_cards``, which is a fail-fast
+    loop). Ideal for retriaging several cards at once. Returns
+    ``{"updated": [<card>, ...]}`` in request order."""
+    return _client_instance().update_cards(updates)
+
+
+@mcp.tool()
+def list_templates(board_id: int | None = None) -> dict[str, Any]:
+    """List a board's card templates (id, name, cards). ``board_id`` targets one board
+    (defaults to PANDAN_BOARD_ID). A template's ``cards`` is the list of card payloads
+    ``apply_template`` will instantiate. Returns ``{"templates": [...]}``."""
+    return _client_instance().list_templates(_require_board(board_id))
+
+
+@mcp.tool()
+def create_template(
+    name: str, cards: list[dict[str, Any]], board_id: int | None = None
+) -> dict[str, Any]:
+    """Create a card template — a named, reusable plan of cards on a board. ``cards``
+    is a non-empty list of card payloads (each with the same fields as ``create_card``
+    minus ``board_id``: ``title`` required; optional description/column/story_points/
+    assignee/epic_id/priority/due_date/label_ids). ``board_id`` targets one board
+    (defaults to PANDAN_BOARD_ID). Returns the created template."""
+    return _client_instance().create_template(_require_board(board_id), name, cards)
+
+
+@mcp.tool()
+def delete_template(template_id: int, board_id: int | None = None) -> dict[str, Any]:
+    """Delete a card template by id on a board. ``board_id`` targets one board
+    (defaults to PANDAN_BOARD_ID). 404 if no such template is on that board."""
+    return _client_instance().delete_template(_require_board(board_id), template_id)
+
+
+@mcp.tool()
+def apply_template(template_id: int, board_id: int | None = None) -> dict[str, Any]:
+    """Seed a plan from a template in one call: instantiate the template's cards as
+    real cards on the board (atomic — all created or none). ``board_id`` targets one
+    board (defaults to PANDAN_BOARD_ID). Returns ``{"created": [<card>, ...]}`` in
+    template order."""
+    return _client_instance().apply_template(_require_board(board_id), template_id)
+
+
+# --- cycles / iterations (V33, KAN-297) ------------------------------------
+
+
+@mcp.tool()
+def list_cycles(board_id: int | None = None) -> dict[str, Any]:
+    """List a board's cycles/iterations (id, name, starts_on, ends_on). ``board_id``
+    targets one board (defaults to PANDAN_BOARD_ID). Use a cycle's id as the
+    ``cycle_id`` filter on list_cards, or to assign a card via update_card. Returns
+    ``{"cycles": [...]}``."""
+    return _client_instance().list_cycles(_require_board(board_id))
+
+
+@mcp.tool()
+def create_cycle(
+    name: str,
+    starts_on: str | None = None,
+    ends_on: str | None = None,
+    board_id: int | None = None,
+) -> dict[str, Any]:
+    """Create a cycle/iteration — a ``name`` and optional ISO-8601 ``starts_on`` /
+    ``ends_on`` bounds. ``board_id`` targets one board (defaults to PANDAN_BOARD_ID).
+    Returns the created cycle; assign cards to it with update_card(card_id,
+    cycle_id=<id>)."""
+    return _client_instance().create_cycle(
+        _require_board(board_id), name, starts_on=starts_on, ends_on=ends_on
+    )
+
+
+@mcp.tool()
+def delete_cycle(cycle_id: int, board_id: int | None = None) -> dict[str, Any]:
+    """Delete a cycle by id on a board; its cards are detached (their cycle_id is
+    cleared), not deleted. ``board_id`` targets one board (defaults to
+    PANDAN_BOARD_ID). 404 if no such cycle is on that board."""
+    return _client_instance().delete_cycle(_require_board(board_id), cycle_id)
+
+
+@mcp.tool()
+def cycle_metrics(cycle_id: int, board_id: int | None = None) -> dict[str, Any]:
+    """Report derived burndown / velocity metrics for a cycle/iteration (V34).
+    Reports committed vs completed (stories + story points), velocity (completed
+    points), and a per-day burndown of remaining work over the cycle's
+    starts_on..ends_on window (empty when the cycle has no dates). All computed
+    from the cycle's card state + the activity feed; nothing is written.
+    ``board_id`` targets one board (defaults to PANDAN_BOARD_ID). 404 if no such
+    cycle is on that board; authorized via the board (you must be able to read it).
+    """
+    return _client_instance().cycle_metrics(_require_board(board_id), cycle_id)
+
+
+def main() -> None:
+    """Entry point — run the server over stdio."""
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -2,6 +2,7 @@
   import { Ban, CalendarClock, Hand, Link as LinkIcon, Pencil, Trash2 } from "lucide-svelte";
   import type { Card, Priority } from "../api";
   import { cardById, epicFor, removeCard } from "../board.svelte";
+  import { kbd } from "../keyboard.svelte";
   import CardModal from "./CardModal.svelte";
 
   let { card }: { card: Card } = $props();
@@ -48,6 +49,8 @@
   // view (P1 face) · confirmDelete (P4 quick-delete). Full view/edit is the modal.
   let mode = $state<"view" | "confirmDelete">("view");
   let showModal = $state(false);
+  // Opened via the `e` shortcut → modal lands focused on the title for editing.
+  let modalEditFocus = $state(false);
   let deleting = $state(false);
   let deleteError = $state<string | null>(null);
 
@@ -67,10 +70,21 @@
     if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return; // it was a drag
     showModal = true;
   }
+  // Keyboard affordances on the focused card face (V36, KAN-300). A focused
+  // role=button opening on Enter/Space is the existing, accessible affordance; we
+  // build on it with `o` (open) and `e` (open focused for editing). These fire only
+  // when the card itself is the key target (not an inner control) and never carry a
+  // Cmd/Ctrl chord (⌘K et al. belong to the global handlers), so typing is safe.
   function onKeydown(e: KeyboardEvent) {
     if (e.target !== e.currentTarget) return; // ignore keys from inner controls
-    if (e.key === "Enter" || e.key === " ") {
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // chords belong to global handlers
+    if (e.key === "Enter" || e.key === " " || e.key === "o") {
       e.preventDefault();
+      modalEditFocus = false;
+      showModal = true;
+    } else if (e.key === "e") {
+      e.preventDefault();
+      modalEditFocus = true;
       showModal = true;
     }
   }
@@ -105,10 +119,13 @@
   <div
     class="card"
     class:is-blocked={card.blocked}
+    class:kbd-focused={kbd.focusedCardId === card.id}
     role="button"
     tabindex="0"
+    data-card-id={card.id}
     aria-label="Open {card.ticket_number}: {card.title}"
     onpointerdown={onPointerDown}
+    onfocus={() => (kbd.focusedCardId = card.id)}
     onclick={openFromClick}
     onkeydown={onKeydown}
   >
@@ -218,5 +235,9 @@
 {/if}
 
 {#if showModal}
-  <CardModal cardId={card.id} onclose={() => (showModal = false)} />
+  <CardModal
+    cardId={card.id}
+    editFocus={modalEditFocus}
+    onclose={() => (showModal = false)}
+  />
 {/if}

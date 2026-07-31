@@ -31,10 +31,21 @@ from ..auth_models import User
 from ..authz import Access, authorize_board, get_principal, visible_board_ids
 from ..card_query import sort_order_by
 from ..db import get_db
-from ..models import Card, CardComment, CardDependency, CardLabel, CardLink, Epic, Label
+from ..models import (
+    Card,
+    CardComment,
+    CardDependency,
+    CardLabel,
+    CardLink,
+    Cycle,
+    Epic,
+    Label,
+)
+from ..notifications import record_notification
 from ..ordering import next_position, renumber_column
 from ..pagination import NEXT_CURSOR_HEADER, decode_cursor, encode_cursor
 from ..schemas import (
+    MAX_BATCH_ITEMS,
     CardBatchUpdateItem,
     CardCreate,
     CardMove,
@@ -262,6 +273,25 @@ def _validate_epic(db: Session, epic_id: int | None, board_id: int) -> None:
         )
 
 
+def _validate_cycle(db: Session, cycle_id: int | None, board_id: int) -> None:
+    """A story's ``cycle_id`` (if set) must reference an existing cycle (V33,
+    KAN-297) **on the same board** as the story (no cross-board links); 422
+    otherwise. Mirrors :func:`_validate_epic`."""
+    if cycle_id is None:
+        return
+    cycle = db.get(Cycle, cycle_id)
+    if cycle is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="cycle_id must reference an existing cycle",
+        )
+    if cycle.board_id != board_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="cycle must belong to the same board as the story",
+        )
+
+
 @router.get("", response_model=list[CardRead])
 def list_cards(
     response: Response,
@@ -270,6 +300,7 @@ def list_cards(
     board_id: int | None = None,
     column: ColumnEnum | None = None,
     epic_id: int | None = None,
+    cycle_id: int | None = None,
     updated_since: datetime | None = None,
     blocked: bool | None = None,
     priority: PriorityEnum | None = None,
@@ -291,7 +322,8 @@ def list_cards(
 
     Filters (all optional, AND-ed): ``board_id`` (cards on that board — the SPA
     always sends it to scope the view; omitted → all *your* boards); ``column``;
-    ``epic_id`` (stories linked to that epic); ``updated_since`` (an ISO-8601
+    ``epic_id`` (stories linked to that epic); ``cycle_id`` (stories in that
+    cycle/iteration, V33); ``updated_since`` (an ISO-8601
     timestamp — cards whose ``updated_at`` is at or after it, **inclusive**, the
     "changed since" feed for polling agents); ``blocked`` (KAN-29 ready/blocked
     signal — ``blocked=true`` returns only cards with ≥1 blocker not yet ``done``;
@@ -364,6 +396,9 @@ def list_cards(
         query = query.where(Card.column == column.value)
     if epic_id is not None:
         query = query.where(Card.epic_id == epic_id)
+    if cycle_id is not None:
+        # Cards in a cycle/iteration (V33, KAN-297); mirrors the epic_id filter.
+        query = query.where(Card.cycle_id == cycle_id)
     if updated_since is not None:
         query = query.where(Card.updated_at >= updated_since)
     if blocked is not None:
@@ -501,6 +536,7 @@ def _create_card_row(
     it) but does **not** commit — the caller owns the transaction, so a single create
     and a batch/template apply can share this and stay atomic (M5 V19, KAN-252)."""
     _validate_epic(db, payload.epic_id, board_id)
+    _validate_cycle(db, payload.cycle_id, board_id)
     label_ids = _validate_labels(db, payload.label_ids, board_id)
     card = Card(
         board_id=board_id,
@@ -511,6 +547,7 @@ def _create_card_row(
         story_points=payload.story_points,
         assignee=payload.assignee,
         epic_id=payload.epic_id,
+        cycle_id=payload.cycle_id,
         priority=payload.priority.value,
         due_date=payload.due_date,
     )
@@ -569,6 +606,8 @@ def _apply_card_update(db: Session, principal: User, card: Card, data: dict) -> 
         )
     if "epic_id" in data:
         _validate_epic(db, data["epic_id"], card.board_id)
+    if "cycle_id" in data:
+        _validate_cycle(db, data["cycle_id"], card.board_id)
     # ``label_ids`` isn't a card column — it replaces the card_label join, so pull
     # it out of the field-edit loop and apply it separately (M5 V11).
     label_ids_sent = "label_ids" in data
@@ -576,6 +615,9 @@ def _apply_card_update(db: Session, principal: User, card: Card, data: dict) -> 
     # ``priority`` is an enum on the schema but a varchar column — store its value.
     if data.get("priority") is not None:
         data["priority"] = PriorityEnum(data["priority"]).value
+    # Capture the assignee before the edit so we notify only on the *transition* into
+    # a new assignee (V37, KAN-301) — one row per assignment, not per unrelated edit.
+    assignee_before = card.assignee
     for field, value in data.items():
         setattr(card, field, value)
     if label_ids_sent:
@@ -589,6 +631,18 @@ def _apply_card_update(db: Session, principal: User, card: Card, data: dict) -> 
         action="updated",
         summary=f"updated {card.ticket_number}",
     )
+    # Notify the board owner when a card is (re)assigned to someone (V37, KAN-301):
+    # ``assignee`` was sent, is truthy (empty string = un-assign → no notification),
+    # and actually changed. Same transaction as the edit (record_notification adds,
+    # never commits) — so a single PATCH and a batch item both emit exactly once.
+    if data.get("assignee") and data["assignee"] != assignee_before:
+        record_notification(
+            db,
+            board_id=card.board_id,
+            card_id=card.id,
+            kind="assigned",
+            body=f"{card.ticket_number} assigned to {data['assignee']}",
+        )
 
 
 @router.patch("/batch", response_model=list[CardRead])
@@ -617,6 +671,13 @@ def batch_update_cards(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="batch must contain at least one card update",
+        )
+    # Payload hardening (V28, KAN-292): cap the batch so a single call can't fan out
+    # into an unbounded transaction. Configurable via MAX_BATCH_ITEMS (generous default).
+    if len(payload) > MAX_BATCH_ITEMS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"batch must not exceed {MAX_BATCH_ITEMS} card updates",
         )
     ids = [item.id for item in payload]
     if len(set(ids)) != len(ids):
@@ -775,6 +836,9 @@ def flag_needs_human(
     activity event. **404** unless the card is live; owner/member-gated (WRITE)."""
     card = _get_or_404(db, card_id)
     authorize_board(db, principal, card.board_id, Access.WRITE)
+    # Notify only on the transition into needs-human (V37, KAN-301): re-flagging an
+    # already-flagged card emits nothing (exactly one row per event).
+    was_flagged = card.needs_human
     card.needs_human = True
     card.attention_note = payload.attention_note
     record_activity(
@@ -790,6 +854,18 @@ def flag_needs_human(
             else f"flagged {card.ticket_number} for a human"
         ),
     )
+    if not was_flagged:
+        record_notification(
+            db,
+            board_id=card.board_id,
+            card_id=card.id,
+            kind="needs_human",
+            body=(
+                f"{card.ticket_number} needs a human: {payload.attention_note}"
+                if payload.attention_note
+                else f"{card.ticket_number} needs a human"
+            ),
+        )
     db.commit()
     db.refresh(card)
     return _attach_one(db, card)
@@ -986,7 +1062,34 @@ def add_dependency(
             detail="dependency would create a cycle",
         )
 
+    # Notify the board owner when THIS edge transitions the card into "blocked"
+    # (V37, KAN-301): it had no active (non-``done``, live) blocker before and the
+    # new blocker isn't ``done`` yet — so it flips from ready → blocked. Emit only on
+    # that transition (a card that was already blocked stays blocked → no new row).
+    blocker_alias = aliased(Card)
+    active_blockers_before = db.scalar(
+        select(func.count())
+        .select_from(CardDependency)
+        .join(blocker_alias, blocker_alias.id == CardDependency.blocker_id)
+        .where(
+            CardDependency.blocked_id == card.id,
+            blocker_alias.column != ColumnEnum.done.value,
+            blocker_alias.deleted_at.is_(None),
+        )
+    )
+    newly_blocked = (
+        active_blockers_before == 0 and blocker.column != ColumnEnum.done.value
+    )
+
     db.add(CardDependency(blocker_id=blocker_id, blocked_id=card.id))
+    if newly_blocked:
+        record_notification(
+            db,
+            board_id=card.board_id,
+            card_id=card.id,
+            kind="blocked",
+            body=f"{card.ticket_number} is now blocked by {blocker.ticket_number}",
+        )
     db.commit()
     return _attach_one(db, card)
 

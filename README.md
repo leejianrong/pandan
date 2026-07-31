@@ -1,4 +1,4 @@
-# Simple Kanban
+# Pandan
 
 A small, deployable Kanban board for scrum/software teams — **Svelte 5 + FastAPI + PostgreSQL**.
 Its defining goal is **API-first**: every UI action is a plain REST endpoint, so an MCP server, a
@@ -12,7 +12,7 @@ CLI, or an LLM agent can drive the board without any UI or backend rework — an
 > The core board (view / create / edit / delete / drag-to-move) runs end to end behind a full
 > REST API, with a pytest + Playwright test suite and CI/CD to Fly.io. On top of that:
 > GitHub login, multiple owned boards, epics, card dependencies / work-links / comments, a query
-> API with keyset pagination, an [MCP server](mcp/) and a [`kan` CLI](kanban-cli/) for agents, and
+> API with keyset pagination, an [MCP server](mcp/) and a [`pandan` CLI](pandan-cli/) for agents, and
 > a recent UI pass (card/epic modals, theme toggle). See [Current status](#current-status).
 
 ## What it is
@@ -35,14 +35,14 @@ straight at it:
 
 - **[MCP server](mcp/)** — one tool per endpoint, so an agent gets full CRUD over boards, cards,
   epics, dependencies, links, and comments. Run it from source with `uv`, or pull the public
-  [ghcr.io image](https://github.com/leejianrong/simple-kanban/pkgs/container/simple-kanban-mcp)
-  (`docker pull ghcr.io/leejianrong/simple-kanban-mcp:latest`, no `docker login` needed). Wire it
+  [ghcr.io image](https://github.com/leejianrong/pandan/pkgs/container/pandan-mcp)
+  (`docker pull ghcr.io/leejianrong/pandan-mcp:latest`, no `docker login` needed). Wire it
   into Claude Code via `.mcp.json` (see [`.mcp.json.example`](.mcp.json.example)) and ask it to
   *"list my boards"*.
-- **[`kan` CLI](kanban-cli/)** — the same adapter as subcommands, for CI jobs and non-MCP
-  automation, with a token-free `kan warmup` you can loop on as a pre-step. Install from source, or
-  download a prebuilt binary (`kan-linux-x86_64`, `kan-macos-arm64`) from the
-  [latest release](https://github.com/leejianrong/simple-kanban/releases/latest).
+- **[`pandan` CLI](pandan-cli/)** — the same adapter as subcommands, for CI jobs and non-MCP
+  automation, with a token-free `pandan warmup` you can loop on as a pre-step. Install from source, or
+  download a prebuilt binary (`pandan-linux-x86_64`, `pandan-macos-arm64`) from the
+  [latest release](https://github.com/leejianrong/pandan/releases/latest).
 
 Both authenticate with a personal access token you mint in the **Tokens** tab; a PAT acts as you
 and is owner-gated exactly like your session.
@@ -62,7 +62,7 @@ and example agent workflows.
 | Hosting | Fly.io (app) + Neon (Postgres), CI/CD via GitHub Actions |
 | Drag & drop | `svelte-dnd-action` |
 | Auth | GitHub OAuth + revocable cookie sessions (fastapi-users, async engine); per-user hashed PATs for agents |
-| Agent clients | MCP server (`mcp/`, official `mcp` SDK) + `kan` CLI (`kanban-cli/`), both over the shared `kanban-client` |
+| Agent clients | MCP server (`mcp/`, official `mcp` SDK) + `pandan` CLI (`pandan-cli/`), both over the shared `pandan-client` |
 
 See [`docs/adr/`](docs/adr/) for the reasoning behind each of these choices.
 
@@ -115,8 +115,8 @@ build, Playwright e2e, and the MCP and CLI test suites as independent jobs on ev
 backend/       FastAPI app (app/), Alembic migrations (alembic/), tests/ (unit + integration), pyproject.toml
 frontend/      Svelte 5 SPA (src/), Vite config, e2e/ (Playwright)
 mcp/           MCP server — one tool per /api/v1 endpoint (official mcp SDK, stdio)
-kanban-cli/    `kan` command-line client
-kanban-client/ Shared httpx wrapper both mcp/ and kanban-cli/ depend on
+pandan-cli/    `pandan` command-line client
+pandan-client/ Shared httpx wrapper both mcp/ and pandan-cli/ depend on
 docs/          Shape Up planning: FRAME → PRD/CONTEXT → SHAPING → BREADBOARD + ADRs + guides/
 .github/workflows/   CI (lint, unit, integration, frontend build, e2e, mcp, cli) + deploy to Fly.io
 Dockerfile           Multi-stage image — builds the SPA, then serves it from FastAPI
@@ -127,7 +127,7 @@ fly.toml             Fly.io deployment config
 ## API
 
 REST + JSON under the versioned `/api/v1` prefix, with interactive OpenAPI docs at **`/docs`**.
-Every board-scoped route is auth-required and owner-gated — a cookie session or a `kanban_pat_…`
+Every board-scoped route is auth-required and owner-gated — a cookie session or a `pandan_pat_…`
 bearer token resolves to a user, and only that board's owner is allowed (else `403`; no auth →
 `401`). `/api/health` stays unversioned and unauthenticated.
 
@@ -163,7 +163,7 @@ This repo is built in vertical slices. All three milestones are feature-complete
 | Query API + pagination | ✅ filters on `GET /api/v1/cards` + keyset pagination (`X-Next-Cursor`) |
 | Auth | ✅ GitHub login + cookie sessions; owner-gated `/api/v1`; per-user PATs |
 | Multiple boards | ✅ `board` entity with ownership + board switcher |
-| MCP server + `kan` CLI | ✅ thin adapters over `/api/v1` for agents and CI |
+| MCP server + `pandan` CLI | ✅ thin adapters over `/api/v1` for agents and CI |
 | UI polish | ✅ card/epic modals, epics grouping, light/dark theme toggle |
 | Seed data | ✅ Alembic data migration (guarded to empty DBs) |
 | Tests | ✅ `pytest` unit + integration + Playwright e2e |

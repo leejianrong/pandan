@@ -4,18 +4,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status & the source of truth
 
-The core board, **Milestone 2** (agent-driven task tracking: epics, `/api/v1`, query API, MCP
-server) and **Milestone 3** (accounts, multi-board ownership, auth) are all shipped and deployed
-(live at [simple-kanban-jian.fly.dev](https://simple-kanban-jian.fly.dev), full backend-pytest +
-Playwright-e2e suite, CI/CD to Fly.io). **Milestone 4** (board collaboration, trust & history,
-GitHub PR auto-sync, agent/CLI ergonomics) is in progress.
+The core board and **Milestones 2–6** are all shipped and deployed (live at
+[simple-kanban-jian.fly.dev](https://simple-kanban-jian.fly.dev), full backend-pytest +
+Playwright-e2e suite, CI/CD to Fly.io): M2 agent-driven task tracking (epics, `/api/v1`, query API,
+MCP server), M3 accounts + multi-board ownership + auth, M4 board collaboration/trust/history + GitHub
+PR auto-sync + agent-CLI ergonomics, M5 agent↔human handoff + awareness UI + fleet reporting, M6
+abuse hardening + projects + cycles + design system + notifications.
+
+**Milestone 7** ("Name & Sharpen the Tools", [docs/milestone-7/](docs/milestone-7/SLICES.md)) is
+**in progress**. Its first slice, **V40 — the `simple-kanban` → `pandan` rebrand**
+([ADR 0018](docs/adr/0018-pandan-rebrand.md), which also names the `kaya` notes sibling), has landed:
+the product is **pandan**, the CLI is **`pandan`** (with a `pdn` alias), env config is **`PANDAN_*`**,
+and newly minted PATs carry **`pandan_pat_`**. Next up is [AXI](https://axi.md/) conformance for the
+CLI and a right-sizing of the 48-tool MCP surface. The rebrand changed no API, schema or migration.
+
+Three things the rebrand deliberately did **not** rename, so don't "finish" it:
+- **The `KAN-` / `EPIC-` ticket prefixes** — immutable per-table Postgres sequences (ADR 0006/0009);
+  renaming would split the board's own history. `KAN` is retconned as simply "kanban".
+- **The deployed identity.** The app still lives at
+  [simple-kanban-jian.fly.dev](https://simple-kanban-jian.fly.dev) under the Fly app
+  `simple-kanban-jian`, with the same GitHub OAuth App and `AUTH_SECRET`. The Fly→Fly cutover was
+  **deferred** (KAN-424, blocked on the k8s migration KAN-439) rather than paid twice; the in-place
+  renames that *will* happen — GitHub repo, OAuth App display name, ghcr image path — are KAN-437.
+  The repo URL, the ghcr path (`…/simple-kanban-mcp`) and the docs-site URL therefore still read
+  `simple-kanban`, on purpose.
+- **Session/wire/storage identifiers** — the `kanbanauth` cookie, the `X-Kanban-Event` outbound
+  webhook header, the `kanban.*` logger names, the `kanban.theme` / `kanban.activeBoardId`
+  localStorage keys, and the `kanban:kanban@…/kanban` local Postgres credentials. Each would log
+  users out, break a consumer, or reset local state for no gain.
+
+The pre-rebrand **`KANBAN_API_URL` / `KANBAN_TOKEN` / `KANBAN_BOARD_ID` still work as a deprecated
+fallback** (read second, with a one-line notice on stderr), and a `kanban_pat_…` PAT still
+authenticates indefinitely. Both are dead weight carried on purpose, scheduled for removal.
 
 **This file is not the roadmap, and per-feature status written here goes stale — trust the code over
 these docs, and when they disagree, fix the docs in the same PR.** Two places are kept current by
 construction; look there for what's done and in flight:
-- **The Kanban board itself.** The project dogfoods its own product: the *Simple Kanban Roadmap*
-  board on the deployed instance is the authoritative task list. Drive it with the `kan` CLI
-  ([kanban-cli/](kanban-cli/)) or the MCP server ([mcp/](mcp/)).
+- **The board itself.** The project dogfoods its own product: the *Pandan Roadmap*
+  board on the deployed instance is the authoritative task list. Drive it with the `pandan` CLI
+  ([pandan-cli/](pandan-cli/)) or the MCP server ([mcp/](mcp/)).
 - **`docs/milestone-*/SLICES.md`** — the per-slice plan + status for each milestone, and the
   [ADRs](docs/adr/) for the *why* behind each decision (see §How the docs relate).
 
@@ -83,18 +110,18 @@ npm run e2e       # Playwright smoke (auto-starts backend+Vite; needs docker com
 
 **MCP server** (from `mcp/`) — the agent entry point (V5, board-scoped in V10), its own `uv` package:
 ```bash
-uv sync                                             # install (mcp SDK + the shared kanban-client)
+uv sync                                             # install (mcp SDK + the shared pandan-client)
 uv run ruff check .                                 # lint (matches CI mcp job)
 uv run pytest -q                                    # unit (mocked httpx) + tool-list smoke; no DB
-KANBAN_API_URL=http://localhost:8000 KANBAN_TOKEN=kanban_pat_… uv run python -m kanban_mcp   # run the stdio server by hand
+PANDAN_API_URL=http://localhost:8000 PANDAN_TOKEN=pandan_pat_… uv run python -m pandan_mcp   # run the stdio server by hand
 ```
-> A thin adapter over the shared **`kanban-client`** package (`kanban_client/client.py`, imports
-> `KanbanClient`; KAN-21 moved the `httpx` wrapper out of the old `mcp/kanban_mcp/api.py` into a
+> A thin adapter over the shared **`pandan-client`** package (`pandan_client/client.py`, imports
+> `PandanClient`; KAN-21 moved the `httpx` wrapper out of the MCP server's own `api.py` into a
 > sibling package the MCP server depends on by path so both stay in sync) — one tool per `/api/v1`
 > endpoint, giving **full CRUD parity across boards, cards, and epics** (list / get / create /
 > update / delete + card `move`) plus `list_boards`/`create_board` discovery; no DB of its own.
-> Config via `KANBAN_API_URL` + `KANBAN_TOKEN` (a **required** per-user PAT since `/api/v1` is
-> auth-required) + optional `KANBAN_BOARD_ID` (the default board for calls that omit `board_id`;
+> Config via `PANDAN_API_URL` + `PANDAN_TOKEN` (a **required** per-user PAT since `/api/v1` is
+> auth-required) + optional `PANDAN_BOARD_ID` (the default board for calls that omit `board_id`;
 > unset → list spans all your boards / create lands on the earliest, so set it in `.mcp.json` to
 > avoid targeting the wrong board; V10, ADR 0015). Wire into Claude Code by copying
 > `.mcp.json.example` → `.mcp.json`; see [mcp/README.md](mcp/README.md). CI runs it as the `mcp` job.
@@ -164,6 +191,21 @@ make worktree-db-down                         # tear it down when the worktree i
 `make db`/`make up`/`make dev` (shared :5432 compose Postgres) remain the loop for the primary
 checkout. Integration tests are unaffected — they spin up throwaway testcontainers of their own.
 
+**Running e2e from a worktree — the ports are env-overridable too (KAN-391).** Playwright uses
+`reuseExistingServer` in dev, and the backend/Vite origins default to `:8000`/`:5173`; on a
+multi-project machine those ports are often held by an unrelated local app, so a worktree e2e run
+silently reuses the foreign server and every spec fails at auth (`test-login` 404s) — a false red.
+`FRONTEND_PORT` / `BACKEND_PORT` (read by `frontend/vite.config.ts`, `frontend/playwright.config.ts`,
+and `frontend/e2e/helpers.ts`) let a worktree run on free ports **with no source edits**, defaulting
+to `5173`/`8000` so CI and normal dev are unchanged (`API_ORIGIN` can also be set explicitly to
+override the helpers' backend origin outright). The Vite `/api` proxy target follows `BACKEND_PORT`:
+```bash
+BACKEND_PORT=8010 FRONTEND_PORT=5183 npm run e2e   # from frontend/, needs DATABASE_URL set
+make worktree-e2e                                  # picks stable per-worktree ports + this worktree's DB
+```
+`make worktree-e2e` derives deterministic per-path ports (like `worktree-db`) and points the run at
+this worktree's ephemeral DB — bring the DB up first with `make worktree-db`.
+
 For parallel file-mutating work, **prefer [treehouse](https://github.com/kunchenguid/treehouse)** — it
 manages a bounded, recycled pool of worktrees (config in [`treehouse.toml`](treehouse.toml),
 `max_trees = 4`) so they don't pile up as one-off checkouts and clog disk (the mess KAN-240's cleanup
@@ -182,6 +224,33 @@ ln -sf ../../scripts/git-hooks/pre-push .git/hooks/pre-push
 ```
 Bypass a single push with `git push --no-verify` (use sparingly).
 
+Since **V50 (KAN-435)** the hook also has a `pandan-cli/` block (ruff + pytest + a **version-bump
+guard**), mirrored by CI's `CLI version bump` step: a diff touching `pandan-cli/pandan_cli/`
+behaviour **must** bump `__version__` in `pandan_cli/__init__.py` *and* `version` in
+`pandan-cli/pyproject.toml`, then re-run `uv lock` (a stale lock fails CI at `uv sync --frozen`, not
+at an obvious "version" error). There is deliberately no waiver flag. The point is that
+`pandan --version` prints build provenance — `pandan 0.5.0 (5da9ace)` for a release vs. an explicit
+`(source checkout, not a released build)` — so a stale binary is *detectable*; an unbumped version
+silently breaks that.
+
+> **A plain `git push` may fail with `No anonymous write access` / `Authentication failed`.** Two
+> known causes: a sub-agent shell can't reach the VS Code credential socket, and a cached credential
+> keyed to the *old* URL goes stale after a repo rename (KAN-437 hit this in the primary checkout, not
+> a worktree). Same fix either way:
+> `git -c credential.helper='!gh auth git-credential' push …`.
+
+**Mutation-test the guards you add here — this repo asks for it, and there's a way to lose your work
+doing it.** Several M7 slices ship a test whose whole job is "this can't regress" (the legacy-PAT
+prefix guard in V40, the ticket-ref branch in V42, the version-bump guard in V50). A test that passes
+proves nothing about such a promise until you've watched it go red: break the thing it protects,
+confirm the failure, restore. **But do the mutation non-destructively.**
+`git checkout -- <file>` / `git restore <file>` overwrite the working tree from the **index**, silently
+discarding uncommitted changes to that file — and unstaged work never entered the object database, so
+no reflog or `git fsck` can recover it. A V42 sub-agent nearly lost an entire implementation this way
+and was saved only by a scratch copy it happened to have written. Commit (or
+`git stash push -- <file>`) before mutating, edit a copy, or apply the mutation as a patch and reverse
+exactly it with `git apply -R`. See the `dev-playbook` skill, *Testing and correctness* §5.
+
 ## Configuration
 
 `DATABASE_URL` is the only required runtime config. It defaults to the docker-compose Postgres:
@@ -190,13 +259,42 @@ psycopg **v3** driver — keep it. Both the app ([backend/app/db.py](backend/app
 ([backend/alembic/env.py](backend/alembic/env.py)) read the same `DATABASE_URL`, so migrations
 always target the app's database.
 
+**DB + cold-start resilience env vars (V30, KAN-294)** — tune the app engines in
+[backend/app/db.py](backend/app/db.py) so a slow query on a cold-woken Neon can't pile up
+connections and wedge the 256MB box. All optional with prod-safe defaults, and applied to **both**
+the sync board engine and the async auth engine (Alembic's own engine in `env.py` is **untouched**,
+so long-running migrations are never cut short):
+- `DB_STATEMENT_TIMEOUT_MS` (default `30000`) — Postgres per-statement server-side cap in ms (via the
+  psycopg `options` connect-arg `-c statement_timeout=…`); a runaway query is cancelled, not hung. `0` disables.
+- `DB_POOL_SIZE` (`5`) / `DB_MAX_OVERFLOW` (`5`) — bounded connection pool (10 max), on top of `pool_pre_ping`.
+- `DB_POOL_TIMEOUT` (`10`) — seconds a caller waits for a free pooled connection before erroring (a burst degrades gracefully).
+- `DB_CONNECT_TIMEOUT` (`10`) — libpq connect timeout in seconds, so a stuck DB fails fast.
+
 **Agent auth is a per-user PAT (V9, ADR 0014; V10, ADR 0015).** `/api/v1` is **auth-required** for
 every request. Agents (the MCP server, `curl`) authenticate with a self-serve per-user **PAT**
-(`kanban_pat_…`, hashed HMAC-SHA256; created/revoked at `/api/v1/tokens` + the Tokens UI) set as
-`KANBAN_TOKEN`; it resolves to its owning user and is **owner-gated** exactly like a human. The
+(`pandan_pat_…`, hashed HMAC-SHA256; created/revoked at `/api/v1/tokens` + the Tokens UI) set as
+`PANDAN_TOKEN`; it resolves to its owning user and is **owner-gated** exactly like a human. The
 SPA/human clients authenticate with the **cookie session** and send no token. **`API_TOKENS` no
 longer exists** — V4's shared-token list (ADR 0010) was superseded by PATs (V9) and its transitional
 SERVICE bypass was removed in V10 (ADR 0015). (Ops: the `API_TOKENS` Fly secret can be dropped.)
+
+**Client config env vars (V40, KAN-423, ADR 0018)** — for the CLI ([pandan-cli/pandan_cli/config.py](pandan-cli/pandan_cli/config.py))
+and the MCP server ([mcp/pandan_mcp/config.py](mcp/pandan_mcp/config.py)), *not* the backend:
+`PANDAN_API_URL` / `PANDAN_TOKEN` / `PANDAN_BOARD_ID`. The pre-rebrand `KANBAN_*` spellings are a
+**deprecated fallback**: each key is read under its `PANDAN_*` name first and only then the `KANBAN_*`
+one, emitting a one-line notice on **stderr** (never stdout — the CLI's stdout is machine-readable and
+the MCP server's is the JSON-RPC channel). Precedence is **per value**, so a half-migrated environment
+resolves correctly. The CLI additionally migrates `~/.config/kan/config.toml` →
+`~/.config/pandan/config.toml` on first use (leaving the old file in place), still reads a legacy
+`[kan]` table, and still honours a `kanban` server key in `.mcp.json`. All of this is dead weight
+carried on purpose and is deleted in a later milestone.
+
+**PAT prefix (V40).** `TOKEN_PREFIX` in [backend/app/tokens.py](backend/app/tokens.py) is now
+`pandan_pat_`, with `LEGACY_TOKEN_PREFIXES = ("kanban_pat_",)`. The resolver's fast-path guard
+([backend/app/authz.py](backend/app/authz.py), `_resolve_pat`) tests the union — **that guard is
+load-bearing**: it is the one place a prefix change could invalidate already-issued tokens, and an
+earlier draft of ADR 0018 wrongly claimed it didn't exist. Verification itself is still an HMAC hash
+lookup over the whole raw token, so a `kanban_pat_…` PAT authenticates indefinitely.
 
 `AUTH_SECRET` doubles as the **pepper** for PAT hashing (HMAC-SHA256), so rotating it invalidates all
 existing PATs (and cookie sessions) — expected.
@@ -207,6 +305,21 @@ endpoint returns `503`** (auto-sync is effectively off); bad/missing signature �
 only the inbound webhook; it's separate from `AUTH_SECRET`. Per-board opt-in (`autosync_enabled` +
 `autosync_advance_to_done`, both default OFF) is set via `PATCH /api/v1/boards/{id}`. Full setup/ops:
 [docs/guides/autosync-github-setup.md](docs/guides/autosync-github-setup.md) (ADR 0016).
+
+**Outbound signed webhook (V38, KAN-302)** — the *outbound* mirror of the inbound `WEBHOOK_SECRET`
+verification. Per-board opt-in (mirrors autosync): `outbound_webhook_url` + `outbound_webhook_secret`
++ `outbound_webhook_enabled` (default OFF/NULL) set via `PATCH /api/v1/boards/{id}` (the **secret is
+write-only** — accepted on PATCH, never returned in a board read). When enabled with a URL set,
+creating a notification fires one HMAC-SHA256-signed `POST` to the URL using the **same**
+`X-Hub-Signature-256: sha256=<hex>` scheme (the shared signer lives in
+[backend/app/webhook_signing.py](backend/app/webhook_signing.py); dispatch in
+[backend/app/outbound.py](backend/app/outbound.py)). Delivery is best-effort, fired **after** the
+mutation's transaction commits (a SQLAlchemy `after_commit` session event — `record_notification`
+only queues it), so a slow/failed POST is swallowed + logged and **never** rolls back or blocks the
+mutation. No worker infra (MVP). Env (all optional): `OUTBOUND_WEBHOOK_TIMEOUT` (default `3.0`s
+per attempt), `OUTBOUND_WEBHOOK_RETRIES` (default `0` extra attempts), `OUTBOUND_WEBHOOK_MIN_INTERVAL`
+(default `1.0`s per-board throttle so a burst can't hammer the target; in-process, resets on restart —
+same tradeoff as the V27 limiter).
 
 **Observability env vars (KAN-172, ADR 0017)** — wired in [backend/app/observability.py](backend/app/observability.py):
 - `LOG_LEVEL` — level for the `kanban.access` structured JSON request logger (one line per request:
@@ -219,6 +332,39 @@ only the inbound webhook; it's separate from `AUTH_SECRET`. Per-board opt-in (`a
 Health probes (ADR 0017): `GET /api/health` is a **readiness** probe (cheap `SELECT 1` on the sync
 board engine → `503 {"status":"unavailable"}` when the DB is unreachable, else `200 {"status":"ok"}`);
 `GET /api/health/live` is a static **liveness** probe (always `200` while the process serves).
+
+**Rate limiting env vars (V27, KAN-291)** — wired in [backend/app/ratelimit.py](backend/app/ratelimit.py):
+a single classifying middleware over slowapi's in-memory `limits` engine guards four tiers —
+**auth** (login + OAuth callback), **write** (every `/api/v1` mutation incl. card `move`, board
+`dispatch`, `POST /tokens`), **expensive** (full-text search `GET /api/v1/cards?q=` + board
+`/metrics`), **webhook** (`POST /api/v1/webhooks/github`). Over the limit → `429` + a `Retry-After`
+header. Keyed on the **trusted `Fly-Client-IP`** header (never the spoofable `X-Forwarded-For`, since
+uvicorn runs `--forwarded-allow-ips=*`) plus a cheap principal hint. In-memory storage: single
+machine, resets on cold-start (accepted MVP). Config:
+- `RATE_LIMIT_ENABLED` — master switch. **Off unless truthy**, so dev + the test suite (which fire
+  many requests) are unaffected by default; set it on in prod (a Fly secret) to enable protection.
+- `RATE_LIMIT_AUTH` / `RATE_LIMIT_WRITE` / `RATE_LIMIT_EXPENSIVE` / `RATE_LIMIT_WEBHOOK` — per-tier
+  `limits` rate strings (`"N/second|minute|hour|day"`); generous defaults
+  `30`/`300`/`120`/`240` per minute.
+
+**Payload hardening env vars (V28, KAN-292)** — body-size + array caps; all optional with generous
+defaults, additive so normal payloads are unaffected. String `max_length`s are hardcoded in
+[backend/app/schemas.py](backend/app/schemas.py) (aligned to the `varchar(N)` column widths, so an
+over-long field is a clean `422`, not a 500 at INSERT); only the two lever amplifiers are env-tunable:
+- `MAX_REQUEST_BODY_BYTES` (default `2000000`, ~2 MB) — a body-size ceiling middleware
+  ([backend/app/main.py](backend/app/main.py)) that rejects a request whose declared `Content-Length`
+  exceeds it with `413`, before the body is read (header-only check).
+- `MAX_BATCH_ITEMS` (default `500`) — max cards per `PATCH /api/v1/cards/batch` (`422` over it).
+- `MAX_TEMPLATE_CARDS` (default `200`) — max cards per template, enforced on both create and apply.
+
+**Security headers (V29, KAN-293)** — a response middleware
+([backend/app/main.py](backend/app/main.py), registered outermost so it decorates errors + the
+rate-limit `429` too) sets HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy`, and a single-origin CSP. **The CSP ships as `Content-Security-Policy-Report-Only`
+first** (browsers report violations but block nothing, so it can't break the SPA or `/docs`, whose
+Swagger UI uses inline scripts/styles + a CDN bundle); flip to enforcing by renaming the header to
+`Content-Security-Policy` once prod consoles are clean (and self-host or allow the Swagger CDN for
+`/docs`). No env config.
 
 `E2E_AUTH_BYPASS` (V8) — when truthy, mounts an **e2e-only** `POST /auth/test-login` that mints a
 real cookie session for an arbitrary email (Playwright can't fake the httpOnly session a
@@ -335,7 +481,7 @@ spec for intended behavior:
 `SHAPING.md` (selects Shape A) → `BREADBOARD.md` (UI places & wiring) → build in slices.
 
 - **[docs/CONTEXT.md](docs/CONTEXT.md)** — canonical glossary and domain model. Use these terms exactly.
-- **[docs/adr/](docs/adr/)** (0001–0016; all Accepted except 0010, superseded) — the *why* behind each decision: monorepo &
+- **[docs/adr/](docs/adr/)** (0001–0018; all Accepted except 0010, superseded) — the *why* behind each decision: monorepo &
   stack (0001), Postgres+Alembic from day one (0002), single-artifact serving (0003), Fly.io+Neon
   CI/CD (0004), API-first/MCP-ready (0005), data model (0006), no-auth/LWW/no-realtime (0007),
   sync-SQLAlchemy + psycopg v3 + varchar-CHECK column + Vite dev-proxy (0008), epic as a first-class
@@ -348,6 +494,12 @@ spec for intended behavior:
   bypass), realising D3's one authorization layer and further evolving 0007/0010 (0013), self-serve
   agent personal access tokens — per-user hashed PATs resolving to their owning user, superseding
   0010's shared `API_TOKENS` as the agent mechanism (0014), MCP board-scoping (per-call `board_id` +
-  `list_boards`/`create_board` discovery + `KANBAN_BOARD_ID`) and **retiring `API_TOKENS`** — removing
+  `list_boards`/`create_board` discovery + `PANDAN_BOARD_ID`) and **retiring `API_TOKENS`** — removing
   the transitional SERVICE bypass so every principal is a real user, fully superseding 0010 (0015),
-  GitHub PR→board auto-sync via a signed webhook (`WEBHOOK_SECRET`, per-board opt-in) (0016).
+  GitHub PR→board auto-sync via a signed webhook (`WEBHOOK_SECRET`, per-board opt-in) (0016),
+  observability — DB-readiness health + structured request logging + opt-in Sentry (0017), and the
+  **`simple-kanban` → `pandan` rebrand** with `kaya` as the notes sibling (suite: `kayatoast`) —
+  what gets renamed (CLI `kan`→`pandan`+`pdn`, MCP tool namespace, `PANDAN_*` env with a deprecated
+  `KANBAN_*` fallback, PAT mint prefix) and what deliberately does **not** (the immutable `KAN-`/
+  `EPIC-` ticket prefixes, the deployed Fly/OAuth identity — deferred, and session/wire/storage
+  identifiers) (0018).

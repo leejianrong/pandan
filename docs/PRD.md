@@ -1,4 +1,4 @@
-# PRD — Simple Kanban (MVP)
+# PRD — Pandan (MVP)
 
 - **Status:** Draft (step B of build-plan-product)
 - **Date:** 2026-07-07

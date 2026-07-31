@@ -20,6 +20,8 @@ boards. See :mod:`app.authz`.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -28,11 +30,41 @@ from ..activity import record_activity
 from ..auth_models import User
 from ..authz import Access, authorize_board, get_principal, visible_board_ids
 from ..db import get_db
-from ..models import Epic
-from ..schemas import EpicCreate, EpicRead, EpicTrashRead, EpicUpdate
+from ..epic_rollup import compute_rollup
+from ..models import Card, Epic
+from ..schemas import EpicCreate, EpicProgress, EpicRead, EpicTrashRead, EpicUpdate
 from .boards import resolve_board_id
 
 router = APIRouter(prefix="/epics", tags=["epics"])
+
+
+def _attach_rollups(db: Session, epics: list[Epic]) -> list[Epic]:
+    """Attach the derived progress + health (V32, KAN-296) onto each epic in place so
+    :class:`EpicRead` (``from_attributes``) serialises them — no stored column, no
+    migration. One grouped ``COUNT`` over the epics' **non-deleted** child cards
+    (``done`` = the ``done`` column); the math lives in :mod:`app.epic_rollup`.
+    Returns the same list for call-site convenience."""
+    now = datetime.now(timezone.utc)
+    counts: dict[int, tuple[int, int]] = {}
+    epic_ids = [e.id for e in epics]
+    if epic_ids:
+        rows = db.execute(
+            select(
+                Card.epic_id,
+                func.count().label("total"),
+                func.count().filter(Card.column == "done").label("done"),
+            )
+            .where(Card.epic_id.in_(epic_ids), Card.deleted_at.is_(None))
+            .group_by(Card.epic_id)
+        ).all()
+        counts = {row.epic_id: (row.total, row.done) for row in rows}
+    for epic in epics:
+        total, done = counts.get(epic.id, (0, 0))
+        rollup = compute_rollup(total, done, epic.target_date, now=now)
+        # Transient (unmapped) attributes read by EpicRead's from_attributes.
+        epic.progress = EpicProgress(**rollup["progress"])  # type: ignore[attr-defined]
+        epic.health = rollup["health"]  # type: ignore[attr-defined]
+    return epics
 
 
 def _get_or_404(db: Session, epic_id: int) -> Epic:
@@ -73,7 +105,7 @@ def list_epics(
         query = query.where(Epic.board_id == board_id)
     else:
         query = query.where(Epic.board_id.in_(visible_board_ids(principal)))
-    return list(db.scalars(query).all())
+    return _attach_rollups(db, list(db.scalars(query).all()))
 
 
 @router.get("/trash", response_model=list[EpicTrashRead])
@@ -96,7 +128,7 @@ def list_trashed_epics(
         query = query.where(Epic.board_id == board_id)
     else:
         query = query.where(Epic.board_id.in_(visible_board_ids(principal)))
-    return list(db.scalars(query).all())
+    return _attach_rollups(db, list(db.scalars(query).all()))
 
 
 @router.post("", response_model=EpicRead, status_code=status.HTTP_201_CREATED)
@@ -111,6 +143,8 @@ def create_epic(
         board_id=board_id,
         name=payload.name,
         description=payload.description,
+        target_date=payload.target_date,
+        lead=payload.lead,
     )
     db.add(epic)
     db.commit()
@@ -126,7 +160,7 @@ def create_epic(
         summary=f"created {epic.ticket_number}: {epic.name}",
     )
     db.commit()
-    return epic
+    return _attach_rollups(db, [epic])[0]
 
 
 @router.get("/{epic_id}", response_model=EpicRead)
@@ -137,7 +171,7 @@ def get_epic(
 ) -> Epic:
     epic = _get_or_404(db, epic_id)
     authorize_board(db, principal, epic.board_id, Access.READ)
-    return epic
+    return _attach_rollups(db, [epic])[0]
 
 
 @router.patch("/{epic_id}", response_model=EpicRead)
@@ -168,7 +202,7 @@ def update_epic(
     )
     db.commit()  # updated_at is bumped server-side via onupdate
     db.refresh(epic)
-    return epic
+    return _attach_rollups(db, [epic])[0]
 
 
 @router.delete("/{epic_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -226,7 +260,7 @@ def restore_epic(
     )
     db.commit()
     db.refresh(epic)
-    return epic
+    return _attach_rollups(db, [epic])[0]
 
 
 @router.delete("/{epic_id}/purge", status_code=status.HTTP_204_NO_CONTENT)

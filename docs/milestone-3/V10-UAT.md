@@ -3,7 +3,7 @@
 - **Date:** 2026-07-09
 - **Slice:** V10 (ADR 0015) — completes Milestone 3
 - **Environment:** production — `https://simple-kanban-jian.fly.dev` (Fly.io `iad`, machine version 20)
-- **Tester:** Claude (acting as the AI agent), driving the **V10 MCP server** (`mcp/kanban_mcp`)
+- **Tester:** Claude (acting as the AI agent), driving the **V10 MCP server** (`mcp/pandan_mcp`)
   against the deployed API with a real personal access token (`KANBAN_TOKEN`).
 
 ## 1. Deploy verification

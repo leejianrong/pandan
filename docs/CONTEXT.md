@@ -1,6 +1,6 @@
 # CONTEXT.md
 
-Shared language, domain model, and locked decisions for the **Simple Kanban** MVP.
+Shared language, domain model, and locked decisions for the **Pandan** MVP.
 This is the canonical vocabulary; downstream docs (PRD, shaping, breadboard) should use these
 terms exactly. Produced during step A (grill-with-docs). See `docs/adr/` for the reasoning behind
 each significant decision, and `QUESTIONS.md` for the resolved Q&A trail.

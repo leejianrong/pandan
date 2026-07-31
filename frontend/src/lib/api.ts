@@ -100,6 +100,17 @@ export interface CardUpdate {
   label_ids?: number[];
 }
 
+// Derived per-epic health signal (V32, KAN-296) — computed server-side from the
+// epic's target_date vs. remaining child work; null when the epic has no target_date.
+export type EpicHealth = "on_track" | "at_risk" | "overdue";
+
+// Derived rollup over an epic's non-deleted child cards (V32, KAN-296).
+export interface EpicProgress {
+  total: number;
+  done: number;
+  percent: number; // 0–100
+}
+
 // An epic is a grouping a story can belong to (ADR 0009), scoped to a board (V7).
 export interface Epic {
   id: number;
@@ -107,6 +118,12 @@ export interface Epic {
   board_id: number;
   name: string;
   description: string | null;
+  // Lightweight project fields (V31, KAN-295) — optional target/ship date + lead.
+  target_date: string | null;
+  lead: string | null;
+  // Derived, server-authoritative (V32, KAN-296): progress rollup + health signal.
+  progress: EpicProgress;
+  health: EpicHealth | null;
   created_at: string;
   updated_at: string;
 }
@@ -648,7 +665,17 @@ export async function removeMember(boardId: number, memberId: number): Promise<v
 // over the X-Next-Cursor response header exactly like GET /cards.
 
 export type ActivityEntityType = "card" | "epic" | "board";
-export type ActivityAction = "created" | "updated" | "deleted" | "moved" | "restored";
+// Mirrors backend VALID_ACTIVITY_ACTIONS (models.py): the CRUD verbs plus V13's
+// attention/resolved handoff events and KAN-239's purged (permanent destruction).
+export type ActivityAction =
+  | "created"
+  | "updated"
+  | "deleted"
+  | "moved"
+  | "restored"
+  | "attention"
+  | "resolved"
+  | "purged";
 
 export interface Activity {
   id: number;
@@ -689,6 +716,48 @@ export async function listActivity(
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   const entries: Activity[] = await res.json();
   return { entries, nextCursor: res.headers.get(NEXT_CURSOR_HEADER) };
+}
+
+// --- Notifications (V37 API, KAN-301; surfaced in the UI by V39, KAN-303) -----
+// A per-user inbox of events a human shouldn't miss. Poll/pull only (ADR 0007) —
+// no websockets; the client polls `GET /notifications`. Owner-scoped: a caller
+// only ever sees their own rows. `read_at` is null while unread.
+
+// Mirrors the backend VALID_NOTIFICATION_KINDS (models.py) — the four events a
+// human shouldn't miss.
+export type NotificationKind = "needs_human" | "blocked" | "ci_failed" | "assigned";
+
+export interface Notification {
+  id: number;
+  // The recipient (UUID) — always the current caller on the owner-scoped list.
+  user_id: string;
+  board_id: number;
+  // The card the event is about, or null once that card is purged (SET NULL).
+  card_id: number | null;
+  kind: NotificationKind;
+  body: string;
+  // ISO timestamp once marked read; null while unread.
+  read_at: string | null;
+  created_at: string;
+}
+
+// List the caller's notifications, newest-first. `unread: true` → only the unread
+// ones (server-side `?unread=true`); default returns all.
+export async function listNotifications(
+  opts: { unread?: boolean } = {},
+): Promise<Notification[]> {
+  const suffix = opts.unread ? "?unread=true" : "";
+  const res = await fetch(`${API}/notifications${suffix}`);
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+// Mark one of the caller's notifications read (idempotent server-side). Returns the
+// updated row so the caller could reconcile, though the store just refetches.
+export async function markNotificationRead(id: number): Promise<Notification> {
+  const res = await fetch(`${API}/notifications/${id}`, { method: "PATCH" });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
 }
 
 // --- Board metrics (M5 V17 API, surfaced in the UI by V16, KAN-249/KAN-250) --
@@ -743,6 +812,60 @@ export async function getBoardMetrics(
   if (opts.window) qs.set("window", opts.window);
   const suffix = qs.toString() ? `?${qs}` : "";
   const res = await fetch(`${API}/boards/${boardId}/metrics${suffix}`);
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+// --- Cycles / iterations (V33 API) + cycle burndown/velocity (V34, KAN-298) --
+// A cycle is a board-scoped, time-boxed iteration a story can belong to. Its
+// metrics (burndown / velocity) are derived server-side from the cycle's card
+// state + the activity feed (no stored metric). Read-only; owner/member-gated.
+
+export interface Cycle {
+  id: number;
+  board_id: number;
+  name: string;
+  starts_on: string | null;
+  ends_on: string | null;
+  created_at: string;
+}
+
+export interface WorkTotals {
+  count: number;
+  points: number;
+}
+
+export interface BurndownPoint {
+  date: string; // ISO calendar day (YYYY-MM-DD, UTC)
+  remaining: number;
+  completed: number;
+  ideal: number;
+}
+
+export interface CycleMetrics {
+  board_id: number;
+  cycle_id: number;
+  generated_at: string;
+  starts_on: string | null;
+  ends_on: string | null;
+  committed: WorkTotals;
+  completed: WorkTotals;
+  velocity: number;
+  unit: "points" | "count";
+  burndown: BurndownPoint[];
+}
+
+export async function listCycles(boardId: number): Promise<Cycle[]> {
+  const res = await fetch(`${API}/boards/${boardId}/cycles`);
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function getCycleMetrics(
+  boardId: number,
+  cycleId: number,
+): Promise<CycleMetrics> {
+  const res = await fetch(`${API}/boards/${boardId}/cycles/${cycleId}/metrics`);
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
 }
