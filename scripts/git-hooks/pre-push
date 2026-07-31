@@ -9,6 +9,11 @@
 # fails on svelte-check for a change that never touched frontend/, so scoped slices
 # get real signal instead of a blanket `--no-verify`.
 #
+# Two diff ranges, not one (KAN-484): which checks to RUN is a question about the
+# push (incremental), while the CLI version-bump POLICY is a question about the
+# branch (merge-base vs the default branch, matching CI). See the long note at the
+# range computation below — that split is the whole point and not incidental.
+#
 # Install (from repo root):
 #   ln -sf ../../scripts/git-hooks/pre-push .git/hooks/pre-push
 # Bypass for a one-off (use sparingly):  git push --no-verify
@@ -17,33 +22,81 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 zero="0000000000000000000000000000000000000000"
 
-# Resolve a stable base ref for new branches / stdin-less fallbacks.
+# Resolve a stable base ref for new branches / stdin-less fallbacks. Track
+# whether it resolved at all: an unresolvable base and a branch that simply adds
+# nothing beyond the base both yield an empty branch range, and they need
+# opposite treatment (KAN-484 — see the fail-safe note below).
+base_resolved=1
 if git rev-parse --verify -q origin/main >/dev/null; then
   base_ref="origin/main"
+elif git rev-parse --verify -q main >/dev/null; then
+  base_ref="main"
 else
   base_ref="main"
+  base_resolved=0
 fi
 
 # Compute the set of files changed by the push. A pre-push hook gets
 # `<local-ref> <local-sha> <remote-ref> <remote-sha>` lines on stdin.
+#
+# TWO ranges, deliberately (KAN-484). They exist because this hook answers two
+# different questions and only one of them is about the push:
+#
+#   `changed`         TEST SELECTION — "what changed since the last push?"
+#                     Incremental (remote tip → local tip) once the branch is on
+#                     the remote. On a long-lived branch that is much smaller than
+#                     the whole-branch diff, and re-running ruff / pytest /
+#                     svelte-check over areas an earlier push already proved green
+#                     is wasted wall-clock on every single push.
+#
+#   `branch_changed`  POLICY — "does this BRANCH bump the CLI version?"
+#                     Always the whole branch (merge-base against the default
+#                     branch), which is exactly what CI's `CLI version bump` step
+#                     evaluates (dorny/paths-filter against the PR base).
+#
+# They MUST differ, and conflating them was the KAN-484 bug: evaluated over the
+# incremental range the version-bump policy false-positives on a merge commit.
+# Merging main into an in-flight branch — the normal move under this repo's branch
+# protection whenever another PR lands first, and what `gh pr update-branch` does
+# — puts main's pandan_cli/ files inside `remote_sha..local_sha`, while the bump
+# you already made sits in an earlier push and is OUTSIDE it. Worse, resolving the
+# version-line conflict the *correct* way (keep your branch's already-higher
+# version) leaves the version files byte-identical on both ends of the incremental
+# range, so they vanish from the diff entirely. Real case: commit 608e2f3, where
+# `git diff 1afa1cc 608e2f3` lists pandan_cli/{cli,context}.py and no version file
+# at all, while the branch range lists both plus __init__.py and pyproject.toml.
+# The hook fired; CI passed; the agent pushed with --no-verify. A guard that cries
+# wolf gets routed around, and then it is not a guard — so the fix is to make the
+# policy ask the branch-shaped question. NOT to add a waiver flag: V50 shipped
+# without one on purpose (KAN-435), and that stands.
 changed=""
+branch_changed=""
 have_stdin=0
 while read -r local_ref local_sha remote_ref remote_sha; do
   have_stdin=1
   # Branch deletion (nothing to push) — skip.
   [ "$local_sha" = "$zero" ] && continue
+
+  # Whole-branch range: diff against the base (merge-base if reachable). Stale
+  # `origin/main` only widens this — it never hides a missing bump — because
+  # anything main landed under pandan_cli/ came with its own version bump.
+  range_base="$base_ref"
+  if mb="$(git merge-base "$base_ref" "$local_sha" 2>/dev/null)"; then
+    range_base="$mb"
+  fi
+  branch_files="$(git diff --name-only "$range_base" "$local_sha" 2>/dev/null || true)"
+
   if [ "$remote_sha" = "$zero" ]; then
-    # New branch on the remote: diff against the base (merge-base if reachable).
-    range_base="$base_ref"
-    if mb="$(git merge-base "$base_ref" "$local_sha" 2>/dev/null)"; then
-      range_base="$mb"
-    fi
-    files="$(git diff --name-only "$range_base" "$local_sha" 2>/dev/null || true)"
+    # New branch on the remote: there is no previous push, so the whole-branch
+    # range is also the only sensible test range.
+    files="$branch_files"
   else
     files="$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || true)"
   fi
   changed="$changed
 $files"
+  branch_changed="$branch_changed
+$branch_files"
 done
 
 if [ "$have_stdin" -eq 0 ]; then
@@ -53,19 +106,38 @@ if [ "$have_stdin" -eq 0 ]; then
   else
     changed="$(git diff --name-only "$base_ref...HEAD" 2>/dev/null || true)"
   fi
+  # `A...B` is already merge-base semantics, so this is the branch range.
+  branch_changed="$(git diff --name-only "$base_ref...HEAD" 2>/dev/null || true)"
 fi
 
-# Normalise to a sorted, de-duped, non-empty list.
+# Normalise both to a sorted, de-duped, non-empty list.
 changed="$(printf '%s\n' "$changed" | sed '/^$/d' | sort -u)"
+branch_changed="$(printf '%s\n' "$branch_changed" | sed '/^$/d' | sort -u)"
 
-if [ -z "$changed" ]; then
+# Fail safe, not open: in a clone with neither `origin/main` nor `main` the branch
+# range comes back empty, which would silently skip the policy. Fall back to the
+# incremental set so it is still evaluated on *something*.
+#
+# Gated on `base_resolved` on purpose. An empty branch range with a *resolvable*
+# base means something different — the tip is already an ancestor of the base, so
+# the branch adds nothing to police, and CI would compute the same empty diff and
+# skip its step too. Falling back there would re-open exactly the KAN-484 bug in
+# that corner, so don't.
+if [ "$base_resolved" -eq 0 ] && [ -z "$branch_changed" ]; then
+  branch_changed="$changed"
+fi
+
+if [ -z "$changed" ] && [ -z "$branch_changed" ]; then
   echo "pre-push ▸ no changed files detected — nothing to check"
   echo "pre-push ▸ OK"
   exit 0
 fi
 
-# Does the changed set contain a path under the given prefix?
+# Does the changed set contain a path under the given prefix? `touched` asks the
+# incremental (test-selection) set, `branch_touched` the whole branch — see the
+# two-ranges note above before swapping one for the other.
 touched() { printf '%s\n' "$changed" | grep -q "^$1"; }
+branch_touched() { printf '%s\n' "$branch_changed" | grep -q "^$1"; }
 
 ran_any=0
 
@@ -112,27 +184,36 @@ if touched "pandan-cli/"; then
   ran_any=1
   echo "pre-push ▸ pandan-cli: ruff + tests"
   ( cd "$repo_root/pandan-cli" && uv run ruff check . && uv run pytest -q )
-
-  # Bump-on-fix (V50 / KAN-435): a CLI change users can SEE must ship a version
-  # bump in the same push, or `--version` can't tell a stale install from current
-  # source — the root cause of two false bug reports. Cheap rule: any diff under
-  # pandan-cli/pandan_cli/ must also touch a version declaration. A comment-only
-  # edit taking a patch bump is a fine, honest outcome; CI enforces the same rule
-  # (the `CLI version bump` step), this is just the fast local signal.
-  if touched "pandan-cli/pandan_cli/"; then
-    if touched "pandan-cli/pyproject.toml" || touched "pandan-cli/pandan_cli/__init__.py"; then
-      echo "pre-push ▸ pandan-cli: version bump present"
-    else
-      echo "pre-push ▸ FAIL: pandan-cli/pandan_cli/ changed but the version did not."
-      echo "         Bump __version__ in pandan-cli/pandan_cli/__init__.py AND version in"
-      echo "         pandan-cli/pyproject.toml (then re-run \`uv lock\`) in this same change."
-      echo "         Why: a user-visible fix that never bumps the version ships a binary"
-      echo "         indistinguishable from source (V50, KAN-435)."
-      exit 1
-    fi
-  fi
 else
   echo "pre-push ▸ pandan-cli: skipped (no pandan-cli/ changes)"
+fi
+
+# Bump-on-fix (V50 / KAN-435): a CLI change users can SEE must ship a version bump
+# in the same CHANGE, or `--version` can't tell a stale install from current source
+# — the root cause of two false bug reports. Cheap rule: any diff under
+# pandan-cli/pandan_cli/ must also touch a version declaration. A comment-only edit
+# taking a patch bump is a fine, honest outcome; CI enforces the same rule (the
+# `CLI version bump` step), this is just the fast local signal.
+#
+# Asks `branch_touched`, not `touched` — the question is about the branch, not the
+# push (KAN-484; see the two-ranges note at the top). Its own block rather than
+# nested inside the pandan-cli test block for the same reason: a push whose
+# incremental diff is docs-only still gets its branch checked, which is what CI
+# does — CI gates this step on `cli_code` alone, independently of the CLI job's own
+# `cli` gate.
+if branch_touched "pandan-cli/pandan_cli/"; then
+  if branch_touched "pandan-cli/pyproject.toml" || branch_touched "pandan-cli/pandan_cli/__init__.py"; then
+    echo "pre-push ▸ pandan-cli: version bump present in this branch"
+  else
+    echo "pre-push ▸ FAIL: pandan-cli/pandan_cli/ changed in this branch but the version did not."
+    echo "         Bump __version__ in pandan-cli/pandan_cli/__init__.py AND version in"
+    echo "         pandan-cli/pyproject.toml (then re-run \`uv lock\`) in this same change."
+    echo "         Why: a user-visible fix that never bumps the version ships a binary"
+    echo "         indistinguishable from source (V50, KAN-435)."
+    echo "         Scope: the whole branch vs $base_ref, matching CI — so an earlier"
+    echo "         push's bump counts. If $base_ref looks stale, \`git fetch origin\`."
+    exit 1
+  fi
 fi
 
 if [ "$ran_any" -eq 0 ]; then
