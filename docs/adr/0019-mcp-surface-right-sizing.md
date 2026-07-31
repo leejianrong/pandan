@@ -77,7 +77,7 @@ was simply wrong.
 Where today's 8,775 sits: **descriptions (prose) 4,030 · input schemas 3,660 · tool names 394** (the
 remaining ~690 is JSON framing — the object braces, the three keys, and escaping). So prose and schema
 are roughly half each, and no single tool dominates: `list_cards` is the largest at 780, `create_card`
-497, `update_card` 450, and the cheapest 20 tools cost ≤130 each (`get_card` is 57). There is no fat
+497, `update_card` 450, and the cheapest 21 tools cost ≤130 each (`get_card` is 57). There is no fat
 tail to trim — the cost is spread, which is itself an argument against a surgical "delete the rarely
 used ones" pass. Run with `--per-tool` for the full breakdown.
 
