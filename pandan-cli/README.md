@@ -47,6 +47,7 @@ rather than spot-fixing it.
 
 | Command | Endpoint |
 |---------|----------|
+| `pandan overview [--board N]` | `GET /cards` — what bare `pandan` prints; listed in `--help` since KAN-492 (see [Bare `pandan`](#bare-pandan-shows-you-the-board-v46-kan-429)) |
 | `pandan warmup` | `GET /api/health` |
 | `pandan list [--board N] [--column C] [--epic ID] [--cycle ID] [--priority P] [--label ID] [--due-before ISO] [--overdue] [--needs-human] [--assignee A] [--q TEXT] [--sort SPEC] [--limit N]` | `GET /cards` (V3 query API) |
 | `pandan get <card_id>` | `GET /cards/{id}` |
