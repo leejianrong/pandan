@@ -345,10 +345,13 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
 ## Wave 3 — MCP right-sizing *(Nice-to-have; the milestone demos complete without this)*
 
 ### V49 · MCP right-sizing: measure, decide, ADR, execute (A8) — KAN-432
-- **Build:** the 48 MCP tool schemas load into every agent's context before any work happens, and the
+- **Build:** the MCP tool schemas load into every agent's context before any work happens, and the
   CLI now has full parity — so for a shell-capable agent the CLI path is strictly cheaper per task.
-  1. **Measure** (the Must half): the token cost of the current 48-tool schema set, and of each option
-     below, on the same yardstick.
+  1. **Measure** (the Must half): the token cost of the current schema set, and of each option
+     below, on the same yardstick. **The surface is 49 tools, not the 48 this plan and KAN-432
+     originally said** — verified 2026-07-31 by driving the server over stdio (`initialize` →
+     `tools/list` returns 49) against the live `.mcp.json` config. The measured resident cost is
+     **~10,076 tokens per session**. Re-count rather than trusting either number when you start.
   2. **Decide** between: (a) consolidate to a small verb set (e.g. one tool per entity with an action
      argument); (b) expose a single exec-`pandan` tool and let the CLI be the surface; (c) keep the
      breadth as the documented fallback for shell-less agents and **freeze its growth**.
