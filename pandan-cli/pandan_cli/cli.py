@@ -35,6 +35,17 @@ agent never pays a second round trip for counts: ``42 cards · 12 todo · 5 in_p
 the rows under ``--format json``/``toon``. It always describes **the rows actually
 returned** — under ``--limit``, a filter, or one keyset page — never the whole board.
 
+**Long free-text fields are truncated with a size hint** (V45, KAN-428 — AXI 3), so
+one ``get`` can't blow an agent's context: a card/epic ``description``, a
+comment/notification ``body`` and an ``attention_note`` are cut at
+``PANDAN_MAX_TEXT_CHARS`` characters (default 500; ``0`` disables) and marked
+``(truncated, 3431 chars total — use --full to see complete body)``. The count is the
+**true original** length in characters. This applies to the human rows *and* to
+``--format json``/``toon`` — the payload's shape is unchanged (a truncated string is
+still a string) and ``--full`` restores every body everywhere. A **single** ``get``
+also now prints that description at all, which it never did before: it used to be a
+one-line summary, so the body was invisible without ``--json``.
+
 Failures are **structured and on stdout** (V43, KAN-426 — AXI 6): one tab-separated
 row ``error<TAB><code><TAB><message><TAB><arg>`` (``-`` when no single argument is at
 fault), or the same object serialized under ``--format json``/``toon``. stdout is the
@@ -70,6 +81,7 @@ from pandan_client import PandanApiError, PandanClient
 from . import build_info, toon
 from .config import (
     DEFAULT_API_URL,
+    DEFAULT_MAX_TEXT_CHARS,
     Config,
     ConfigError,
     config_file_path,
@@ -220,33 +232,146 @@ PRIORITIES = ("none", "low", "medium", "high", "urgent")
 DEFAULT_LABEL_COLOR = "#64748b"
 
 
+# --- content truncation (V45, KAN-428 — AXI 3) ------------------------------
+# A card description on this project's own board runs to ~3.4k characters, so a
+# single `get` was the most expensive call an agent could make, and `comment list`
+# could return several of them at once. Every output path now caps a long
+# free-text field at ``config.max_text_chars`` and says so, in a hint carrying the
+# **true total** so the caller can decide whether the rest is worth a second call:
+#
+#     … (truncated, 3431 chars total — use --full to see complete body)
+#
+# `--full` opts out everywhere, including the structured formats — the escape hatch
+# is what makes truncating a machine payload safe.
+#
+# Two invariants, both pinned by tests:
+#
+# * **Characters, never bytes.** Truncation slices a ``str``, which Python indexes
+#   by code point, so a multi-byte character (the board's own text is full of
+#   ``·``/``—``/``→``) can never be split in half and the output is always valid
+#   UTF-8. The reported total is likewise a character count — `len(text)`, not
+#   `len(text.encode())`. (Combining marks / ZWJ emoji sequences are *grapheme*
+#   clusters, which the stdlib cannot segment; splitting one is cosmetic, produces
+#   valid UTF-8, and is out of scope.)
+# * **The total is true.** The hint's number is the length of the *original* text,
+#   measured before the cut. A hint claiming a wrong size is worse than no hint.
+#
+# Which fields: an explicit allow-list, not "any long string". Two payload strings
+# are load-bearing and must survive verbatim at any length — a keyset
+# ``next_cursor`` (truncate it and pagination silently breaks) and a link ``url`` —
+# so a blanket rule would be a correctness bug waiting for a long value. The
+# allow-list is exactly the API's unbounded ``Text`` columns that hold prose.
+_TEXT_FIELDS = frozenset(
+    {
+        "description",     # card + epic
+        "body",            # comment + notification
+        "attention_note",  # the needs-human handoff note
+        "summary",         # an activity row's human sentence
+    }
+)
+
+
+def _truncation_hint(total: int) -> str:
+    """The size hint appended to a cut field. ``total`` is the **original** length in
+    characters, so the caller can size the follow-up call it might make."""
+    return f"(truncated, {total} chars total — use --full to see complete body)"
+
+
+def _truncate_text(text: str, limit: int) -> tuple[str, int | None]:
+    """``(rendered, original_length)`` — with ``original_length`` **None when nothing
+    was cut**, which is how every caller decides whether to show a hint.
+
+    ``limit <= 0`` disables truncation (that is what ``--full`` and
+    ``PANDAN_MAX_TEXT_CHARS=0`` resolve to), and an under-limit string is returned
+    unchanged — identical object, no ellipsis, no hint."""
+    if limit <= 0 or len(text) <= limit:
+        return text, None
+    # `str` slicing is by code point: this cannot split a multi-byte character.
+    return text[:limit], len(text)
+
+
+def _truncate_inline(text: str, limit: int) -> str:
+    """Truncate for a context that has to stay a single string — a TSV cell or a
+    JSON/TOON string value — by appending the ellipsis + hint to the kept prefix.
+
+    Deliberately still a **string**: a structured consumer's ``.description`` keeps
+    its type and only gets shorter, which is the smallest change that bounds the
+    payload. Promoting it to ``{"text": …, "truncated": true}`` would break every
+    caller that reads the field."""
+    kept, total = _truncate_text(text, limit)
+    if total is None:
+        return kept
+    return f"{kept}… {_truncation_hint(total)}"
+
+
+def _truncate_payload(value: Any, limit: int) -> Any:
+    """Recursively copy a structured payload with its ``_TEXT_FIELDS`` strings cut to
+    ``limit``. Anything else — numbers, booleans, other strings, keys — is returned
+    untouched, and an unchanged payload is returned as the same object.
+
+    Only *values reached through a ``_TEXT_FIELDS`` key* are cut, so a long string
+    living under some other key (``next_cursor``, ``url``, ``title``) is safe by
+    construction rather than by luck."""
+    if limit <= 0:
+        return value
+    if isinstance(value, dict):
+        return {
+            key: (
+                _truncate_inline(item, limit)
+                if key in _TEXT_FIELDS and isinstance(item, str)
+                else _truncate_payload(item, limit)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_truncate_payload(item, limit) for item in value]
+    return value
+
+
+def _text_limit(*, full: bool, limit: int) -> int:
+    """The effective character limit: ``--full`` collapses to ``0`` (= off), which is
+    the same value ``PANDAN_MAX_TEXT_CHARS=0`` produces. One concept downstream, so
+    no helper below has to know about the flag."""
+    return 0 if full else limit
+
+
 # --- output helpers ---------------------------------------------------------
 
 
-def _structured_payload(result: Any) -> Any:
+def _structured_payload(
+    result: Any,
+    *,
+    full: bool = False,
+    limit: int = DEFAULT_MAX_TEXT_CHARS,
+) -> Any:
     """The object both structured formats serialize — **the one shared serializer**
     V47 (KAN-430) exists to establish. ``json`` and ``toon`` differ only in how this
     return value is written out, so they cannot describe different data.
 
-    It is the client's result verbatim **plus** a ``summary`` object beside the rows
-    on a list response (V44, KAN-427 — see ``_summary_for``); every other shape (a
-    single entity, metrics, a delete receipt) passes through untouched, because
-    there is nothing to total. The human counterpart of that ``summary`` is the
-    trailing line in ``_emit`` below, rendered from the *same* dict.
+    It is the client's result **plus** a ``summary`` object beside the rows on a list
+    response (V44, KAN-427 — see ``_summary_for``), with its long free-text fields
+    cut to ``limit`` characters (V45, KAN-428 — see ``_truncate_payload``). Rows are
+    otherwise verbatim: no key is added, removed or retyped, and ``--full``
+    (``full=True``) restores every body in full. Every other shape (a single entity,
+    metrics, a delete receipt) grows no ``summary``, because there is nothing to
+    total. The human counterpart of that ``summary`` is the trailing line in
+    ``_emit`` below, rendered from the *same* dict.
 
-    It is a function, not an inlined expression, because the remaining slices want
-    to bend the structured payload and must bend **both** formats at once:
-
-    * **V45 (KAN-428)** — truncate long text here, taking ``full: bool`` (from
-      ``--full``) as a keyword argument threaded down from ``_emit``'s caller.
+    **The aggregate is attached after truncation, never before** — so the counts in
+    ``summary`` are structurally out of the truncator's reach, and an activity row's
+    own ``summary`` *string* (a ``_TEXT_FIELDS`` member) can still be cut without
+    the two ever being confused for each other.
     """
+    payload = _truncate_payload(result, _text_limit(full=full, limit=limit))
+    # Computed from the untruncated ``result``: the numbers describe the rows the API
+    # returned, and cannot be perturbed by how much of a body we chose to print.
     found = _summary_for(result)
     if found is None:
-        return result
+        return payload
     _, summary = found
     # ``summary`` last, so the rows an agent cares about stay at the top of the
     # payload; a list envelope never has a key of that name of its own.
-    return {**result, "summary": summary}
+    return {**payload, "summary": summary}
 
 
 def _render_structured(payload: Any, fmt: str) -> str:
@@ -267,6 +392,8 @@ def _emit(
     fmt: str = FORMAT_HUMAN,
     noun: str = "card",
     fields: list[str] | None = None,
+    full: bool = False,
+    limit: int = DEFAULT_MAX_TEXT_CHARS,
 ) -> None:
     """Print a command result in ``fmt`` — the CLI's single output chokepoint.
 
@@ -275,9 +402,15 @@ def _emit(
     entities; everything else is detected from the result's shape.
 
     ``fields`` is the ``--fields`` projection (V42, KAN-425) and applies to the
-    **human** row only: the structured formats are a deliberate passthrough of the
-    client result (the full payload is already there), so a projection there would
-    reshape a documented machine contract for no gain.
+    **human** row only: the structured formats carry the client's own keys, so a
+    projection there would reshape a documented machine contract for no gain.
+
+    ``full`` / ``limit`` are V45's content truncation (KAN-428): a long free-text
+    field is cut to ``limit`` characters with a size hint in **both** branches —
+    human and structured — and ``--full`` (``full=True``) turns that off everywhere.
+    Truncation is a *content* concern, not a formatting one, so unlike the summary
+    line it deliberately is **not** suppressed for structured consumers; the flag is
+    their escape hatch instead.
 
     **V46 (KAN-429)** hangs its ``help[]`` next-step hints off the human branch
     below — after the ``_humanize`` line and *inside* the ``else``, which is what
@@ -285,9 +418,9 @@ def _emit(
     **after** the V44 summary line, so the aggregate stays the last *data* line.
     """
     if fmt in STRUCTURED_FORMATS:
-        print(_render_structured(_structured_payload(result), fmt))
+        print(_render_structured(_structured_payload(result, full=full, limit=limit), fmt))
         return
-    print(_humanize(result, noun=noun, fields=fields))
+    print(_humanize(result, noun=noun, fields=fields, limit=_text_limit(full=full, limit=limit)))
     # V44 (KAN-427): a list verb's pre-computed aggregate, always its last line, so
     # an agent reads counts off `tail -1` instead of paying a second round trip.
     # Non-list results get none (nothing to total); the structured formats carry the
@@ -297,14 +430,28 @@ def _emit(
         print(_summary_line(*found))
 
 
-def _humanize(result: Any, *, noun: str = "card", fields: list[str] | None = None) -> str:
+def _humanize(
+    result: Any,
+    *,
+    noun: str = "card",
+    fields: list[str] | None = None,
+    limit: int = DEFAULT_MAX_TEXT_CHARS,
+) -> str:
     """Render a client result as concise human text (one entity per line).
 
     With ``fields`` set, a list result's rows are projected onto exactly those
     field names instead of the entity's default row; every other shape (and every
-    single-entity result) renders as usual."""
+    single-entity result) renders as usual.
+
+    ``limit`` is V45's already-resolved character cap (``0`` = don't truncate — what
+    ``--full`` collapses to). It reaches three places: a **single** card/epic render,
+    which since V45 also shows that entity's ``description`` (the under-disclosure
+    the slice's audit found — a one-line summary was hiding the body entirely); a
+    comment/notification line's ``body``; and a ``--fields`` projection of a
+    free-text column. List *rows* never grow a description block — a hundred-card
+    `list` must stay a hundred lines."""
     if fields:
-        projected = _project_rows(result, fields)
+        projected = _project_rows(result, fields, limit=limit)
         if projected is not None:
             return projected
     if isinstance(result, dict) and "cards" in result:  # list_cards
@@ -345,7 +492,7 @@ def _humanize(result: Any, *, noun: str = "card", fields: list[str] | None = Non
     if isinstance(result, dict) and "notifications" in result:  # list_notifications
         rows = result["notifications"]
         return (
-            "\n".join(_notification_line(n) for n in rows)
+            "\n".join(_notification_line(n, limit=limit) for n in rows)
             if rows
             else "(no notifications)"
         )
@@ -359,7 +506,11 @@ def _humanize(result: Any, *, noun: str = "card", fields: list[str] | None = Non
         return "\n".join(lines)
     if isinstance(result, dict) and "comments" in result:  # list_comments
         comments = result["comments"]
-        return "\n".join(_comment_line(c) for c in comments) if comments else "(no comments)"
+        return (
+            "\n".join(_comment_line(c, limit=limit) for c in comments)
+            if comments
+            else "(no comments)"
+        )
     # list_dependencies returns {"card_id", "blocked_by", "blocks"} — ``card_id``
     # is distinctive (a card carries ``id``, not ``card_id``).
     if isinstance(result, dict) and "card_id" in result and "blocked_by" in result:
@@ -371,14 +522,14 @@ def _humanize(result: Any, *, noun: str = "card", fields: list[str] | None = Non
     # A single comment (add_comment) carries ``body`` + ``author_id`` (no ticket) —
     # matched before the generic card/epic/board branches below.
     if isinstance(result, dict) and "body" in result and "author_id" in result:
-        return _comment_line(result)
+        return _comment_line(result, limit=limit)
     # A single notification (mark_read) carries ``kind`` (distinctive — nothing else
     # does) + ``body``; matched before the generic branches below.
     if isinstance(result, dict) and "kind" in result and "body" in result:
-        return _notification_line(result)
+        return _notification_line(result, limit=limit)
     if isinstance(result, dict) and "card" in result:  # dispatch / next (peek/claim)
         card = result["card"]
-        return _card_line(card) if card else "(no card ready)"
+        return _card_block(card, limit=limit) if card else "(no card ready)"
     if isinstance(result, dict) and "deleted" in result:  # delete_{card,epic,label,view}
         return f"deleted {noun} {result['deleted']}"
     if isinstance(result, dict) and "status" in result:  # warmup
@@ -402,9 +553,13 @@ def _humanize(result: Any, *, noun: str = "card", fields: list[str] | None = Non
     # A single entity: epics/boards carry ``name`` (no ``title``); cards carry
     # ``title``. Epics additionally have a ``ticket_number`` (``EPIC-…``).
     if isinstance(result, dict) and "name" in result and "title" not in result:
-        return _epic_line(result) if "ticket_number" in result else _board_line(result)
+        return (
+            _epic_block(result, limit=limit)
+            if "ticket_number" in result
+            else _board_line(result)
+        )
     if isinstance(result, dict) and "ticket_number" in result:  # a single card
-        return _card_line(result)
+        return _card_block(result, limit=limit)
     return json.dumps(result, default=str)
 
 
@@ -429,6 +584,36 @@ def _card_line(card: dict[str, Any]) -> str:
             _fmt_points(card.get("story_points")),
         )
     )
+
+
+def _description_block(
+    head: str, description: Any, *, limit: int = DEFAULT_MAX_TEXT_CHARS
+) -> str:
+    """``head`` plus a ``description:`` block for a **single**-entity human render
+    (V45, KAN-428). The slice's audit found the real gap here: human ``get`` printed
+    a one-line summary and no description at all, so the body an agent needs was
+    invisible unless it paid for ``--json``.
+
+    ``head`` is returned **unchanged** when there is no description (null or empty),
+    which is why "a card with no description renders unchanged" holds structurally
+    rather than by test. The hint goes on its own line after the text — a
+    description is multi-line prose, so a trailing parenthetical would read as part
+    of it — and carries the true original length."""
+    if not description:
+        return head
+    text, total = _truncate_text(str(description), limit)
+    lines = [head, "description:", text]
+    if total is not None:
+        lines.append(_truncation_hint(total))
+    return "\n".join(lines)
+
+
+def _card_block(card: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS) -> str:
+    """A **single** card: its ``_card_line``, then its truncated description (V45).
+
+    Only the single-entity render uses this — ``list`` rows keep calling
+    ``_card_line`` directly, so a 100-card list is still 100 lines."""
+    return _description_block(_card_line(card), card.get("description"), limit=limit)
 
 
 def _fmt_progress(epic: dict[str, Any]) -> str:
@@ -461,6 +646,14 @@ def _epic_line(epic: dict[str, Any]) -> str:
             _fmt_progress(epic),
         )
     )
+
+
+def _epic_block(epic: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS) -> str:
+    """A **single** epic: its ``_epic_line``, then its truncated description (V45).
+
+    Same shape as ``_card_block`` — an epic's description is the other unbounded
+    prose field a single-entity read was hiding. ``epic list`` rows are unaffected."""
+    return _description_block(_epic_line(epic), epic.get("description"), limit=limit)
 
 
 def _board_line(board: dict[str, Any]) -> str:
@@ -533,15 +726,16 @@ def _activity_line(row: dict[str, Any]) -> str:
     )
 
 
-def _notification_line(n: dict[str, Any]) -> str:
+def _notification_line(n: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS) -> str:
     """One concise line for a notification (V37, KAN-301): id, kind, read/unread
-    state, body (tab-separated)."""
+    state, body (tab-separated). The body is a ``Text`` column like a comment's, so
+    it truncates the same way (V45, KAN-428)."""
     return "\t".join(
         (
             str(n.get("id", "?")),
             str(n.get("kind", "")),
             "read" if n.get("read_at") else "unread",
-            str(n.get("body", "")),
+            _truncate_inline(str(n.get("body", "")), limit),
         )
     )
 
@@ -657,13 +851,17 @@ def _dep_block(result: dict[str, Any]) -> str:
     )
 
 
-def _comment_line(comment: dict[str, Any]) -> str:
-    """One concise line for a comment: id, created_at, body (tab-separated)."""
+def _comment_line(comment: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS) -> str:
+    """One concise line for a comment: id, created_at, body (tab-separated).
+
+    The body is truncated to ``limit`` characters with a size hint (V45, KAN-428) —
+    this was the CLI's other unbounded surface: a ``comment list`` on a card with a
+    few long notes returned all of them in full."""
     return "\t".join(
         (
             str(comment.get("id", "?")),
             str(comment.get("created_at", "")),
-            str(comment.get("body", "")),
+            _truncate_inline(str(comment.get("body", "")), limit),
         )
     )
 
@@ -802,13 +1000,27 @@ def _validate_fields(fields: list[str], rows: list[Any], noun: str) -> None:
             )
 
 
-def _project_line(row: Any, fields: list[str]) -> str:
+def _project_line(row: Any, fields: list[str], *, limit: int = DEFAULT_MAX_TEXT_CHARS) -> str:
+    """One projected row. A cell naming a ``_TEXT_FIELDS`` column is truncated to
+    ``limit`` (V45, KAN-428) — ``--fields ticket,description`` was otherwise a way to
+    put a 3.4k-character body back on a TSV row. The truncation is keyed on the
+    **resolved** field name, the same allow-list ``_truncate_payload`` uses, so the
+    human and structured surfaces cut exactly the same columns."""
     if not isinstance(row, dict):
         return _field_value(row)
-    return "\t".join(_field_value(row.get(_resolve_field(name))) for name in fields)
+    cells = []
+    for name in fields:
+        resolved = _resolve_field(name)
+        cell = _field_value(row.get(resolved))
+        if resolved in _TEXT_FIELDS:
+            cell = _truncate_inline(cell, limit)
+        cells.append(cell)
+    return "\t".join(cells)
 
 
-def _project_rows(result: Any, fields: list[str]) -> str | None:
+def _project_rows(
+    result: Any, fields: list[str], *, limit: int = DEFAULT_MAX_TEXT_CHARS
+) -> str | None:
     """Render a list result's rows projected onto ``fields``, or ``None`` when the
     result isn't a list envelope (then the caller falls back to the default render).
 
@@ -827,7 +1039,7 @@ def _project_rows(result: Any, fields: list[str]) -> str | None:
         if not rows:
             return f"(no {key})"
         _validate_fields(fields, rows, _ROW_NOUN.get(key, key))
-        lines = [_project_line(row, fields) for row in rows]
+        lines = [_project_line(row, fields, limit=limit) for row in rows]
         if result.get("next_cursor"):
             lines.append(f"(more — next cursor: {result['next_cursor']})")
         return "\n".join(lines)
@@ -1591,6 +1803,9 @@ def _cmd_config_show(args: argparse.Namespace) -> int:
         "api_url": resolved.get("api_url") or DEFAULT_API_URL,
         "token": _redact_token(resolved.get("token", "")),
         "board_id": resolved.get("board_id"),
+        # The effective truncation limit (V45, KAN-428) — reported here because
+        # "why is my description cut off?" is otherwise unanswerable from outside.
+        "max_text_chars": resolved.get("max_text_chars") or str(DEFAULT_MAX_TEXT_CHARS),
         "config_file": str(config_file_path()),
         "mcp_json": str(mcp) if mcp else None,
     }
@@ -1803,6 +2018,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         dest="as_json",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
+    # --full: opt out of V45's content truncation (KAN-428). Registered on the shared
+    # parent the same way, so it works before OR after the subcommand and applies to
+    # every verb — it is an output concern, not a per-verb one.
+    common.add_argument(
+        "--full",
+        action="store_true",
+        dest="full",
+        default=argparse.SUPPRESS,
+        help=(
+            "print long free-text fields (a card/epic description, a comment or "
+            f"notification body, an attention note) in full. Default: cut at "
+            f"{DEFAULT_MAX_TEXT_CHARS} characters with a '(truncated, N chars total …)' "
+            "hint, so one `get` can't blow an agent's context. Applies to the human "
+            "rows AND to --format json/toon. Set PANDAN_MAX_TEXT_CHARS (or "
+            "max_text_chars in the config file) to change the limit; 0 disables it"
+        ),
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        dest="full",
         default=False,
         help=argparse.SUPPRESS,
     )
@@ -2553,6 +2792,10 @@ def run(argv: Sequence[str] | None = None) -> int:
             fmt=fmt,
             noun=getattr(args, "noun", "card"),
             fields=getattr(args, "fields", None),
+            # V45 (KAN-428): the limit comes from config (env / file), the opt-out
+            # from the flag — so a whole session can be widened once, or one call.
+            full=getattr(args, "full", False),
+            limit=config.max_text_chars,
         )
     except CliError as exc:
         return _print_error(exc, fmt=fmt)

@@ -1189,7 +1189,12 @@ def test_epic_list_human_output(monkeypatch, env, capsys):
 def test_epic_single_human_output(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result=EPIC))
     cli.run(["epic", "create", "Onboarding"])
-    assert capsys.readouterr().out.strip() == "EPIC-1\tOnboarding\t60% (3/5) [at_risk]"
+    # The head line is unchanged; V45 (KAN-428) appends the epic's own description
+    # to a **single**-entity render (``EPIC`` carries ``description: "d"``), well
+    # under the limit so it prints verbatim with no hint.
+    assert capsys.readouterr().out.strip() == (
+        "EPIC-1\tOnboarding\t60% (3/5) [at_risk]\ndescription:\nd"
+    )
 
 
 def test_epic_missing_subcommand_is_usage_error(env):

@@ -1,8 +1,8 @@
 """Runtime config for the ``pandan`` CLI (also available as ``pdn``).
 
-Each value (``api_url`` / ``token`` / ``board_id``) is resolved independently
-through a precedence chain — the first source that supplies a non-empty value
-wins:
+Each value (``api_url`` / ``token`` / ``board_id`` / ``max_text_chars``) is
+resolved independently through a precedence chain — the first source that
+supplies a non-empty value wins:
 
 1. **Environment** — ``PANDAN_API_URL`` / ``PANDAN_TOKEN`` / ``PANDAN_BOARD_ID``,
    and, as a **deprecated fallback**, the pre-rebrand ``KANBAN_*`` spellings
@@ -31,6 +31,13 @@ can't leak into a shell transcript / model context. Vars:
 - ``PANDAN_BOARD_ID`` — optional default board (an integer id) for board-scoped
   commands (``list``/``create``) when they omit ``--board``. Unset → the API's own
   fallback (list = all your boards; create = your earliest board).
+- ``PANDAN_MAX_TEXT_CHARS`` — the content-truncation limit in **characters**
+  (V45, KAN-428): how much of a long free-text field (a card/epic
+  ``description``, a comment/notification ``body``, an ``attention_note``) any
+  output prints before it is cut and replaced with a size hint. Default
+  ``DEFAULT_MAX_TEXT_CHARS``; ``0`` disables truncation entirely (the same effect
+  as passing ``--full`` on every call). Config-file key: ``max_text_chars``.
+  It is **new since the rebrand**, so it has no deprecated ``KANBAN_*`` spelling.
 
 The ``KANBAN_*`` fallback exists so the cutover can't brick an existing
 ``.mcp.json``, config file or CI job mid-flight. It is scheduled for removal once
@@ -48,17 +55,30 @@ from pathlib import Path
 
 DEFAULT_API_URL = "http://localhost:8000"
 
+# How many characters of a long free-text field any output prints before it is cut
+# and replaced with a size hint (V45, KAN-428 — AXI 3). Chosen to keep a `get` on a
+# 3.4k-character card description cheap while still showing enough to act on;
+# raise it (or pass ``--full``) when you actually want the whole body.
+DEFAULT_MAX_TEXT_CHARS = 500
+
 # Each config key's environment-variable spellings, **in precedence order**: the
 # current name first, then names retired by the rebrand (V40, KAN-423).
 _ENV_NAMES: dict[str, tuple[str, ...]] = {
     "api_url": ("PANDAN_API_URL", "KANBAN_API_URL"),
     "token": ("PANDAN_TOKEN", "KANBAN_TOKEN"),
     "board_id": ("PANDAN_BOARD_ID", "KANBAN_BOARD_ID"),
+    # New since the rebrand → one spelling only, no deprecated fallback to carry.
+    "max_text_chars": ("PANDAN_MAX_TEXT_CHARS",),
 }
+# Every key the config file / .mcp.json / env chain carries, in a single tuple so
+# reading, merging and re-writing the file can't drift (a `config set` that only
+# knew three keys would silently drop a hand-added ``max_text_chars``).
+_CONFIG_KEYS = tuple(_ENV_NAMES)
 # Canonical (non-deprecated) spellings, for error messages.
 _ENV_API_URL = _ENV_NAMES["api_url"][0]
 _ENV_TOKEN = _ENV_NAMES["token"][0]
 _ENV_BOARD_ID = _ENV_NAMES["board_id"][0]
+_ENV_MAX_TEXT_CHARS = _ENV_NAMES["max_text_chars"][0]
 
 # The ``.mcp.json`` server key, current name first then the retired one.
 _MCP_SERVER_NAMES = ("pandan", "kanban")
@@ -94,6 +114,8 @@ class Config:
     api_url: str
     token: str
     board_id: int | None
+    # V45 (KAN-428): the content-truncation limit in characters; 0 = don't truncate.
+    max_text_chars: int = DEFAULT_MAX_TEXT_CHARS
 
 
 def config_file_path() -> Path:
@@ -191,7 +213,7 @@ def _from_config_file() -> dict[str, str]:
     table = _config_table(data)
     if not isinstance(table, dict):
         return {}
-    return _normalize({k: table.get(k) for k in ("api_url", "token", "board_id")})
+    return _normalize({k: table.get(k) for k in _CONFIG_KEYS})
 
 
 def _config_table(data: dict) -> object:
@@ -271,7 +293,12 @@ def load_config(*, require_token: bool = True) -> Config:
             "The /api/v1 API is auth-required."
         )
     board_id = _parse_board_id(resolved.get("board_id", ""))
-    return Config(api_url=api_url, token=token, board_id=board_id)
+    return Config(
+        api_url=api_url,
+        token=token,
+        board_id=board_id,
+        max_text_chars=_parse_max_text_chars(resolved.get("max_text_chars", "")),
+    )
 
 
 def resolve_values() -> dict[str, str]:
@@ -295,6 +322,30 @@ def _parse_board_id(raw: str) -> int | None:
         raise ConfigError(f"{_ENV_BOARD_ID} must be an integer, got {raw!r}") from exc
 
 
+def _parse_max_text_chars(raw: str) -> int:
+    """Parse the truncation limit (V45, KAN-428): empty → the default, ``0`` →
+    truncation off, a negative or non-integer value → a clear error.
+
+    A negative limit is rejected rather than clamped: silently treating ``-1`` as
+    "no truncation" would make a typo look like a working setting."""
+    raw = raw.strip()
+    if not raw:
+        return DEFAULT_MAX_TEXT_CHARS
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ConfigError(
+            f"{_ENV_MAX_TEXT_CHARS} must be a non-negative integer "
+            f"(0 disables truncation), got {raw!r}"
+        ) from exc
+    if value < 0:
+        raise ConfigError(
+            f"{_ENV_MAX_TEXT_CHARS} must be a non-negative integer "
+            f"(0 disables truncation), got {raw!r}"
+        )
+    return value
+
+
 def write_config_file(
     *,
     api_url: str | None = None,
@@ -312,10 +363,10 @@ def write_config_file(
             data = tomllib.loads(path.read_text(encoding="utf-8"))
             table = _config_table(data)
             if isinstance(table, dict):
+                # Every key in ``_CONFIG_KEYS``, not just the settable three: a
+                # hand-added ``max_text_chars`` must survive a `config set --board-id`.
                 current = {
-                    k: str(table[k])
-                    for k in ("api_url", "token", "board_id")
-                    if table.get(k) is not None
+                    k: str(table[k]) for k in _CONFIG_KEYS if table.get(k) is not None
                 }
         except (OSError, tomllib.TOMLDecodeError):
             current = {}
@@ -334,16 +385,20 @@ def write_config_file(
     return path
 
 
+_INT_CONFIG_KEYS = ("board_id", "max_text_chars")
+
+
 def _render_toml(values: dict[str, str]) -> str:
-    """Render the ``[pandan]`` table. ``board_id`` is emitted as a bare integer when
-    it parses as one; everything else is a quoted string. The value set is tiny and
-    known (a URL, a ``pandan_pat_…`` token, an int), so hand-rendering is safe."""
+    """Render the ``[pandan]`` table. The integer-valued keys are emitted as bare
+    integers when they parse as one; everything else is a quoted string. The value
+    set is tiny and known (a URL, a ``pandan_pat_…`` token, two ints), so
+    hand-rendering is safe."""
     lines = [f"[{_CONFIG_TABLE_NAMES[0]}]"]
-    for key in ("api_url", "token", "board_id"):
+    for key in _CONFIG_KEYS:
         if key not in values:
             continue
         val = values[key]
-        if key == "board_id" and val.lstrip("-").isdigit():
+        if key in _INT_CONFIG_KEYS and val.lstrip("-").isdigit():
             lines.append(f"{key} = {val}")
         else:
             escaped = val.replace("\\", "\\\\").replace('"', '\\"')
