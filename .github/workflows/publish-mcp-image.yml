@@ -73,6 +73,10 @@ jobs:
       # and assert on it, then build again with `push: true`. The second build
       # is a full cache hit on the same buildx builder (plus the gha cache
       # written below), so it only pushes layers; it is not a second compile.
+      # (Honest limitation: the two builds are separate invocations, so a cache
+      # miss could in principle produce different *bytes*. It cannot produce
+      # different *provenance* — both are handed the same `steps.meta.outputs.labels`
+      # — and the labels are what the gate asserts, so the claim stays true.)
       - name: Build for the provenance gate (local, not pushed)
         uses: docker/build-push-action@v7
         with:
