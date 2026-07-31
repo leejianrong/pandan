@@ -86,6 +86,10 @@ rather than spot-fixing it.
 | `pandan link rm <card_id> --link-id ID` | `DELETE /cards/{id}/links/{link_id}` |
 | `pandan comment add <card_id> --body B` | `POST /cards/{id}/comments` |
 | `pandan comment list <card_id>` | `GET /cards/{id}/comments` |
+| `pandan context install [--settings PATH] [--exec PATH] [--timeout SECONDS] [--limit N] [--no-skill] [--force-skill]` | *(local — wires a Claude Code `SessionStart` hook; see [Ambient context](#ambient-context-v48-kan-431))* |
+| `pandan context uninstall [--settings PATH] [--keep-skill]` | *(local — removes the hook, leaving unrelated settings alone)* |
+| `pandan context status [--settings PATH]` | *(local — is the hook installed, is the board configured, does the skill match this build)* |
+| `pandan context show [--board N] [--hook] [--timeout SECONDS] [--limit N]` | `GET /cards` — the ambient block itself; `--hook` is what the hook runs |
 | `pandan --version` (or `-v`) | *(local — prints the version **and the build's provenance**, then exits; see [Is my `pandan` stale?](#is-my-pandan-stale))* |
 | `pandan login [--api-url U] [--board-id N] [--token-stdin]` | *(local — saves the PAT to the config file)* |
 | `pandan config set [--api-url U] [--board-id N] [--token-stdin \| --token T]` | *(local — writes the config file)* |
@@ -331,6 +335,40 @@ command. `pandan config show` reports the effective value.
 breaking pagination — or a link `url`, producing a value that looks fine and doesn't
 work. Both cases are pinned by tests. V44's aggregate is attached *after* truncation, so
 its counts are structurally out of reach.
+
+### Ambient context (V48, KAN-431)
+
+`pandan context install` wires the default board's state into an agent session **before
+it acts**, as a Claude Code `SessionStart` hook — so a fresh session already knows the
+open cards instead of spending a tool call to find out.
+
+```bash
+pandan context install      # idempotent; writes ~/.claude/settings.json + the skill
+pandan context status       # hook installed? board configured? skill current?
+pandan context show         # the block itself, without starting a session
+pandan context uninstall    # clean; leaves unrelated settings untouched
+```
+
+The block carries the aggregate counts plus the open cards (ticket / column / title /
+points / assignee). `--limit` bounds how many cards; `--exec` sets which executable the
+hook invokes, defaulting to **the one you ran `install` with — never a `pandan` found on
+`$PATH`**, which may be stale.
+
+**It cannot delay a session start, by construction.** A `SessionStart` hook can't *block*
+a session but it *is* awaited, and this project's backend scales to zero — so a cold wake
+inheriting the client's default 35s timeout would stall every session. Instead
+`context show --hook` builds its own client at half the hook budget with no retry
+backoff (**5s** total by default), and **always exits 0** printing either a valid block or
+nothing at all. That last part is deliberate and is why these verbs sit *outside* the
+[error contract](#errors-structured-on-stdout-v43-kan-426): anything else on stdout would be
+injected into the model's context **as board state**, so a structured error would become a
+lie about the board.
+
+**The skill is packaged with the CLI**, at `pandan_cli/skills/pandan/SKILL.md`, and is
+carried into the release binary too. **That repo copy is the source of truth** — edit it
+there and re-run `pandan context install --force-skill`, rather than editing
+`~/.claude/skills/…` directly. A locally-modified skill is never overwritten without
+`--force-skill`, and `uninstall` never deletes it.
 
 ### When to reach for `--format toon` (V47, KAN-430)
 
