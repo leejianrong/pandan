@@ -2796,7 +2796,7 @@ def test_usage_errors_are_json_too_when_json_is_requested(env, capsys, argv):
 
 
 def test_error_row_is_one_line_even_for_a_multiline_message(capsys):
-    cli._set_error_json(False)
+    cli._set_error_format(cli.FORMAT_HUMAN)
     code = cli._print_error(cli.CliError("line one\nline\ttwo", code="unexpected"))
     out = capsys.readouterr().out
     assert code == cli.EXIT_ERROR

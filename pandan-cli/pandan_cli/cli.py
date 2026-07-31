@@ -10,17 +10,31 @@ groups (``pandan board list``, ``pandan epic create``) so their verbs don't coll
 the card verbs — parity with the board/epic surface of ``/api/v1`` (KAN-23).
 
 The CLI is a thin adapter over the shared ``PandanClient``: parse args → env
-config → one client call → print. ``--json`` prints the client's raw dict (for
-``pandan list --json | jq …``); otherwise a concise ``ticket  column  title  pts=N``
-line (``pts=-`` when unestimated, reading the API's ``story_points``). List verbs
-take ``--fields a,b,c`` to widen that minimal default row on demand (V42, KAN-425);
-it shapes the **human** row only — ``--json`` stays a verbatim passthrough.
+config → one client call → print. ``--format`` picks the rendering (V47, KAN-430):
+
+* ``human`` (the default) — a concise ``ticket  column  title  pts=N`` line
+  (``pts=-`` when unestimated, reading the API's ``story_points``). List verbs take
+  ``--fields a,b,c`` to widen that minimal default row on demand (V42, KAN-425); it
+  shapes the **human** row only. This tab-separated form is already key-free, so it
+  is both the default and the cheapest list output — V47 did not touch it.
+* ``json`` — the client's raw dict, indented (``pandan list --format json | jq …``).
+  **``--json`` is a supported alias for ``--format json``** and is going nowhere.
+* ``toon`` — the same object in `TOON <https://toonformat.dev/>`_, which prints a
+  uniform array's field names once in a header instead of per row. On our *nested*
+  payloads that is a large saving over ``--format json``: ``metrics`` −56%,
+  ``activity`` −43%, ``epic list`` −37% measured in ``o200k_base`` tokens. On a
+  single ``get`` it is a wash, and on the cards list it is worse than the TSV
+  default — which is exactly why the default stayed put.
+
+``json`` and ``toon`` render the **same** object through one shaping function
+(``_structured_payload``) and differ only in the serializer, so the two can't drift.
 
 Failures are **structured and on stdout** (V43, KAN-426 — AXI 6): one tab-separated
 row ``error<TAB><code><TAB><message><TAB><arg>`` (``-`` when no single argument is at
-fault), or the same as JSON under ``--json``. stdout is the machine channel, so an
-agent parses one stream; stderr keeps only human extras (argparse's usage block, the
-``KANBAN_*`` deprecation notice). No verb ever prompts when stdin isn't a tty.
+fault), or the same object serialized under ``--format json``/``toon``. stdout is the
+machine channel, so an agent parses one stream; stderr keeps only human extras
+(argparse's usage block, the ``KANBAN_*`` deprecation notice). No verb ever prompts
+when stdin isn't a tty.
 
 Exit codes (for scripting) — **stable, never renumbered**:
     0  success
@@ -47,7 +61,7 @@ from typing import Any
 import httpx
 from pandan_client import PandanApiError, PandanClient
 
-from . import build_info
+from . import build_info, toon
 from .config import (
     DEFAULT_API_URL,
     Config,
@@ -119,14 +133,26 @@ class CliError(Exception):
         self.exit_code = ERROR_CODES[code]
 
 
-# Whether errors render as JSON. Set from argv at the top of ``run()`` because an
-# argparse failure *is* an error and happens before the parsed namespace exists.
-_ERRORS_AS_JSON = False
+# --- output formats (V47, KAN-430 — AXI 1) -----------------------------------
+# One vocabulary for "how does this render", replacing V4-era's `--json` boolean.
+# `human` is the default and is the tab-separated form every earlier slice built;
+# `json` and `toon` are the two *structured* renderings of one shared payload.
+FORMAT_HUMAN = "human"
+FORMAT_JSON = "json"
+FORMAT_TOON = "toon"
+OUTPUT_FORMATS = (FORMAT_HUMAN, FORMAT_JSON, FORMAT_TOON)
+# The machine-readable ones. Anything V44/V46 wants to add for humans only (a
+# trailing summary line, `help[]` hints) is suppressed when the format is in here.
+STRUCTURED_FORMATS = (FORMAT_JSON, FORMAT_TOON)
+
+# How errors render. Set from argv at the top of ``run()`` because an argparse
+# failure *is* an error and happens before the parsed namespace exists.
+_ERROR_FORMAT = FORMAT_HUMAN
 
 
-def _set_error_json(as_json: bool) -> None:
-    global _ERRORS_AS_JSON
-    _ERRORS_AS_JSON = as_json
+def _set_error_format(fmt: str) -> None:
+    global _ERROR_FORMAT
+    _ERROR_FORMAT = fmt
 
 
 def _as_cli_error(exc: BaseException) -> CliError:
@@ -145,8 +171,8 @@ def _as_cli_error(exc: BaseException) -> CliError:
 
 
 def _error_payload(err: CliError) -> dict[str, Any]:
-    """The ``--json`` error object. Every key is always present (``null`` when it
-    doesn't apply) so a consumer never has to test for absence."""
+    """The structured (``json``/``toon``) error object. Every key is always present
+    (``null`` when it doesn't apply) so a consumer never has to test for absence."""
     return {
         "error": {
             "code": err.code,
@@ -165,12 +191,15 @@ def _error_row(err: CliError) -> str:
     return "\t".join(("error", err.code, message, err.arg or "-"))
 
 
-def _print_error(err: CliError, *, as_json: bool | None = None) -> int:
-    """Print the structured error to **stdout** and return its exit code."""
-    if as_json is None:
-        as_json = _ERRORS_AS_JSON
-    if as_json:
-        print(json.dumps(_error_payload(err), indent=2, default=str))
+def _print_error(err: CliError, *, fmt: str | None = None) -> int:
+    """Print the structured error to **stdout** and return its exit code.
+
+    The error object goes through the same ``_render_structured`` the results do, so
+    ``--format toon`` gets a TOON error and not a surprise JSON one."""
+    if fmt is None:
+        fmt = _ERROR_FORMAT
+    if fmt in STRUCTURED_FORMATS:
+        print(_render_structured(_error_payload(err), fmt))
     else:
         print(_error_row(err))
     return err.exit_code
@@ -188,24 +217,63 @@ DEFAULT_LABEL_COLOR = "#64748b"
 # --- output helpers ---------------------------------------------------------
 
 
+def _structured_payload(result: Any) -> Any:
+    """The object both structured formats serialize — **the one shared serializer**
+    V47 (KAN-430) exists to establish. ``json`` and ``toon`` differ only in how this
+    return value is written out, so they cannot describe different data.
+
+    Today it is the client's result verbatim (``--json`` has always been a
+    documented passthrough, and the README's "--json output shape" section is that
+    promise). It is a function, not an inlined expression, because the next three
+    slices all want to bend the structured payload and must bend **both** formats
+    at once:
+
+    * **V44 (KAN-427)** — attach the pre-computed ``summary`` object beside the rows
+      here. Its human counterpart is the trailing line in ``_emit`` below.
+    * **V45 (KAN-428)** — truncate long text here, taking ``full: bool`` (from
+      ``--full``) as a keyword argument threaded down from ``_emit``'s caller.
+    """
+    return result
+
+
+def _render_structured(payload: Any, fmt: str) -> str:
+    """Serialize a payload in one of the ``STRUCTURED_FORMATS``.
+
+    ``json.dumps(default=str)`` and ``toon.encode`` agree on how a non-JSON value is
+    written (both stringify it), so the two renderings of one payload always carry
+    the same data — that equality is the V47 round-trip contract, pinned in
+    ``tests/test_toon_format.py``."""
+    if fmt == FORMAT_TOON:
+        return toon.encode(payload)
+    return json.dumps(payload, indent=2, default=str)
+
+
 def _emit(
-    result: Any, *, as_json: bool, noun: str = "card", fields: list[str] | None = None
+    result: Any,
+    *,
+    fmt: str = FORMAT_HUMAN,
+    noun: str = "card",
+    fields: list[str] | None = None,
 ) -> None:
-    """Print a command result: raw JSON when ``--json``, else a human summary.
+    """Print a command result in ``fmt`` — the CLI's single output chokepoint.
 
     ``noun`` (``card``/``epic``/``board``) only disambiguates the delete summary,
     whose result dict (``{"deleted": id}``) is otherwise shape-identical across
     entities; everything else is detected from the result's shape.
 
     ``fields`` is the ``--fields`` projection (V42, KAN-425) and applies to the
-    **human** row only: ``--json`` is a deliberate verbatim passthrough of the
-    client result (the full payload is already there, and V44 adds a ``summary``
-    key beside ``cards``), so a projection there would reshape a documented
-    machine contract for no gain. See the README's "--json output shape" section.
+    **human** row only: the structured formats are a deliberate passthrough of the
+    client result (the full payload is already there), so a projection there would
+    reshape a documented machine contract for no gain.
+
+    **V46 (KAN-429)** hangs its ``help[]`` next-step hints off the human branch
+    below — after the ``_humanize`` line and *inside* the ``else``, which is what
+    "suppressed under ``--json``/``--format toon``" means mechanically.
     """
-    if as_json:
-        print(json.dumps(result, indent=2, default=str))
+    if fmt in STRUCTURED_FORMATS:
+        print(_render_structured(_structured_payload(result), fmt))
         return
+    # V44 (KAN-427): the trailing human summary line goes after this print.
     print(_humanize(result, noun=noun, fields=fields))
 
 
@@ -1339,8 +1407,11 @@ def _cmd_config_show(args: argparse.Namespace) -> int:
         "config_file": str(config_file_path()),
         "mcp_json": str(mcp) if mcp else None,
     }
-    if getattr(args, "as_json", False):
-        print(json.dumps(out, indent=2))
+    # ``run()`` stamps the resolved format onto the namespace before dispatching a
+    # local handler, so `config show` honours --format json/toon and the --json alias.
+    fmt = _resolve_format(args)
+    if fmt in STRUCTURED_FORMATS:
+        print(_render_structured(out, fmt))
     else:
         for key, val in out.items():
             print(f"{key}\t{val}")
@@ -1473,11 +1544,15 @@ def build_parser() -> argparse.ArgumentParser:
             "So the PAT can stay in a file and never touch the command line. Run\n"
             "`pandan login` once to save it; `pandan config show` prints the effective config.\n"
             "\n"
+            "Output: --format human (default, tab-separated) | json | toon.\n"
+            "--json is a supported alias for --format json; --format wins if both\n"
+            "are given. toon is the token-cheap rendering for nested payloads.\n"
+            "\n"
             "Exit codes: 0 ok, 1 error, 2 usage, 3 unauthorized, 4 forbidden, 5 not found\n"
             "(a KAN-/EPIC- ticket that resolves to nothing is also 5).\n"
             "Errors print one row on STDOUT: error<TAB>code<TAB>message<TAB>arg\n"
-            "(a JSON {\"error\": {...}} object with --json). No verb ever prompts when\n"
-            "stdin is not a terminal."
+            "(an {\"error\": {...}} object under --format json/toon). No verb ever\n"
+            "prompts when stdin is not a terminal."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1494,18 +1569,40 @@ def build_parser() -> argparse.ArgumentParser:
         version=build_info.version_string(),
         help="print the CLI version + build commit and exit",
     )
-    # A shared parent so --json works before OR after the subcommand
-    # (e.g. `pandan --json list` and `pandan list --json` both parse).
+    # A shared parent so --format/--json work before OR after the subcommand
+    # (e.g. `pandan --json list` and `pandan list --format toon` both parse).
+    # Each flag is registered twice — on `common` with SUPPRESS so an absent
+    # subcommand-level copy does not clobber a global one already parsed, and on
+    # the main parser with the real default.
     common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--format",
+        dest="output_format",
+        choices=OUTPUT_FORMATS,
+        default=argparse.SUPPRESS,
+        help=(
+            "output format (default: human). 'json' is the raw API envelope, indented; "
+            "'toon' is the same object in TOON, which prints a uniform array's field "
+            "names once in a header instead of per row — much cheaper on the nested "
+            "payloads (get / metrics / activity / epic list / dep list / template + "
+            "view reads). The default human rows are tab-separated and already "
+            "key-free, so they stay the cheapest list output"
+        ),
+    )
+    parser.add_argument(
+        "--format",
+        dest="output_format",
+        choices=OUTPUT_FORMATS,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     common.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
-        # SUPPRESS so an absent subcommand-level --json does not clobber a global
-        # `pandan --json <cmd>` already parsed by the main parser below.
         default=argparse.SUPPRESS,
         help=(
-            "print the raw JSON from the API (for piping, e.g. | jq). List verbs return "
+            "alias for --format json, supported and not deprecated. List verbs return "
             'the API envelope, not a bare array: `list --json | jq \'.cards[]\'`'
         ),
     )
@@ -2181,6 +2278,38 @@ def _normalize_sort_argv(argv: list[str]) -> list[str]:
     return out
 
 
+def _format_from_argv(argv: list[str]) -> str:
+    """Best-effort read of the output format straight from argv (V47, KAN-430).
+
+    Used only for the window *before* argparse has produced a namespace, where an
+    argparse failure still has to render as the format the caller asked for. Both
+    ``--format toon`` and ``--format=toon`` are recognised, last one wins, and an
+    unknown value is ignored here — argparse rejects it a moment later, and its
+    usage error should not itself be rendered in a format we don't understand."""
+    chosen: str | None = None
+    for index, token in enumerate(argv):
+        if token.startswith("--format="):
+            candidate = token.split("=", 1)[1]
+        elif token == "--format" and index + 1 < len(argv):
+            candidate = argv[index + 1]
+        else:
+            continue
+        if candidate in OUTPUT_FORMATS:
+            chosen = candidate
+    if chosen is not None:
+        return chosen
+    return FORMAT_JSON if "--json" in argv else FORMAT_HUMAN
+
+
+def _resolve_format(args: argparse.Namespace) -> str:
+    """The effective output format: an explicit ``--format`` wins, then the ``--json``
+    alias, else ``human``."""
+    fmt = getattr(args, "output_format", None)
+    if fmt:
+        return fmt
+    return FORMAT_JSON if getattr(args, "as_json", False) else FORMAT_HUMAN
+
+
 def run(argv: Sequence[str] | None = None) -> int:
     """Parse args, dispatch, print, and return an exit code (no ``sys.exit``).
 
@@ -2188,12 +2317,14 @@ def run(argv: Sequence[str] | None = None) -> int:
     plus the exit code its machine code maps to (V43, KAN-426)."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     # An argparse failure is itself a structured error, and it happens before there is
-    # a parsed namespace to read --json from — so seed the render mode from argv.
-    _set_error_json("--json" in raw_argv)
+    # a parsed namespace to read the format from — so seed the render mode from argv.
+    _set_error_format(_format_from_argv(raw_argv))
     parser = build_parser()
     args = parser.parse_args(_normalize_sort_argv(raw_argv))
-    as_json = bool(getattr(args, "as_json", False))
-    _set_error_json(as_json)
+    fmt = _resolve_format(args)
+    _set_error_format(fmt)
+    # Local handlers take only the namespace, so hand them the resolved format there.
+    args.output_format = fmt
 
     # Local commands (login / config …) touch only the config file — no token, no
     # client, no network. Dispatch them before resolving or requiring config.
@@ -2202,13 +2333,13 @@ def run(argv: Sequence[str] | None = None) -> int:
         try:
             return local_func(args)
         except Exception as exc:
-            return _print_error(_as_cli_error(exc), as_json=as_json)
+            return _print_error(_as_cli_error(exc), fmt=fmt)
 
     try:
         # warmup hits the public /api/health, so it doesn't need a token.
         config = load_config(require_token=getattr(args, "require_token", True))
     except ConfigError as exc:
-        return _print_error(CliError(str(exc), code="config"), as_json=as_json)
+        return _print_error(CliError(str(exc), code="config"), fmt=fmt)
 
     try:
         with PandanClient(config.api_url, config.token) as client:
@@ -2216,7 +2347,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     except Exception as exc:
         # CliError (delete without --yes, an unresolvable ticket …), PandanApiError
         # (status → code), httpx (transport), anything else (unexpected).
-        return _print_error(_as_cli_error(exc), as_json=as_json)
+        return _print_error(_as_cli_error(exc), fmt=fmt)
 
     # ``noun`` defaults to "card" (card verbs are top-level and set no noun);
     # the board/epic subparsers set it so the delete summary reads correctly.
@@ -2226,12 +2357,12 @@ def run(argv: Sequence[str] | None = None) -> int:
     try:
         _emit(
             result,
-            as_json=as_json,
+            fmt=fmt,
             noun=getattr(args, "noun", "card"),
             fields=getattr(args, "fields", None),
         )
     except CliError as exc:
-        return _print_error(exc, as_json=as_json)
+        return _print_error(exc, fmt=fmt)
     # warmup never throws (a still-waking/failed server is a status, not an
     # exception), so it maps that status to a scripting-friendly exit code:
     # 0 when awake, 1 otherwise (retry the CI pre-step / investigate).
