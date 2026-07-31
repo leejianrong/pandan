@@ -1761,3 +1761,162 @@ exist in no binary**, so the `pdn` withdrawal and the parity correction are not 
 build, and `pandan --version` on `PATH` reports `0.12.0` while source reports `0.14.0`. That skew is
 real, is the intended behaviour of V50's provenance work — and is precisely what KAN-505 misreports as a
 local edit.
+
+### M7 follow-ups, stage 7 — six cards in two parallel batches of three (PRs #227–#236, v0.15.0 → v0.18.0)
+
+M7's *slices* were done; what remained was **seven agent-workable follow-up cards** filed by the slice
+agents themselves. Run as two batches of three concurrent agents with the **landing serialized**, one
+PR reviewed and merged at a time.
+
+| Card | PR | Version | Outcome |
+|---|---|---|---|
+| KAN-478 + KAN-485 (paired) | #228 | `v0.15.0` | one definition of list-ness, one flattening rule |
+| KAN-501 | #229 | — | MCP `fields`/`full`: **−82%** across five real reads for **+552** resident |
+| KAN-484 | #230 | — | the version-bump guard asks the **branch**, not the last push |
+| KAN-505 | #233 | `v0.17.0` | `locally modified` is now claimed only when *provable* |
+| KAN-492 | #234 | `v0.18.0` | the AXI-10 `--help` freeze becomes a change-detector |
+| KAN-475 | #236 | — | MCP image build inputs — *open at the time of writing* |
+| KAN-502 | — | — | the four CLI↔MCP parity gaps — *in flight at the time of writing* |
+
+> Written mid-batch on purpose, because this project has twice lost detail by deferring the log to the
+> end. The last two rows are completed in the stage-7 addendum below once they land.
+
+#### The incident: a worktree fence does not cover `git config`
+
+Mid-batch, **every git command in the primary checkout began failing** with `fatal: this operation must
+be run in a work tree`. Cause: **`core.bare` had been set to `true`** on the shared config. All working
+files were intact, so the fix was one command — but the mechanism is the lesson.
+
+**Linked worktrees share the main repository's `.git/config`.** The KAN-484 agent was building a test
+fixture for a *pre-push hook*, and a hook runs with **`GIT_DIR` exported** — so its fixture's
+`git init` / `git config` / `git commit` / `update-ref` retargeted the **real repository** from inside
+its own worktree. It never `cd`-ed anywhere it was told not to. The existing fences — Write/Edit
+confined to the worktree, "never `cd` into the parent checkout" — are both *path*-shaped, and this
+escape was not about paths at all.
+
+Damage, and what was and wasn't recoverable:
+
+- `core.bare=true` → reset; verified `false`.
+- `user.email` / `user.name` / `commit.gpgsign` leaked into the **shared** config → the agent removed
+  all three unprompted and disclosed it; the PM independently audited `git config --list --local`.
+- Refs clobbered, including `refs/remotes/origin/main` → recovered from reflog + `git fetch`.
+- **One permanent residue.** Commit `5cc6787`, now on `main` via #229, is authored
+  `KAN-484 test <test@example.invalid>` — it is the **KAN-501 agent's** commit, which picked up the
+  other agent's leaked identity while both were running. The KAN-484 agent re-authored its own six
+  commits, but could not touch a commit on someone else's branch, and by then #229 was merged.
+  **Left as-is deliberately:** rewriting protected, published history to correct an author string is a
+  worse trade than the wrong string. Recorded here because that is the honest alternative to fixing it.
+
+*Generalisable, three ways.* **(1)** Worktree isolation is not process isolation — anything that writes
+to `.git/config`, refs, or hooks is repository-global no matter which worktree issues it. **(2)** The
+blast radius of one agent's config write is *every concurrent agent*, which is a new failure mode that
+only exists because we run three at a time. **(3)** A test fixture that shells out to `git` inside a
+hook context inherits `GIT_*` and must strip the whole namespace. The fixture now does exactly that —
+strips `GIT_*`, pins config discovery at `/dev/null`, supplies identity by environment so it
+**never calls `git config`**, passes `-C <scratch>` everywhere, and asserts its git dir before writing
+— pinned by `test_the_fixture_is_isolated_from_the_real_repository` and proven against a decoy
+`GIT_DIR`.
+
+#### Parallel batches collide on the version number, and the collision is the *cheap* part
+
+The V50 bump-on-fix rule means every concurrent CLI agent needs a **distinct** target version, assigned
+up front (0.15.0, 0.16.0, 0.17.0…). That works until landing order diverges from assignment order:
+KAN-492 branched at 0.15.0 targeting **0.16.0**, KAN-505 landed **0.17.0** first, and merging KAN-492
+as-briefed would have moved the version **backward**. Resolved forward to **0.18.0** — took `main`'s
+lock, re-ran `uv lock`, never hand-edited — and **0.16.0 is now permanently skipped**, which is honest,
+because it never landed.
+
+*Generalisable: assign distinct versions to concurrent agents, but treat the assignment as a floor, not
+a promise. The PM resolves the conflict at land time, because only the PM knows the real landing order.*
+Two agents' `cli.py` edits merged with **zero conflicts** despite both being in that file — the fence
+held because it was drawn by *function* (output helpers vs. parser) and the version files were the only
+true overlap.
+
+#### Blind guards: four more, and one of them was in a guard being mutation-tested
+
+The milestone tally reaches **ten**. This stage's four are each a different shape:
+
+- **7th** — V44's own `test_a_single_template_is_not_counted_as_a_card_list` asserted
+  `"2 cards" not in out`, which passed *only because* the verb was printing `?` rows, so no card count
+  ever appeared. It would have stayed green through the fix **and** through a regression.
+- **8th** — KAN-501's envelope test asserted a real card is not a row envelope. It passed for the wrong
+  reason: `labels` is not in `_ROW_ENVELOPES` at all, so the sibling-key check it meant to exercise
+  never ran. Deleting that check left the whole suite green.
+- **9th** — KAN-484's fixture asserted `merge.returncode != 0` to prove a merge conflict; for two
+  commits that was satisfied by an **unrelated git error**. Now asserts `CONFLICT` in the output *and*
+  that `MERGE_HEAD` exists.
+- **10th** — the sharpest. KAN-492's *new* hidden-verb guard was itself too loose: it collected any
+  four-space-indented line, sweeping in epilog list items and 18-space help-wrap continuations. It was
+  found by **reading the failure output of a mutation that was already red**, not by the mutation
+  failing to fire.
+
+*Generalisable: a red mutation is not the end of the check — read what it printed. And a green mutation
+has two possible causes, a blind test or a false belief; this stage produced examples of both.*
+
+#### Two cards that were right to refuse the obvious fix
+
+**KAN-505 established that the thing it was asked to compare was not knowable.** The brief asked it to
+distinguish "the binary is behind" from "the skill was edited". It checked, found the installed
+`SKILL.md` carries **no provenance of any kind**, and rather than invent a heuristic — which would have
+re-created the bug one level up — made `install` *write* a stamp and reported the pre-existing case as
+permanently indeterminate. Its decision table claims `locally modified` **only** when version *and*
+commit both match, i.e. the one case that actually proves a hand edit; one version covering two commits
+is `unknown`, refusing to guess. The stamp is a trailing HTML comment, not frontmatter, because
+frontmatter is the harness's metadata contract; and comparisons run on the stamp-stripped body, so the
+stamp cannot make an untouched file look edited — which would have turned `uninstall`'s "never delete a
+modified skill" promise into "never delete anything". **The severity argument was that the false alarm
+pointed at the destructive fix**, so the deliverable was `--force-skill` becoming *safer*: the
+invitation is gone from the stale-binary state, and a downgrade is now announced rather than silent.
+
+**KAN-492 found its own recommendation was forced rather than preferred.** The PM's reading was that
+hints should print above V44's aggregate to preserve the published `tail -1` contract. Verified, it is
+the *only* option: above the rows buries the content, below the aggregate breaks the contract. The
+bonus finding is better — `pandan overview`, itself aggregate-bearing, had **already** been ending on a
+hint, so V46's order had quietly broken that contract for the one verb nobody checked.
+
+#### Guards, watchers, and evidence
+
+- **A guard's tests need a watcher too, and the hole was a paths filter this time.** KAN-484 shipped
+  `mcp/tests/test_prepush_hook.py`, but the `mcp` job filters on `mcp/**` while the hook lives at
+  `scripts/git-hooks/pre-push` — matching **no filter at all**, so a hook-only PR would skip the very
+  tests guarding it. Same shape as KAN-452's tag-gated release gate, reached by a different route.
+  Fixed by adding `scripts/git-hooks/**` to the `mcp` filter (PR #232).
+- **Prove a filter change positively, by making the PR trip it.** #232 deliberately edited the hook, so
+  the `mcp` job ran **108 tests on a PR that changed no `mcp/**` file at all** — before the change it
+  would have logged `No mcp changes — skipping`. A docs/CI-only diff would have been classified
+  docs-only and proven nothing. *Generalisable: when you change a CI trigger, include a change that
+  the new trigger must catch, or you have shipped an unobserved claim.*
+- **Step conclusions are a valid fallback when the log won't come.** For #234 `gh run view --log` timed
+  out twice; the job's per-step conclusions via the API showed `Skip (no pandan-cli changes)` was itself
+  **skipped** (so the filter saw real changes) with `Pytest` and `CLI version bump` succeeding. Weaker
+  than the log line, stronger than the tick — and worth naming as the fallback rather than quietly
+  downgrading to "it's green".
+- **Parsing `--help` for a verb list produces false positives.** It made `aging` look like a verb; it is
+  a wrapped word inside `metrics`'s own description. The CLI's own invalid-choice error enumerates every
+  registered verb in order, which is cheaper and authoritative:
+  `invalid choice: 'aging' (choose from overview, warmup, list, …)`.
+
+#### PM notes
+
+- **Two of the seven cards had a claim that did not survive contact** — the running total for M7 is now
+  six. KAN-485 asserted `_field_value` already flattened the hazard: it handled `\n` and `\t` but
+  **not `\r`**, and a *third* open-coded copy of the rule existed in `_error_row`. KAN-475's cost
+  argument for pinning ("dependabot already manages this") was false on mechanism: `.github/dependabot.yml`
+  has **no `docker` ecosystem**, so a pinned tag would have had nobody to bump it — trading a floating
+  input for a silently stale one that *looks* pinned. Both were caught before or during the work rather
+  than after, and in KAN-485's case by the agent reporting the discrepancy instead of picking a side.
+- **A card's own line numbers go stale faster than its reasoning.** Every one of the seven cards cited
+  positions from before V44–V48 landed (`_humanize` at 296, actually 460). The reasoning held in all
+  seven cases; the coordinates held in none. Briefs now say so explicitly.
+- **Fencing by function, inside one file, worked** — but only because the PM verified adjacency by
+  reading the code rather than trusting the file list. KAN-501's card instructed it to "reuse the CLI's
+  existing field-selection logic", which is **impossible**: `mcp/pyproject.toml` depends on
+  `pandan-client` only, never `pandan-cli`. Followed literally it would have dragged that agent into
+  `cli.py` alongside the paired agent. Caught pre-spawn; the rule it re-proves is that *a file list is
+  not an adjacency analysis*.
+- **Routing docs centrally paid for itself again.** Four of the six agents reported doc changes they
+  needed rather than making them, and the PM applied them in two PRs (#231, #235) — including
+  annotating three V46 claims that KAN-492 superseded, and correcting an ADR 0019 consequence that had
+  become false in the present tense. Superseded claims were **annotated, not deleted**: the reasoning is
+  the record of why a slice shipped as it did, and this project has repeatedly found the argument more
+  valuable than the outcome.
