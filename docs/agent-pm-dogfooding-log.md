@@ -1776,10 +1776,16 @@ PR reviewed and merged at a time.
 | KAN-505 | #233 | `v0.17.0` | `locally modified` is now claimed only when *provable* |
 | KAN-492 | #234 | `v0.18.0` | the AXI-10 `--help` freeze becomes a change-detector |
 | KAN-475 | #236 | — | MCP image inputs recorded as digests — **auditable, not reproducible** |
-| KAN-502 | — | — | the four CLI↔MCP parity gaps — *in flight at the time of writing* |
+| KAN-502 | #239 | `v0.19.0` | all four parity gaps closed; **parity pinned in both directions by a test** |
 
 > Written mid-batch on purpose, because this project has twice lost detail by deferring the log to the
-> end. KAN-502 is completed in an addendum once it lands.
+> end. All seven cards have since landed; the last two have their own sections below.
+
+**Seven cards, ten implementer PRs plus four PM PRs, `v0.15.0` → `v0.19.1`.** Two batches of three
+concurrent agents, landing strictly serialized. Three other counts worth recording: **four blind guards
+found** (milestone total ten), **two more spec claims falsified on contact** (M7 total six), and **eight
+new cards filed** from findings the work turned up — KAN-513, 517, 518, 519, 523, 526, 529 plus this
+stage's own follow-ups.
 
 #### KAN-475: the recommended option was impossible, and finding out took one more click
 
@@ -1963,3 +1969,90 @@ hint, so V46's order had quietly broken that contract for the one verb nobody ch
   become false in the present tense. Superseded claims were **annotated, not deleted**: the reasoning is
   the record of why a slice shipped as it did, and this project has repeatedly found the argument more
   valuable than the outcome.
+
+#### KAN-502: parity stops being a claim and becomes a test
+
+The card's acceptance criterion — *"a test **or doc note** asserting CLI-vs-MCP parity in both
+directions"* — invited exactly the artefact that caused the problem in the first place: a **prose claim**
+about parity is what propagated into KAN-432's charter and nearly justified deleting MCP tools. The brief
+therefore asked for a mechanical test and said plainly that an honest "not achievable without coupling
+the packages" would be worth more than a fake one.
+
+What shipped is `pandan-cli/tests/test_parity.py`: it parses the tool names out of
+`mcp/pandan_mcp/server.py` **as text** — never importing `pandan_mcp`, because one adapter importing
+another inverts ADR 0005 — walks the real parser for CLI leaf verbs, and asserts MCP ⊆ CLI, CLI ⊆ MCP,
+and `MCP_ONLY == {}`.
+
+**Its one real risk was a vacuous pass, and it is guarded.** If the regex matched nothing, `tools` would
+be empty and *both* subset assertions would hold trivially. So the regex is cross-checked against a raw
+`@mcp.tool` decorator count, with the failure message "so every assertion below is unsound" — the same
+two-ways check ADR 0019 used to establish 49-not-48. The PM verified this independently by breaking the
+regex: `assert 0 == 49` fired. *Generalisable: a subset assertion over a set you computed is only as
+strong as your proof that the set is non-empty — and that proof belongs in the test, not in your head.*
+
+**Two card claims corrected rather than inherited.** `claim_card` is atomic in the sense of *one
+invocation*, not *one transaction* — `pandan-client/pandan_client/client.py:420-429` composes `move` then
+`update` and its own docstring says so. The card said "atomically", ADR 0019 says "claims a *named* card
+atomically", and the new verb deliberately says neither. And `update_board` reaches **4 of
+`BoardUpdate`'s 6** fields: `autosync_enabled` / `autosync_advance_to_done` are reachable from *neither*
+adapter — an **API-coverage** gap rather than a parity gap, so it does not breach ADR 0005 and was
+correctly left out of scope (carded as KAN-529).
+
+**PR #226's parity correction turned out to be incomplete.** Fixing the skill's false "full parity" claim
+had left a **second** bolded instance in the *When to fall back to MCP* section. Fifth instance of the
+milestone's recurring lesson, and its sharpest form yet: **fixing one occurrence of a claim is not fixing
+the claim** — grep the file for the assertion, not the sentence you happened to read.
+
+**A gitleaks failure that was right.** The agent's first fixture assigned a high-entropy literal to
+`SECRET = "…"`; gitleaks flagged it as `generic-api-key`. Correctly — a random-looking string next to the
+word "secret" is indistinguishable from the real thing. `ci.yml` says never allowlist, so it was fixed at
+source (low-entropy prose, renamed `FAKE_WEBHOOK_KEY`) and **history rewritten**, because gitleaks scans
+all commits. *Generalisable: a test fixture for a secret should not look like a secret.*
+
+**And the mutation that came back partly green, reported rather than hidden.** The obvious leak mutation
+(handler merges the secret into its result) reddens `json` and `toon` but leaves **`human` green**,
+because `_board_line` prints a fixed id+name projection and drops the extra key. The agent kept all three
+cases anyway — a stray print on the human branch is a route the structured formats would miss — added a
+read-side companion covering the renderer alone, and wrote the finding into the docstring. It also
+declined to cover `--format json`, because that is documented as the client's raw dict and asserting
+otherwise "would be the CLI lying about its own contract". *A guard that covers two of three routes is
+worth having; a guard you believe covers three is not.*
+
+#### The PM's own evidence claim was confounded, and that is the most transferable finding here
+
+Closing KAN-502's last follow-up, the PM added `mcp/pandan_mcp/server.py` to CI's `cli` paths filter — the
+**third** "guard with no watcher" of the milestone, after a tag-gated workflow (KAN-452) and tests whose
+subject matched no filter (KAN-484). This one arrived by a new route: a test whose **input** lives outside
+its own filter.
+
+The PR body claimed it proved itself, because it edited `server.py` and the `cli` job ran. **It proved
+nothing.** That PR *also* edited `pandan-cli/pandan_cli/cli.py`, so the filter matched on `pandan-cli/**`
+regardless — the observation would have looked identical had the new line been absent. Checking the
+`Detect changed areas` log didn't help either: `dorny/paths-filter` echoes its filter *config* but does
+not log matched files without `list-files`.
+
+So the claim was **withdrawn in a comment on the PR** and then established properly: a throwaway branch
+touching **only** `server.py`, opened as a draft, closed unmerged. Step conclusions:
+
+```
+Skip (no pandan-cli changes): skipped     <- the cli filter matched via the new line
+Ruff lint / Pytest:           success     <- the CLI suite genuinely ran (25s vs ~3s for a skip)
+CLI version bump:             skipped     <- correctly NOT demanded
+```
+
+*Generalisable, and it applies to the PM as much as to any agent: **a self-proving PR must isolate the
+variable.*** "Include a change the new trigger must catch" (recorded earlier this stage) is necessary but
+not sufficient — the change must be the **only** thing that could have fired it. The cheap fix is a
+throwaway branch that changes one file and is never merged.
+
+That last line is also a genuine bonus finding: `cli` and `cli_version` are correctly **independent**. The
+`cli` filter fires so the parity test runs, while `cli_code` does not, so an MCP-only change is not asked
+for a CLI version bump. Wiring the version guard to the same filter would have made every MCP change
+demand one — a plausible mistake, now confirmed absent.
+
+#### Closing counts
+
+`v0.15.0` → `v0.19.1`, with **0.16.0 permanently skipped** and a `0.19.1` patch bump for a comment-only
+edit under `pandan-cli/pandan_cli/` — the V50 guard firing exactly as designed, and the documented honest
+outcome. Still **no tag** above `v0.12.0`: six unreleased bumps, deliberately batched, and worth noting
+that KAN-505's fix only reaches a user on a build that contains it.
