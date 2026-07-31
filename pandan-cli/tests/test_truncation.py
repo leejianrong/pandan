@@ -26,6 +26,7 @@ other key (``next_cursor``, ``url``), and V44's ``summary`` aggregate.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from toon_decode import decode
@@ -369,6 +370,36 @@ def test_v44s_summary_aggregate_is_untouched_by_truncation(monkeypatch, capsys):
     rows = _payload(monkeypatch, capsys, ["activity", "--board", "5", "--json"], activity)
     assert rows["activity"][0]["summary"].endswith(hint(1200))
     assert rows["summary"] == {"count": 1}
+
+
+def test_the_aggregate_is_never_handed_to_the_truncator_at_all(monkeypatch):
+    """Pins the ORDERING, which the value assertions above cannot: V44's aggregate is
+    attached *after* truncation, so it is out of reach structurally.
+
+    Found by mutation testing — reversing the order leaves every other assertion in
+    this file green, because the aggregate holds only integers and
+    ``_truncate_payload`` skips non-strings. That makes the ordering a promise with no
+    observable consequence *today*, and exactly the kind that rots silently: the day
+    a summary carries a string (a cycle name, a filter echo) it would be cut, and the
+    hint would claim a character total for a field nobody was truncating on purpose.
+    ``summary`` is itself in ``_TEXT_FIELDS`` (an activity row's is prose), so the
+    collision is real and not hypothetical."""
+    seen: list[Any] = []
+    real = cli._truncate_payload
+
+    def spy(value, limit):
+        seen.append(value)
+        return real(value, limit)
+
+    monkeypatch.setattr(cli, "_truncate_payload", spy)
+    result = {"cards": [_card(description=LONG)], "next_cursor": None}
+    payload = cli._structured_payload(result, limit=LIMIT)
+
+    assert payload["summary"]["count"] == 1
+    assert seen, "the truncator was not called at all"
+    # The top-level call saw the raw client result — no `summary` key in sight.
+    assert "summary" not in seen[0]
+    assert seen[0] is result
 
 
 # --- 6. multi-byte safety ------------------------------------------------
