@@ -237,6 +237,18 @@ silently breaks that.
 > credential socket isn't reachable from a sub-agent shell. Use
 > `git -c credential.helper='!gh auth git-credential' push …`.
 
+**Mutation-test the guards you add here — this repo asks for it, and there's a way to lose your work
+doing it.** Several M7 slices ship a test whose whole job is "this can't regress" (the legacy-PAT
+prefix guard in V40, the ticket-ref branch in V42, the version-bump guard in V50). A test that passes
+proves nothing about such a promise until you've watched it go red: break the thing it protects,
+confirm the failure, restore. **But do the mutation non-destructively.**
+`git checkout -- <file>` / `git restore <file>` overwrite the working tree from the **index**, silently
+discarding uncommitted changes to that file — and unstaged work never entered the object database, so
+no reflog or `git fsck` can recover it. A V42 sub-agent nearly lost an entire implementation this way
+and was saved only by a scratch copy it happened to have written. Commit (or
+`git stash push -- <file>`) before mutating, edit a copy, or apply the mutation as a patch and reverse
+exactly it with `git apply -R`. See the `dev-playbook` skill, *Testing and correctness* §5.
+
 ## Configuration
 
 `DATABASE_URL` is the only required runtime config. It defaults to the docker-compose Postgres:
