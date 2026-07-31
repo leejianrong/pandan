@@ -233,8 +233,10 @@ at an obvious "version" error). There is deliberately no waiver flag. The point 
 `(source checkout, not a released build)` — so a stale binary is *detectable*; an unbumped version
 silently breaks that.
 
-> **Agents in a worktree: a plain `git push` may fail with `No anonymous write access`** — the VS Code
-> credential socket isn't reachable from a sub-agent shell. Use
+> **A plain `git push` may fail with `No anonymous write access` / `Authentication failed`.** Two
+> known causes: a sub-agent shell can't reach the VS Code credential socket, and a cached credential
+> keyed to the *old* URL goes stale after a repo rename (KAN-437 hit this in the primary checkout, not
+> a worktree). Same fix either way:
 > `git -c credential.helper='!gh auth git-credential' push …`.
 
 **Mutation-test the guards you add here — this repo asks for it, and there's a way to lose your work

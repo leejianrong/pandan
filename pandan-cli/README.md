@@ -352,7 +352,7 @@ the realistic source-install options.
 **From a checkout (supported):**
 
 ```bash
-git clone https://github.com/leejianrong/simple-kanban.git
+git clone https://github.com/leejianrong/pandan.git
 cd simple-kanban
 uv tool install ./pandan-cli        # installs `pandan` (and `pdn`) on your PATH
 ```
@@ -363,7 +363,7 @@ checkout, so this works cleanly. Uninstall with `uv tool uninstall pandan-cli`.
 **From git directly (supported):**
 
 ```bash
-uv tool install "git+https://github.com/leejianrong/simple-kanban.git#subdirectory=pandan-cli"
+uv tool install "git+https://github.com/leejianrong/pandan.git#subdirectory=pandan-cli"
 ```
 
 `uv` clones the repo and resolves the sibling `../pandan-client` path source from
@@ -390,7 +390,7 @@ so it needs no editing per version:
 
 ```bash
 # Linux x86_64 — no sudo; installs to ~/.local/bin (make sure that's on your PATH)
-curl -L -o pandan https://github.com/leejianrong/simple-kanban/releases/latest/download/pandan-linux-x86_64
+curl -L -o pandan https://github.com/leejianrong/pandan/releases/latest/download/pandan-linux-x86_64
 chmod +x pandan
 mv pandan ~/.local/bin/               # or: sudo mv pandan /usr/local/bin/ for system-wide
 pandan --help
@@ -404,7 +404,7 @@ gh release download v0.4.0 --pattern pandan-linux-x86_64
 ```
 
 Only two binaries ship: **`pandan-linux-x86_64`** and **`pandan-macos-arm64`** — browse them on the
-[latest GitHub Release](https://github.com/leejianrong/simple-kanban/releases/latest). There is
+[latest GitHub Release](https://github.com/leejianrong/pandan/releases/latest). There is
 **no Intel-mac (`pandan-macos-x86_64`) binary**: PyInstaller can't cross-compile so it must build on
 a native Intel runner, and GitHub's free Intel `macos-13` runners are scarce, so that leg was
 dropped (KAN-225). **Intel-Mac users** have three options: run the `pandan-macos-arm64` binary under
@@ -441,7 +441,7 @@ pandan 0.5.0 (source checkout, not a released build)  # running from a checkout 
   sha is only a hint; the code is unpublished.
 
 **How to tell a release binary is stale.** Compare the printed version with the
-[latest release](https://github.com/leejianrong/simple-kanban/releases/latest): if
+[latest release](https://github.com/leejianrong/pandan/releases/latest): if
 yours is lower, you're behind and a fix you're missing may already be shipped. If the
 version matches but you suspect otherwise, compare the sha against that release's tag
 commit. This exists because it once wasn't detectable: `0.3.0` was released, two

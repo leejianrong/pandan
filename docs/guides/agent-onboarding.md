@@ -58,7 +58,7 @@ returns `401`. Revoke a token any time from the same Tokens tab.
 
 Claude Code discovers project-scoped MCP servers from a `.mcp.json` at the repo root. Copy
 [`.mcp.json.example`](../../.mcp.json.example) to `.mcp.json` and keep the server entry you
-want. Full details are in [`mcp/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/mcp/README.md); the essentials follow.
+want. Full details are in [`mcp/README.md`](https://github.com/leejianrong/pandan/blob/main/mcp/README.md); the essentials follow.
 
 ### Run from source with `uv`
 
@@ -120,7 +120,7 @@ Python, no `uv`, and no checkout:
         "-e", "PANDAN_API_URL",
         "-e", "PANDAN_TOKEN",
         "-e", "PANDAN_BOARD_ID",
-        "ghcr.io/leejianrong/simple-kanban-mcp:latest"
+        "ghcr.io/leejianrong/pandan-mcp:latest"
       ],
       "env": {
         "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
@@ -132,8 +132,11 @@ Python, no `uv`, and no checkout:
 }
 ```
 
-The image is **public**, so `docker pull ghcr.io/leejianrong/simple-kanban-mcp:latest` works
-with no `docker login` and no GitHub account. Tags track the release — `latest`, plus the
+`docker pull ghcr.io/leejianrong/pandan-mcp:latest` needs no `docker login` and no GitHub account
+once the image is public. **In transition (KAN-437):** the rename to `pandan-mcp` creates a *new* ghcr
+package, so it doesn't exist until the next version tag is pushed and is private until a one-time
+visibility flip — until then use the old public `ghcr.io/leejianrong/simple-kanban-mcp:latest`. See
+[`mcp/README.md`](https://github.com/leejianrong/pandan/blob/main/mcp/README.md) for the detail. Tags track the release — `latest`, plus the
 semver `0.2.2`, `0.2`, and `0`; pin `:0.2.2` for a fixed version. The `-e NAME` flags with no
 `=value` forward values from the `env` block into the container, keeping the token out of the
 argument list.
@@ -155,7 +158,7 @@ board means that board isn't yours.
 
 ## 5. Example agent workflows
 
-These use the real MCP tool names (see the full table in [`mcp/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/mcp/README.md)).
+These use the real MCP tool names (see the full table in [`mcp/README.md`](https://github.com/leejianrong/pandan/blob/main/mcp/README.md)).
 Card columns are `todo`, `in_progress`, and `done`.
 
 > Your agent sees each tool **namespaced by the `mcpServers` key** you chose above, so with the
@@ -176,7 +179,7 @@ add_comment(card_id, body="Starting on this — will open a PR shortly.")
 ```
 add_dependency(card_id, blocker_id)   # this card is now blocked by another
 list_dependencies(card_id)            # see blocked_by / blocks
-add_link(card_id, label="PR #57", url="https://github.com/leejianrong/simple-kanban/pull/57")
+add_link(card_id, label="PR #57", url="https://github.com/leejianrong/pandan/pull/57")
 add_comment(card_id, body="Fix is up in PR #57, waiting on review.")
 ```
 
@@ -199,14 +202,14 @@ create_card(title="GitHub login button", column="todo", epic_id=<epic id>)
 
 If your automation isn't an MCP client — a CI job, a shell script, an agent that shells out —
 use the `pandan` CLI. It's the same thin adapter over `/api/v1`, exposed as subcommands. Full
-reference: [`pandan-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/pandan-cli/README.md).
+reference: [`pandan-cli/README.md`](https://github.com/leejianrong/pandan/blob/main/pandan-cli/README.md).
 
 **Prebuilt binary (no Python needed).** Download the asset for your platform from the
-[latest GitHub Release](https://github.com/leejianrong/simple-kanban/releases/latest) — the
+[latest GitHub Release](https://github.com/leejianrong/pandan/releases/latest) — the
 `releases/latest/download/…` URL always resolves to the newest one:
 
 ```bash
-curl -L -o pandan https://github.com/leejianrong/simple-kanban/releases/latest/download/pandan-linux-x86_64
+curl -L -o pandan https://github.com/leejianrong/pandan/releases/latest/download/pandan-linux-x86_64
 chmod +x pandan && mv pandan ~/.local/bin/      # or: sudo mv pandan /usr/local/bin/
 ```
 
@@ -214,13 +217,13 @@ Only `pandan-linux-x86_64` and `pandan-macos-arm64` ship (no Intel-mac binary �
 KAN-225); the linux binary needs glibc ≥ 2.28 (Ubuntu 20.04+, Debian 11+, RHEL/Rocky/Alma 8+).
 **Intel-Mac users** run the `pandan-macos-arm64` binary under Rosetta 2, install from source with
 `uv` (below), or use the MCP container image. See
-[`pandan-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/pandan-cli/README.md) for the full asset list and the macOS
+[`pandan-cli/README.md`](https://github.com/leejianrong/pandan/blob/main/pandan-cli/README.md) for the full asset list and the macOS
 Gatekeeper note.
 
 **Install from git (needs Python + `uv`):**
 
 ```bash
-uv tool install "git+https://github.com/leejianrong/simple-kanban.git#subdirectory=pandan-cli"
+uv tool install "git+https://github.com/leejianrong/pandan.git#subdirectory=pandan-cli"
 ```
 
 `uv` clones the repo and resolves the sibling `pandan-client` path dependency from the same
@@ -249,7 +252,7 @@ not-found without parsing text. And when it does fail, the failure is **machine-
 stdout**: one `error<TAB>code<TAB>message<TAB>arg` row, or a `{"error": {…}}` object with
 `--json`, so `jq -r .error.code` is enough to branch. Nothing needs stderr, and no verb ever
 prompts when stdin isn't a terminal. Full code table:
-[`pandan-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/pandan-cli/README.md).
+[`pandan-cli/README.md`](https://github.com/leejianrong/pandan/blob/main/pandan-cli/README.md).
 
 ## Self-hosting
 
@@ -271,7 +274,7 @@ in depth.
 
 To enable GitHub login on your own instance, set `GITHUB_OAUTH_CLIENT_ID` and
 `GITHUB_OAUTH_CLIENT_SECRET` (both unset → the board still boots, but login is unavailable). See
-the Configuration section of [`CLAUDE.md`](https://github.com/leejianrong/simple-kanban/blob/main/CLAUDE.md) for the full env-var list, including
+the Configuration section of [`CLAUDE.md`](https://github.com/leejianrong/pandan/blob/main/CLAUDE.md) for the full env-var list, including
 `AUTH_SECRET` and `COOKIE_SECURE`.
 
 ## Single-owner boards, and what that means today

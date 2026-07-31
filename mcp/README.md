@@ -106,12 +106,22 @@ uv run pytest -q          # unit tests (mocked httpx) + a tool-list smoke test
 
 ### As a container (ghcr.io, KAN-47)
 
-The image is public at `ghcr.io/leejianrong/simple-kanban-mcp`, pushed on every
-version tag by `.github/workflows/publish-mcp-image.yml`. Being public, it pulls with
-no `docker login` and no GitHub account:
+The image is `ghcr.io/leejianrong/pandan-mcp`, pushed on every version tag by
+`.github/workflows/publish-mcp-image.yml`.
+
+> **In transition (KAN-437).** The image path was renamed from `simple-kanban-mcp` with the rebrand,
+> and a renamed path is a **new ghcr package**, so `pandan-mcp` does not exist until the **next**
+> version tag is pushed — and GitHub makes a package **private on its first push**, needing a one-time
+> visibility flip in the web UI (Packages → `pandan-mcp` → Settings → Change visibility → Public;
+> the CI token has no `packages` scope, so this can't be automated). Until both have happened, the
+> last published image is the old public `ghcr.io/leejianrong/simple-kanban-mcp:latest`, which keeps
+> working but stops receiving updates. If a `pandan-mcp` pull 404s, that's which side of the
+> transition you're on — not a broken tag.
+
+Once published and made public it pulls with no `docker login` and no GitHub account:
 
 ```bash
-docker pull ghcr.io/leejianrong/simple-kanban-mcp:latest
+docker pull ghcr.io/leejianrong/pandan-mcp:latest
 ```
 
 Tags follow the release: `latest` on the newest, plus the semver `0.2.2`, `0.2`, and
@@ -123,7 +133,7 @@ docker run -i --rm \
   -e PANDAN_API_URL=https://simple-kanban-jian.fly.dev \
   -e PANDAN_TOKEN=pandan_pat_… \
   -e PANDAN_BOARD_ID=1 \
-  ghcr.io/leejianrong/simple-kanban-mcp:latest
+  ghcr.io/leejianrong/pandan-mcp:latest
 ```
 
 > To reach a backend running on your **host** (not in Docker), use
@@ -134,7 +144,7 @@ the build **context must be the repo root** with `-f mcp/Dockerfile` — buildin
 from inside `mcp/` can't see `../pandan-client` and will fail:
 
 ```bash
-docker build -f mcp/Dockerfile -t simple-kanban-mcp .   # run from the REPO ROOT
+docker build -f mcp/Dockerfile -t pandan-mcp .   # run from the REPO ROOT
 ```
 
 ## Wire it into Claude Code
@@ -200,7 +210,7 @@ every case set `PANDAN_TOKEN` to a `pandan_pat_…` you created in the SPA Token
         "-e", "PANDAN_API_URL",
         "-e", "PANDAN_TOKEN",
         "-e", "PANDAN_BOARD_ID",
-        "ghcr.io/leejianrong/simple-kanban-mcp:latest"
+        "ghcr.io/leejianrong/pandan-mcp:latest"
       ],
       "env": {
         "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",

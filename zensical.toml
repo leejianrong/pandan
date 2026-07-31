@@ -21,8 +21,8 @@ copyright = "Copyright &copy; 2026 Pandan"
 docs_dir = "docs"
 site_dir = "site"
 
-repo_url = "https://github.com/leejianrong/simple-kanban"
-repo_name = "leejianrong/simple-kanban"
+repo_url = "https://github.com/leejianrong/pandan"
+repo_name = "leejianrong/pandan"
 
 # Explicit navigation. Files under docs/ that are not listed here (internal
 # session prompts, spikes, UAT logs) are still built but stay out of the nav.

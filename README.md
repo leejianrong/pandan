@@ -35,14 +35,14 @@ straight at it:
 
 - **[MCP server](mcp/)** — one tool per endpoint, so an agent gets full CRUD over boards, cards,
   epics, dependencies, links, and comments. Run it from source with `uv`, or pull the public
-  [ghcr.io image](https://github.com/leejianrong/simple-kanban/pkgs/container/simple-kanban-mcp)
-  (`docker pull ghcr.io/leejianrong/simple-kanban-mcp:latest`, no `docker login` needed). Wire it
+  [ghcr.io image](https://github.com/leejianrong/pandan/pkgs/container/pandan-mcp)
+  (`docker pull ghcr.io/leejianrong/pandan-mcp:latest`, no `docker login` needed). Wire it
   into Claude Code via `.mcp.json` (see [`.mcp.json.example`](.mcp.json.example)) and ask it to
   *"list my boards"*.
 - **[`pandan` CLI](pandan-cli/)** — the same adapter as subcommands, for CI jobs and non-MCP
   automation, with a token-free `pandan warmup` you can loop on as a pre-step. Install from source, or
   download a prebuilt binary (`pandan-linux-x86_64`, `pandan-macos-arm64`) from the
-  [latest release](https://github.com/leejianrong/simple-kanban/releases/latest).
+  [latest release](https://github.com/leejianrong/pandan/releases/latest).
 
 Both authenticate with a personal access token you mint in the **Tokens** tab; a PAT acts as you
 and is owner-gated exactly like your session.
