@@ -224,6 +224,19 @@ ln -sf ../../scripts/git-hooks/pre-push .git/hooks/pre-push
 ```
 Bypass a single push with `git push --no-verify` (use sparingly).
 
+Since **V50 (KAN-435)** the hook also has a `pandan-cli/` block (ruff + pytest + a **version-bump
+guard**), mirrored by CI's `CLI version bump` step: a diff touching `pandan-cli/pandan_cli/`
+behaviour **must** bump `__version__` in `pandan_cli/__init__.py` *and* `version` in
+`pandan-cli/pyproject.toml`, then re-run `uv lock` (a stale lock fails CI at `uv sync --frozen`, not
+at an obvious "version" error). There is deliberately no waiver flag. The point is that
+`pandan --version` prints build provenance — `pandan 0.5.0 (5da9ace)` for a release vs. an explicit
+`(source checkout, not a released build)` — so a stale binary is *detectable*; an unbumped version
+silently breaks that.
+
+> **Agents in a worktree: a plain `git push` may fail with `No anonymous write access`** — the VS Code
+> credential socket isn't reachable from a sub-agent shell. Use
+> `git -c credential.helper='!gh auth git-credential' push …`.
+
 ## Configuration
 
 `DATABASE_URL` is the only required runtime config. It defaults to the docker-compose Postgres:

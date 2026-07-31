@@ -1272,3 +1272,99 @@ Full decision record in [ADR 0018](adr/0018-pandan-rebrand.md).
   that reads as a code failure until you read one line. `npx playwright install chromium` fixes it;
   CLAUDE.md documents the one-time install for `npm run e2e` but not for the worktree target, which is
   exactly where a fresh tree hits it.
+
+### M7 Wave 2, stage 3 — KAN-434 + KAN-435 run in parallel (PRs #202, #203, v0.5.0)
+
+First genuinely-parallel pair of M7: an envelope-documentation card and the release-discipline card,
+two agents in separate worktrees at once.
+
+- **"Two cards, disjoint files" needed checking, and failed the first check.** KAN-435 edits
+  `cli.py`'s `--version` action (~line 1077); KAN-434's `--json` help-text fix sits at ~line 1086 —
+  **nine lines apart in the same parser block**, a guaranteed same-hunk conflict. Fix was a **scope
+  fence recorded on both cards**: ownership split by file *and by README section*, with KAN-434's
+  one-line help change **delegated into KAN-435's PR** because that agent was already editing those
+  exact lines. Parallelism survived; the conflict never happened. Lesson: check adjacency inside
+  shared files, not just the file list — and when two cards genuinely need the same ten lines, move
+  the line, not the card.
+- **Write the scope fence to the board, not just to the agent.** Both cards carry a comment
+  explaining why one card's change ships in the other's PR. Without it the board looks like KAN-434
+  didn't do its job.
+- **A card can be "done" in the repo and not done in reality.** KAN-434's deliverable spanned
+  `pandan-cli/README.md` *and* the `pandan` skill — and the skill lives **outside the repo**
+  (`~/.claude/skills/pandan/`), so it can't ride a PR. Split that explicitly: the agent did the
+  README, the PM did the skill, and the card only closed once both landed.
+
+**Verification learnings**
+
+- **The `--json` envelope is CLIENT-side, which nobody had written down.** A raw `GET /api/v1/cards`
+  returns a **bare array**; `pandan_client/client.py` wraps it (`{"cards": …}` at `:272`,
+  `{"boards": …}` at `:156`, `{"epics": …}` at `:281`) and lifts `next_cursor` off the
+  `X-Next-Cursor` header, and `_emit` prints the client result verbatim. So the envelope is the
+  *shared client's* per-method return contract — which is why the shape differs per verb, and why the
+  MCP server returns identical shapes. Guessing that table would have produced a documented lie.
+- **Make the agent *execute* the doc examples, not eyeball them.** KAN-434 ran every verb against a
+  throwaway worktree Postgres and ran all four `jq` one-liners verbatim; the PM then re-spot-checked
+  six rows against **prod** with the released binary. A doc table is a claim about behaviour and
+  deserves the same evidence bar as a test.
+- **Demand positive evidence from CI, again.** KAN-435's agent checked the `CLI (lint + tests)` job
+  log to confirm the new `CLI version bump` step *ran* and printed its decision, rather than trusting
+  "all green" — the same discipline V40 needed for `paths-filter`. And note the filter list is now
+  load-bearing in a *second* way: `cli_code`/`cli_version` encode a **policy**, so a bad edit there
+  could silently disable the bump rule. Mitigation is the step logging its decision out loud.
+- **Mutation-test the guard, not just the feature.** The bump guard was exercised against synthetic
+  commits (behavioural diff without a bump → fail; docs-only → pass). Testing a **pre-push hook** is
+  awkward, though: switching branches swaps the hook itself, so it has to be extracted with
+  `git show <branch>:scripts/git-hooks/pre-push`. Also the hook's diff base is `origin/main…HEAD` for
+  the whole push range, so a branch that bumps in *any* commit passes — correct for a push, but it
+  means the guard can't be tested from a branch that already contains the bump.
+
+**Two of the PM's own M7 specs were wrong, and verification caught both**
+
+- **Exit codes (KAN-426 / V43).** The write-up said "0/1/2, already correct". The CLI actually has
+  **six** codes (`0`/`1`/`2`/`3`=401/`4`=403/`5`=404) — richer than AXI principle 6 asks for. Worse,
+  verifying it surfaced a **real inconsistency**: `pandan get 999999` (numeric, 404s server-side)
+  exits **5**, while `pandan get KAN-999999` (ticket ref, resolved client-side) exits **1**. Same
+  logical failure, different code depending on the *identifier form* — which defeats the purpose of
+  exit codes for an agent branching on them. Card repointed at "document and pin the existing scheme,
+  and make ref-resolution failure return 5", 3 → 5 points. The `403 → 4` row is flagged **unverified**
+  (no board exists that isn't ours), rather than asserted.
+- **Truncation (KAN-428 / V45)** had already been re-framed for the same reason in the V40 pass.
+
+The pattern across both: **a spec written from a read of the code is a hypothesis.** Every M7 slice
+whose spec asserted current behaviour has now had to be corrected on contact. Cheapest fix is the rule
+already adopted for ADRs — cite the `file:line`, which forces the grep.
+
+**Release/provenance learnings (v0.5.0)**
+
+- **Provenance belongs in the artifact, and the release must refuse to ship without it.**
+  `pandan --version` now prints `pandan 0.5.0 (5da9ace)` for a release and an explicit
+  `(source checkout, not a released build)` otherwise. The commit is stamped into a **generated,
+  git-ignored** module before PyInstaller freezes, with a unit test asserting `git ls-files` never
+  tracks it — a committed stamp would make every source checkout claim to be a release. And
+  `release-cli.yml`'s smoke test **fails the release** if the built asset's `--version` lacks the
+  release commit, so provenance can't silently regress.
+- **`git describe` lost to a plain short sha**: in the manylinux release container tag availability is
+  uncertain, while `$GITHUB_SHA` is always set and needs no `git` binary. The tag is already in the
+  version number, so `describe` added risk without information.
+- **A local build reporting `<sha>-dirty` is the feature, not a bug** — a build from uncommitted code
+  is exactly what the stamp exists to expose. Don't "fix" the suffix away.
+- **A version bump here is three files plus the lock** (`__init__.py`, `pyproject.toml`, `uv.lock`).
+  A single source of truth via `importlib.metadata` isn't available because a PyInstaller onefile has
+  no reliable package metadata — hence the duplication, and hence the unit test asserting the two
+  version strings agree (a half-bump has happened before).
+- **The container has none of this** (`:latest` is as unidentifiable as the old `kan` binary) — filed
+  as **KAN-452**; the container-native answer is OCI `image.revision` labels + digest pinning, not a
+  `--version` string.
+- **`[project.scripts]` aliases still don't survive PyInstaller** (KAN-442 open). Locally, `pandan`,
+  `pdn` and `kan` are all symlinks to the one released binary and report the same stamped version.
+
+**Smaller finds**
+
+- `pandan-cli/README.md`'s command table under-reports the CLI — the `notify` and `cycle` verb groups
+  are absent (**KAN-451**). Third doc/CLI drift of this class (KAN-35, KAN-433), so the card asks for
+  a verb-by-verb audit against `--help`, not another spot-fix.
+- **A `delete` verb without `--yes` exits 2 with empty stdout**, which reads as "returned nothing"
+  rather than "usage error" during a scripted sweep. Not a bug; a trap for automation.
+- **Agents in a worktree may hit `No anonymous write access` on `git push`** — the VS Code credential
+  socket isn't reachable from a sub-agent shell. `git -c credential.helper='!gh auth git-credential'
+  push` works; now documented in CLAUDE.md.
