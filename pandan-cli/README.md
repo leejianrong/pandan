@@ -94,6 +94,54 @@ Every command takes `--json` to print the API's raw response (for piping, e.g.
 API's `story_points`; `ticket  name` for epics, `id  name` for boards) suitable for
 `grep`/`cut`.
 
+### The `--json` output shape (KAN-434)
+
+**`--json` always prints a JSON *object*, never a bare array** — `pandan list --json`
+is `{"cards": [...]}`, so the `jq` filter is `.cards[]`, **not** `.[]`. The shape
+varies by verb, so pick the right key from this table:
+
+| Verb(s) | Top-level `--json` shape |
+|---------|--------------------------|
+| `list` | `{"cards": [<card>, …]}` — plus `"next_cursor": "<str>"` when more pages remain |
+| `activity` | `{"activity": [<event>, …]}` — plus `"next_cursor"` as above |
+| `board list` | `{"boards": [<board>, …]}` |
+| `epic list` | `{"epics": [<epic>, …]}` |
+| `label list` | `{"labels": [<label>, …]}` |
+| `view list` | `{"views": [<view>, …]}` |
+| `template list` | `{"templates": [<template>, …]}` |
+| `comment list` | `{"comments": [<comment>, …]}` |
+| `cycle list` | `{"cycles": [<cycle>, …]}` |
+| `notify list` | `{"notifications": [<notification>, …]}` |
+| `next`, `next --claim` | `{"card": <card>}` — `{"card": null}` when nothing is ready |
+| `batch-update` | `{"updated": [<card>, …]}` (request order) |
+| `template apply` | `{"created": [<card>, …]}` (template order) |
+| `dep add` / `dep rm` / `dep list` | `{"card_id": <int>, "blocked_by": [<id>, …], "blocks": [<id>, …]}` |
+| `link add` / `link rm` | `{"card_id": <int>, "links": [<link>, …]}` |
+| `delete`, `epic delete`, `label delete`, `view delete`, `template delete`, `cycle delete` | `{"deleted": <id>}` |
+| `warmup` | `{"status": "ok"\|"waking"\|"error", …}` |
+| **single-entity verbs** — `get`, `create`, `update`, `move`, `needs-human`, `resolve`, `comment add`, `notify read`, `board create`, `epic create`, `epic update`, `label create`, `view create`, `template create`, `cycle create` | the **bare entity object** (`{"id": …, "ticket_number": "KAN-7", …}`) — no envelope |
+| `metrics`, `cycle metrics` | the **bare metrics object** (`board_id`, `throughput`, `cycle_time`, `aging_wip`, `by_assignee`; the cycle one is `committed`/`completed`/`velocity`/`burndown`) |
+| `config show` | the bare local-config object (`api_url`, `token` *(redacted)*, `board_id`, `config_file`, `mcp_json`) |
+
+Worked `jq` one-liners:
+
+```bash
+pandan list --json | jq -r '.cards[] | "\(.ticket_number)\t\(.title)"'   # one line per card
+pandan list --json | jq '.cards | length'                                # count them
+pandan next --json | jq -r '.card.ticket_number // "none ready"'         # the envelope is "card"
+pandan get KAN-7 --json | jq -r .title                                   # single reads are BARE
+```
+
+**Why the envelope, and why it won't be flattened.** `--json` is a deliberate
+verbatim passthrough of the client result — the CLI applies no reshaping of its own
+(see `_emit` in `pandan_cli/cli.py`). The **list** envelopes are added by the shared
+[`pandan-client`](../pandan-client/): a raw `GET /api/v1/cards` returns a *bare array*
+and the client wraps it as `{"cards": [...]}` so out-of-band metadata has somewhere to
+live — `next_cursor` (the `X-Next-Cursor` keyset pagination header) already rides there,
+and slice **V44 (KAN-427)** adds a `summary` field beside `cards`. So the envelope is
+load-bearing: **don't "fix" it into a bare array** — that would break pagination and
+V44, and silently change a working contract for every existing consumer.
+
 Run `pandan --help`, `pandan <command> --help`, `pandan board --help`, or
 `pandan epic --help` for the full option list. `pandan --version` (or `-v`) prints the
 CLI version (e.g. `pandan 0.4.0`) and exits.
@@ -247,7 +295,8 @@ pandan config show                       # confirm the effective config (token r
 pandan board list                        # discover your boards
 pandan create "Wire up CI" --column todo --points 3
 pandan list --column in_progress
-pandan list --json | jq '.cards[].title'
+pandan list --json | jq '.cards[].title'  # NB: .cards[], not .[] — see "The --json output shape"
+pandan get KAN-12 --json | jq -r .column  # single reads are a bare object, no envelope
 pandan move 12 done
 pandan epic create "Onboarding" --description "New-user flow"
 pandan delete 12 --yes
