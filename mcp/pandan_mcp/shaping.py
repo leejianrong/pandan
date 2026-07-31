@@ -64,10 +64,18 @@ TEXT_FIELDS = frozenset(
     }
 )
 
-#: Aliases accepted in ``fields``, mirroring the CLI's (``pandan_cli/cli.py:940``)
-#: so one vocabulary works across both adapters. The *output* key is always the
-#: canonical API name, never the alias — a consumer reading ``.ticket_number``
-#: keeps working.
+#: Aliases accepted in ``fields``, mirroring the CLI's (``pandan_cli/cli.py``,
+#: ``FIELD_ALIASES``) so one vocabulary works across both adapters. The *output* key
+#: is always the canonical API name, never the alias — a consumer reading
+#: ``.ticket_number`` keeps working.
+#:
+#: **Duplicated with the CLI's copy on purpose** (decided in KAN-502, which was the
+#: natural place to move it because that slice touched ``pandan-client``). Hoisting
+#: this into the shared ``pandan-client`` was rejected: it would put *presentation*
+#: vocabulary into the shared *transport* layer, which today knows only endpoints and
+#: payloads. Two frozen three-entry tables are cheaper duplicated than coupled — but
+#: if you change one, change the other, and keep the canonical-key rule identical.
+#: The same reasoning covers ``TEXT_FIELDS`` above vs. the CLI's ``_TEXT_FIELDS``.
 FIELD_ALIASES = {
     "ticket": "ticket_number",
     "pts": "story_points",

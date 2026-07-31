@@ -544,5 +544,9 @@ spec for intended behavior:
   `EPIC-` ticket prefixes, the deployed Fly/OAuth identity — deferred, and session/wire/storage
   identifiers) (0018), and **MCP surface right-sizing** — the 49-tool surface is measured (8,775
   `o200k_base` tokens resident, 7,388 after compaction) against a consolidated verb set and a single
-  exec-`pandan` tool, and **kept, frozen against growth**, because the CLI is not at parity in that
-  direction and the real cost is per-call payload, not resident schema (0019).
+  exec-`pandan` tool, and **kept, frozen against growth**, because the CLI was not at parity in that
+  direction and the real cost is per-call payload, not resident schema (0019). **Both of those follow-ups
+  have since landed** — payload shaping in KAN-501 and the four CLI gaps in KAN-502, which also pins
+  parity **both ways** via `pandan-cli/tests/test_parity.py`. ADR 0019 still stands, because the
+  single-exec-tool option needs a second precondition that remains unmet: the published ghcr image
+  carries no `pandan` binary to exec.

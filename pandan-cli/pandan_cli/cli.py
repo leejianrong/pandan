@@ -992,6 +992,13 @@ def _link_block(result: dict[str, Any]) -> str:
 # table, so it can never drift from the API (the repo has three-places-in-sync
 # problems already — see CLAUDE.md on `column`). Two aliases exist for the names
 # the default row displays but the payload spells differently.
+#
+# A SECOND COPY of this table lives in `mcp/pandan_mcp/shaping.py` (KAN-501 gave the
+# MCP read tools a `fields` argument and could not import this module — the MCP
+# server depends on `pandan-client` only, never on `pandan-cli`). KAN-502 considered
+# hoisting it into the shared client and **deliberately kept it duplicated**: it is
+# presentation vocabulary, and `pandan-client` is transport. If you change this
+# table, change that one; the canonical-key rule must stay identical in both.
 
 FIELD_ALIASES = {
     "ticket": "ticket_number",

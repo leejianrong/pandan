@@ -265,6 +265,23 @@ Deliberately **out of V49's scope**, and filed as follow-ups because they are wh
 - **Closing the four CLI gaps** (`board get/update/delete`, an atomic claim of a named card, a batch
   create). That is the precondition that would make option (b) *available* later, and it should be
   done for the CLI's own sake regardless.
+  > **✅ Landed 2026-07-31 as KAN-502** (PR #239, `v0.19.0`). All four are reachable: `pandan board
+  > get/update/delete` (rename *and* the V38 outbound-webhook trio, secret write-only and readable from
+  > stdin), `pandan claim <id> --assignee`, `pandan batch-create`, plus `pandan epic get`. `pandan-client`
+  > needed no change — every endpoint was already wrapped and HTTP-tested.
+  >
+  > **Parity is now pinned in both directions by a test, not a claim:**
+  > `pandan-cli/tests/test_parity.py` parses the tool names out of `mcp/pandan_mcp/server.py` *as text*
+  > (importing `pandan_mcp` would invert this ADR's own adapter independence), walks the real parser,
+  > and asserts MCP ⊆ CLI, CLI ⊆ MCP and `MCP_ONLY == {}`. Its regex is cross-checked against a raw
+  > `@mcp.tool` decorator count, so it cannot pass vacuously on an empty set.
+  >
+  > **Two corrections this landed.** (1) `claim_card` is atomic in the sense of *one invocation*, not
+  > *one transaction* — `client.py:420-429` composes `move` then `update` and says so; the transactional
+  > claim is `dispatch`, already behind `next --claim`. This ADR's Context above says "claims a *named*
+  > card atomically", which overstates it. (2) `update_board` reaches 4 of `BoardUpdate`'s 6 fields:
+  > `autosync_enabled` / `autosync_advance_to_done` are reachable from **neither** adapter — an
+  > API-coverage gap, not a parity gap, and carded separately.
 
 ## Why not remove anything — the precedent
 
@@ -297,10 +314,20 @@ be superseded by one that takes it.
   ~45k tokens in one result, and the mitigation is advice ("prefer the CLI") rather than a mechanism.
   The four CLI parity gaps also remain, so the skill's fallback guidance stays load-bearing rather than
   vestigial.
-  > **Update 2026-07-31 — the first half is fixed, the second is not.** KAN-501 replaced the advice with
-  > a mechanism: an un-narrowed `list_cards` is now the caller's choice, not the only option. **The four
-  > CLI parity gaps remain open (KAN-502)**, so the skill's fallback guidance is still load-bearing, and
-  > option (b) is still unavailable — that part of this consequence stands as written.
+  > **Update 2026-07-31 — both halves are now fixed, and option (b) is still unavailable anyway.**
+  > KAN-501 replaced the advice with a mechanism: an un-narrowed `list_cards` is the caller's choice, not
+  > the only option. KAN-502 then closed the four parity gaps and pinned parity **both ways** with a
+  > test, so this bullet's "the four CLI parity gaps also remain" no longer holds.
+  >
+  > **But option (b) needs *two* preconditions and only one is cleared.** The published ghcr image
+  > copies `pandan-client/` and `mcp/` only (`mcp/Dockerfile`), so it contains **no `pandan` binary to
+  > exec** — a single exec-`pandan` tool would be unusable in exactly the deployment that most wants it.
+  > So (b) remains closed, and this ADR stands rather than being superseded. Reopening it means shipping
+  > the CLI inside the image *and* re-measuring, at which point the −96% figure would need re-deriving
+  > against an image that carries a second package.
+  >
+  > The skill's fallback guidance is now *narrower* rather than vestigial: it stops being "MCP can do
+  > things the CLI cannot" and becomes "MCP is for consumers that cannot run the CLI at all".
 - **Falsified by measurement, recorded so it is not re-assumed:** the surface is 49 tools, not 48; the
   CLI is *not* at full parity with MCP; and the resident schema cost — the thing the card is about — is
   a small fraction of what the MCP path actually costs an agent per task.
