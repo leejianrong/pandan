@@ -29,7 +29,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 | **V41 · Rebrand deploy identity** ⏸️ **deferred** | Fly app, ghcr, OAuth, CI | N2 | 1 | KAN-424 *(blocked-by KAN-439)* | — deferred behind the k8s homelab migration; the in-place renames are carved out as **KAN-437** |
 | **V50 · CLI release discipline** ✅ | version-bump-on-fix + discriminating `--version` | A0 | 2 | KAN-435 | `pandan --version` says which build this is; a stale binary is detectable, not silent |
 | **V42 · `--fields` + round-trip tests** ✅ | projection flag; pin the shipped ref handling | A1 | 2 | KAN-425 | `--fields` widens the row; a per-verb test feeds each printed identifier back |
-| **V43 · Error contract** | structured errors, exit codes | A2 | 2 | KAN-426 | A bad flag, a bad value and a missing token each print a parseable error on **stdout** with the documented exit code |
+| **V43 · Error contract** ✅ | structured errors, exit codes | A2 | 2 | KAN-426 | A bad flag, a bad value and a missing token each print a parseable error on **stdout** with the documented exit code |
 | **V44 · Aggregates** | summary on every list verb | A3 | 2 | KAN-427 | `pandan list` ends with `42 cards · 12 todo · 5 in_progress · 25 done`; no second call needed for a count |
 | **V45 · Truncation** | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
 | **V46 · Content-first + disclosure** | bare command, `help[]` | A5 | 2 | KAN-429 | Bare `pandan` prints live board state and exits 0; results carry `help[]` next-step templates |
@@ -47,11 +47,12 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 > prioritised **first** in Wave 2. Audit against `uv run python -m pandan_cli` from `pandan-cli/`,
 > never a `kan` on `PATH` — see the [shaping](SHAPING.md)'s methodology note.
 
-> **Status:** 🚧 **in progress (3/11 shipped, 1 deferred).** **V40 / KAN-423 is shipped** (two PRs —
+> **Status:** 🚧 **in progress (4/11 shipped, 1 deferred).** **V40 / KAN-423 is shipped** (two PRs —
 > structural then semantic; see its slice note), and Wave 2 has begun: **V50 / KAN-435** shipped as
-> **v0.5.0** (release provenance in `--version` + the version-bump guard) and **V42 / KAN-425** as
-> **v0.6.0** (`--fields` + the identifier round-trip suite). **V43 / KAN-426** is the CLI's error
-> contract. **V41 / KAN-424 is ⏸️ deferred**, `blocked-by`
+> **v0.5.0** (release provenance in `--version` + the version-bump guard), **V42 / KAN-425** as
+> **v0.6.0** (`--fields` + the identifier round-trip suite), and **V43 / KAN-426** as **v0.7.0** (the
+> CLI's error contract: structured errors on stdout, the six-code exit scheme documented and pinned,
+> and ref-resolution failure repaired to exit `5`). **V41 / KAN-424 is ⏸️ deferred**, `blocked-by`
 > **KAN-439** (k8s homelab migration), with **KAN-437** carved out for the in-place renames.
 > Board cards **KAN-423…KAN-432** + **KAN-435** under the three `M7:` epics
 > **EPIC-66** (Pandan Rebrand), **EPIC-67** (Agent-Ergonomic CLI), **EPIC-68** (MCP Right-Sizing).
@@ -227,7 +228,7 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   killing the ambiguity that made the audit misread it. `--fields` deliberately does **not** touch
   `--json` (a verbatim passthrough; V44 adds `summary` there).
 
-### V43 · Structured errors on stdout + documented exit codes (A2) — KAN-426
+### V43 · Structured errors on stdout + documented exit codes (A2) — KAN-426 ✅
 - **Build:** AXI 6 — *stream and shape*, plus pinning and repairing what already exists. Emit a
   parseable error on **stdout** (single-line, or JSON/TOON matching the output flag) carrying a stable
   **machine code**, the human message and the offending argument; guarantee **no verb prompts** when
@@ -246,6 +247,15 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   literal-value tests.
 - **Acceptance:** the three-error demo; suite green. CLI-only — no deploy.
 - **Notes:** this slice defines the error shape the rest of Wave 2 emits, so it lands before V44–V47.
+- **Shipped** as **v0.7.0** (PR #207), paired with KAN-425 under one agent because V42's regression
+  tests cover the identifier-resolution path this slice then had to repair. The exit-code
+  inconsistency was fixed **in the resolver** (`_resolve_card_id`/`_resolve_epic_id`) rather than at
+  the call sites, so it covers every ref-taking verb including `dep --blocked-by`. An add-only
+  `ERROR_CODES` table (`pandan-cli/pandan_cli/cli.py:73`) maps 14 named codes → exit numbers so a
+  raise site picks a *meaning*, never a number; 24 generic `ConfigError` sites were converted. The
+  `403 → 4` row was shipped **flagged unverified** by the PM and then genuinely closed by the agent
+  (prod board 11 exists but isn't ours → `403` → exit `4`; policy at `backend/app/authz.py:194-205`) —
+  flagging the gap is what got it closed.
 
 ### V44 · Pre-computed aggregates on every list verb (A3) — KAN-427
 - **Build:** AXI 4. Every list verb ends with a summary the agent would otherwise pay a round trip for:
