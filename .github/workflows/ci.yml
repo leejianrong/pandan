@@ -159,7 +159,7 @@ jobs:
         run: uv run --frozen --group dev pytest tests/integration -q
 
   client:
-    name: Kanban client (lint + tests)
+    name: Pandan client (lint + tests)
     needs: changes
     runs-on: ubuntu-latest
     steps:
