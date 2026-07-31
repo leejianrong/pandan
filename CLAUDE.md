@@ -259,6 +259,20 @@ at an obvious "version" error). There is deliberately no waiver flag. The point 
 `(source checkout, not a released build)` — so a stale binary is *detectable*; an unbumped version
 silently breaks that.
 
+**The bump is required somewhere in the BRANCH, not in the individual push** (KAN-484). The hook now
+computes **two** diff ranges on purpose: *which checks to run* is a question about the push
+(incremental, so a long-lived branch doesn't re-run green suites), while *does this branch bump the
+version* is a question about the branch (merge-base against the default branch — exactly what CI's
+`dorny/paths-filter` step evaluates against the PR base). Conflating them made the guard
+false-positive on a **merge commit**: merging `main` into an in-flight branch — the normal move under
+this repo's branch protection, and what `gh pr update-branch` does — pulls someone else's
+`pandan_cli/` files into the incremental range while your earlier bump sits outside it. Worse,
+resolving the version-line conflict *correctly* (keep your higher version) leaves the version files
+byte-identical across that range, so they vanish from the diff. Two agents hit it and both reached for
+`--no-verify`, which is the habit a guard cannot afford to teach. Pinned by
+`mcp/tests/test_prepush_hook.py` (there because the `mcp` job needs no DB/Docker/network; the `mcp`
+paths filter includes `scripts/git-hooks/**` so a hook-only PR still runs them).
+
 > **A plain `git push` may fail with `No anonymous write access` / `Authentication failed`.** Two
 > known causes: a sub-agent shell can't reach the VS Code credential socket, and a cached credential
 > keyed to the *old* URL goes stale after a repo rename (KAN-437 hit this in the primary checkout, not

@@ -73,6 +73,15 @@ jobs:
               - 'frontend/**'
             mcp:
               - 'mcp/**'
+              # The pre-push hook's regression tests live in mcp/tests
+              # (test_prepush_hook.py — the `mcp` job needs no DB/Docker/network,
+              # the same reason test_image_provenance_gate.py lives there). The
+              # hook itself is NOT under mcp/, so without this line a hook-only
+              # PR would skip the very tests that guard it — a guard with no
+              # watcher, which is how KAN-452's release gate nearly rotted.
+              # KAN-484 shipped those tests and reported this hole from outside
+              # its fence.
+              - 'scripts/git-hooks/**'
             client:
               - 'pandan-client/**'
             cli:
