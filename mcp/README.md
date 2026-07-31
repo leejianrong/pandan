@@ -10,6 +10,12 @@ source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 > walks through getting access, minting a token, and wiring this server into Claude
 > Code end to end.
 
+> **Prefer the [`pandan` CLI](../pandan-cli/) if your agent can run one.** It is the
+> primary interface; this server is the deliberate **fallback**. See
+> [Why 49 tools, and why that is frozen](#why-49-tools-and-why-that-is-frozen) — it
+> is a measured decision, not an accident, and the measurement says the CLI is
+> ~11× cheaper per task.
+
 ## Tools
 
 | Tool | Endpoint | Board target |
@@ -65,6 +71,63 @@ shared-`API_TOKENS` bypass. Create a **PAT** in the SPA (top-bar **Tokens** →
 `PANDAN_TOKEN`. It authenticates **as your user** and is **owner-gated** — the
 agent can only touch boards you own. A tokenless (or bad-token) server rejects the
 MCP with `401`.
+
+## Why 49 tools, and why that is frozen
+
+The surface is **frozen at 49 tools** by [ADR 0019](../docs/adr/0019-mcp-surface-right-sizing.md)
+(V49). It is deliberately broad, deliberately kept, and deliberately not growing.
+Recorded here because the resident-cost headline invites the wrong conclusion, and
+this decision should not be re-litigated from it.
+
+**What it costs.** Every one of these schemas loads into an agent's context before
+it does any work: **7,388 `o200k_base` tokens** as shipped (8,775 before the schema
+compaction below). Re-measure any time — the harness is committed:
+
+```bash
+uv run --with tiktoken python scripts/measure_tool_schema_tokens.py [--per-tool]
+```
+
+**The headline is a trap.** That resident number is the *small* half. A single
+`list_cards` against a real 121-card board returns **~45,000 tokens** — over 5× the
+entire schema surface, in one tool result — because these tools return the raw API
+envelope while the CLI has field selection, truncation and TSV/TOON output. Measured
+per task, the CLI is **~11× cheaper** on real reads. So the expensive thing about
+this server is its *payloads*, not its tool count, and shrinking the count would
+have optimised the wrong line item.
+
+**Why not the alternatives.** Both were measured on the same yardstick, built through
+the same FastMCP serializer:
+
+| option | tools | resident | verdict |
+|---|---:|---:|---|
+| today (frozen) | 49 | 7,388 | **chosen** |
+| (a) one tool per entity + an `action` arg | 11 | 4,338 | rejected |
+| (b) a single exec-`pandan` tool | 1 | 387 | rejected *for now* |
+
+- **(a)** saves ~4.4k tokens but dissolves 49 precise schemas into 11 unions where
+  nearly every argument must be optional — the schema can no longer tell a model
+  that `claim` needs `assignee`, so validation slides from schema-time to runtime
+  and the saving gets spent on retries. It also renames every tool, breaking
+  allowlists and prompts, and does nothing about the payloads.
+- **(b)** has the best numbers and inherits the CLI's payload shaping — but the CLI
+  cannot yet reach `update_board` or `delete_board`, so making it the only surface
+  would **delete capability** (ADR 0005 forbids a silent parity regression), and the
+  published container image [ships no CLI binary](#as-a-container-ghcrio-kan-47) to
+  exec. Revisit once both are fixed.
+
+**What "frozen" means in practice.** New board capability lands in the **CLI**,
+which costs a session nothing until it is used. Adding a tool here is an **ADR
+amendment**, not a code change: `tests/test_schema.py` pins the name set *and* the
+count and fails with an explanation. Removing one requires checking the CLI actually
+covers the capability first.
+
+**The schema compaction.** `pandan_mcp/schema.py` strips Pydantic's generated
+`title` annotations and flattens nullable `anyOf` to `type: [T, null]` in the schema
+clients are *shown* — −16% for no behaviour change, because FastMCP validates calls
+through a separate object (`fn_metadata.arg_model`) that is never touched. Two traps
+are pinned by tests: a nullable **enum** must not be collapsed (the collapsed form
+rejects `null`), and `title` is both an annotation and a real argument name on
+`create_card`/`update_card`.
 
 ## Configuration (env)
 

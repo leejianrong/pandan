@@ -24,12 +24,18 @@ Method
   options (a) and (b) go through the identical Pydantic→JSON-Schema serializer
   as the live surface. Any per-tool framing overhead is therefore counted the
   same way on both sides of the comparison.
+* **Before vs. as-shipped.** Since Phase 2, ``server.py`` compacts the advertised
+  schemas at import, so the live surface *is* the compacted one. The
+  pre-compaction row is recovered with ``Tool.from_function`` (see
+  :func:`raw_tool_payloads`) rather than estimated, and the compaction applied to
+  option (a) is the **production** function, so nothing here can drift from what
+  the server actually sends.
 
 Run it::
 
     cd mcp && uv run --with tiktoken python scripts/measure_tool_schema_tokens.py
 
-``--per-tool`` also prints the live surface broken down tool by tool.
+``--per-tool`` also prints the shipped surface broken down tool by tool.
 """
 from __future__ import annotations
 
@@ -40,7 +46,9 @@ import json
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.tools.base import Tool
 
+from pandan_mcp.schema import compact_schema
 from pandan_mcp.server import mcp as live_mcp
 
 Column = Literal["todo", "in_progress", "done"]
@@ -86,26 +94,40 @@ def measure(payloads: list[dict[str, Any]], enc) -> dict[str, int]:
     }
 
 
+def raw_tool_payloads(server: FastMCP) -> list[dict[str, Any]]:
+    """The payloads as FastMCP *would* advertise them without V49's compaction.
+
+    ``server.py`` applies :func:`pandan_mcp.schema.compact_advertised_schemas` at
+    import, so the live surface is already compacted and the pre-compaction number
+    cannot simply be read back. ``Tool.from_function`` regenerates the schema from
+    the function signature (mcp/server/fastmcp/tools/base.py:77), which is exactly
+    what registration did in the first place — so this recovers the "before" side
+    of the comparison honestly rather than estimating it.
+    """
+    return [
+        {
+            "name": f"{NAMESPACE}{tool.name}",
+            "description": tool.description,
+            "input_schema": Tool.from_function(tool.fn, name=tool.name).parameters,
+        }
+        for tool in server._tool_manager.list_tools()
+    ]
+
+
 def strip_pydantic_noise(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop the generated ``title`` keys and collapse ``anyOf[{T},{"null"}]`` to
-    ``{"type": [T, "null"]}``. Both are pure serializer artefacts that carry no
-    information the model can act on — measuring without them separates
-    *hygiene* savings (available under any option) from *surface* savings."""
-    out = []
-    for payload in payloads:
-        schema = copy.deepcopy(payload["input_schema"])
-        schema.pop("title", None)
-        for prop in schema.get("properties", {}).values():
-            prop.pop("title", None)
-            options = prop.get("anyOf")
-            if options and len(options) == 2 and {"type": "null"} in options:
-                other = next(o for o in options if o != {"type": "null"})
-                prop.pop("anyOf")
-                prop.update(other)
-                if isinstance(prop.get("type"), str):
-                    prop["type"] = [prop["type"], "null"]
-        out.append({**payload, "input_schema": schema})
-    return out
+    """Apply **the shipped compaction** to a set of payloads.
+
+    Deliberately delegates to :func:`pandan_mcp.schema.compact_schema` rather than
+    keeping a private copy of the rule, so the number this script reports is the
+    number the server actually delivers. An earlier draft duplicated the logic and
+    would have over-reported the saving by ~6 enum-bearing optionals that the real
+    rule refuses to collapse (collapsing a nullable enum narrows it — see
+    ``pandan_mcp/schema.py``).
+    """
+    return [
+        {**payload, "input_schema": compact_schema(copy.deepcopy(payload["input_schema"]))}
+        for payload in payloads
+    ]
 
 
 # --- option (a): one tool per entity, with an `action` argument -------------
@@ -384,12 +406,12 @@ def main() -> None:
     args = parser.parse_args()
 
     enc = _encoder()
-    live = tool_payloads(live_mcp)
+    raw = raw_tool_payloads(live_mcp)
     surfaces = {
-        "current (49 typed tools)": live,
-        "current, serializer noise stripped": strip_pydantic_noise(live),
+        "49 typed tools, before compaction": raw,
+        "49 typed tools, AS SHIPPED (V49)": tool_payloads(live_mcp),
         "(a) one tool per entity + action arg": tool_payloads(option_a),
-        "(a) noise stripped": strip_pydantic_noise(tool_payloads(option_a)),
+        "(a) + the same compaction": strip_pydantic_noise(tool_payloads(option_a)),
         "(b) single exec-pandan tool": tool_payloads(option_b),
     }
     results = {name: measure(payloads, enc) for name, payloads in surfaces.items()}
@@ -398,7 +420,7 @@ def main() -> None:
         print(json.dumps(results, indent=2))
         return
 
-    baseline = results["current (49 typed tools)"]["compact"]
+    baseline = results["49 typed tools, before compaction"]["compact"]
     print("Resident tool-schema cost, o200k_base tokens")
     print(f"{'surface':38s} {'tools':>5s} {'compact':>8s} {'indent2':>8s} {'vs base':>8s}")
     print("-" * 72)
@@ -409,18 +431,18 @@ def main() -> None:
             f"{row['indent2']:8d} {delta:>8s}"
         )
     print()
-    print("Where the current cost sits (compact):")
-    cur = results["current (49 typed tools)"]
+    print("Where the shipped cost sits (compact):")
+    cur = results["49 typed tools, AS SHIPPED (V49)"]
     print(f"  descriptions (prose) {cur['descriptions']:6d}")
     print(f"  input schemas        {cur['schemas']:6d}")
     print(f"  tool names           {cur['names']:6d}")
 
     if args.per_tool:
-        print("\nPer-tool (compact):")
+        print("\nPer-tool, as shipped (compact):")
         rows = sorted(
             (
                 (len(enc.encode(json.dumps(p, separators=(",", ":")))), p["name"])
-                for p in live
+                for p in surfaces["49 typed tools, AS SHIPPED (V49)"]
             ),
             reverse=True,
         )

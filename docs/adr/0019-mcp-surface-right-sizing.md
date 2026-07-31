@@ -1,7 +1,7 @@
 # ADR 0019 — MCP surface right-sizing: keep the breadth, freeze its growth
 
-- **Status:** Proposed — Phase 1 (measurement + recommendation) only. Flips to **Accepted** when the
-  Phase-2 freeze lands. Nothing is removed by this ADR as written.
+- **Status:** Accepted — and **executed**. Phase 1 (measure + decide) and Phase 2 (freeze + compact +
+  document) have both landed. Nothing was removed and no tool was renamed.
 - **Date:** 2026-07-31
 - **Context source:** Milestone 7 ("Name & Sharpen the Tools"), slice **V49** / **KAN-432**, shaped
   requirement **R3.1** (measure the schema token cost of the tool surface and of each alternative) and
@@ -60,13 +60,19 @@ it: **compact** separators for the headline and `indent=2` as the ceiling. **Opt
 built with FastMCP too, not hand-written JSON**, so they pass through the identical
 Pydantic→JSON-Schema serializer and any per-tool framing overhead is counted the same on both sides.
 
-| surface | tools | compact | `indent=2` | vs. today |
+| surface | tools | compact | `indent=2` | vs. before |
 |---|---:|---:|---:|---:|
-| **current** | **49** | **8,775** | **12,825** | — |
-| current, serializer noise stripped | 49 | 7,346 | 10,202 | −16% |
+| 49 typed tools, before compaction | 49 | 8,775 | 12,825 | — |
+| **49 typed tools, AS SHIPPED (Phase 2)** | **49** | **7,388** | **10,307** | **−16%** |
 | **(a)** one tool per entity + `action` arg | 11 | 4,338 | 6,683 | **−51%** |
-| (a), serializer noise stripped | 11 | 3,470 | 5,011 | −60% |
+| (a) + the same compaction | 11 | 3,482 | 5,041 | −60% |
 | **(b)** single exec-`pandan` tool | 1 | 387 | 459 | **−96%** |
+
+> The as-shipped row is **7,388, not the 7,346** Phase 1 projected. Phase 1's throwaway
+> strip-function collapsed *every* nullable `anyOf`; the shipped rule refuses to collapse a nullable
+> **enum**, because the collapsed form rejects `null` (see *Consequences*). Six optionals therefore
+> keep their `anyOf`, at a cost of 42 tokens. The harness now calls the production function rather
+> than a private copy, so the published number and the shipped behaviour cannot drift again.
 
 **The tool count is 49**, confirmed two ways: `grep -c '^@mcp.tool'` over
 [`mcp/pandan_mcp/server.py`](../../mcp/pandan_mcp/server.py) and the length of `list_tools()`. The
@@ -74,14 +80,15 @@ plan's prior figure of ~10,076 tokens falls inside the compact↔`indent=2` brac
 consistent with a differently-framed serialization of the same 49 tools; the 48 in the original card
 was simply wrong.
 
-Where today's 8,775 sits: **descriptions (prose) 4,030 · input schemas 3,660 · tool names 394** (the
-remaining ~690 is JSON framing — the object braces, the three keys, and escaping). So prose and schema
-are roughly half each, and no single tool dominates: `list_cards` is the largest at 780, `create_card`
+Where the pre-compaction 8,775 sat: **descriptions (prose) 4,030 · input schemas 3,660 · tool names
+394** (the remaining ~690 is JSON framing — the object braces, the three keys, and escaping). Phase 2's
+compaction took the schema share to **2,273** (−38%), leaving prose as the clear majority of what
+remains. No single tool dominates: `list_cards` is the largest at 780, `create_card`
 497, `update_card` 450, and the cheapest 21 tools cost ≤130 each (`get_card` is 57). There is no fat
 tail to trim — the cost is spread, which is itself an argument against a surgical "delete the rarely
 used ones" pass. Run with `--per-tool` for the full breakdown.
 
-**1,429 of the 8,775 (16%) is serializer artefact, not information.** FastMCP emits a Pydantic-generated
+**1,387 of the 8,775 (16%) is serializer artefact, not information** — and Phase 2 removed it. FastMCP emits a Pydantic-generated
 `title` on every property and on every argument model (`"title": "Board Id"`, `"title":
 "list_cardsArguments"`), and renders every optional as `anyOf: [{type: T}, {type: null}]` rather than
 `type: [T, null]`. Neither tells a model anything it cannot read off the property name and type. This
@@ -211,13 +218,27 @@ the parity and packaging blockers are.
    amending this ADR rather than merely appending a decorator. The MCP server stops being the place
    new capability lands by default; the CLI is.
 2. **Take the free 16%.** Strip the generated `title` keys and collapse `anyOf[{T},{null}]` →
-   `type: [T, null]`. 8,775 → 7,346 with no rename, no removal, no consumer migration, no parity
+   `type: [T, null]`. 8,775 → 7,388 with no rename, no removal, no consumer migration, no parity
    question.
 3. **Document the breadth as a fallback**, in `mcp/README.md` and in the skill — and **fix the skill's
    false "full parity" claim**, which currently asserts bidirectional parity in bold and contradicts
    itself 40 lines later. State the direction (MCP ⊇ CLI) and list the four gaps.
 4. **Do not touch the tool names, the `pandan_client` core, or any capability.** `pandan-client`
    remains the shared core under both adapters, exactly as ADR 0005 intends.
+
+### How Phase 2 executed it
+
+- **The freeze** is [`mcp/tests/test_schema.py`](../../mcp/tests/test_schema.py): `FROZEN_TOOLS`
+  (the one place the name set now lives — `test_server.py` imports it) plus `FROZEN_TOOL_COUNT`, both
+  asserted, failing with a message that explains *why* the pin exists and warns that a removal needs a
+  CLI-parity check first. Mutation-tested in both directions.
+- **The compaction** is [`mcp/pandan_mcp/schema.py`](../../mcp/pandan_mcp/schema.py), applied once at
+  import in `server.py` after every decorator has registered.
+- **The documentation** is `mcp/README.md` § *Why 49 tools, and why that is frozen*, which carries the
+  numbers and the rejected options so the decision is not re-litigated from the resident-cost headline.
+  The skill's false parity claim was fixed separately by the maintainer (it lives outside this repo).
+- **The harness** now imports the production compaction function instead of duplicating the rule, so a
+  future change to the rule cannot silently invalidate the published measurement.
 
 Deliberately **out of V49's scope**, and filed as follow-ups because they are where the tokens are:
 
@@ -249,7 +270,7 @@ be superseded by one that takes it.
   intact. The surface stops growing, which is the durable part of the win — the drift this slice was
   really about. The measurement is committed and re-runnable, so the next person to ask this question
   starts from numbers. And 16% of the resident cost goes away for free.
-- **Neutral:** the resident 7,346 tokens stay. At ~3.7% of a 200k window, prompt-cache-stable across a
+- **Neutral:** the resident 7,388 tokens stay. At ~3.7% of a 200k window, prompt-cache-stable across a
   session's turns, that is a price worth paying for a typed fallback surface — and it is an order of
   magnitude less than what a single un-narrowed board read costs today.
 - **Negative / deferred:** the expensive problem is *named but not fixed* by this slice. Until the
@@ -260,3 +281,28 @@ be superseded by one that takes it.
 - **Falsified by measurement, recorded so it is not re-assumed:** the surface is 49 tools, not 48; the
   CLI is *not* at full parity with MCP; and the resident schema cost — the thing the card is about — is
   a small fraction of what the MCP path actually costs an agent per task.
+
+### Two traps the compaction turned up, worth keeping in the record
+
+Both were found while implementing the "provably cosmetic" change, which is a useful reminder that
+*cosmetic* is a claim requiring proof, not a category that exempts you from it.
+
+1. **A nullable enum must not be collapsed.** `anyOf: [{enum: [...], type: string}, {type: null}]`
+   accepts a member *or* `null`; the collapsed `{enum: [...], type: [string, null]}` **rejects null**,
+   because `enum` constrains the whole value and `null` is not a member. So the collapse is
+   **allow-listed** to sibling keys that are provably inert for `null` (`items`,
+   `additionalProperties`) and blocks on anything else, including keywords nobody has reasoned about
+   yet. This costs 42 tokens and is the difference between a cosmetic change and a silent narrowing of
+   the advertised contract.
+2. **`title` is both a JSON Schema annotation and a real argument name.** `create_card` and
+   `update_card` both take a `title`. The first implementation recursed blindly, dropping every key
+   called `title` at any depth — and **deleted those arguments from both tools**: a genuine behaviour
+   change wearing a cosmetic disguise. Three invariant tests (argument-name preservation,
+   validator/advertised agreement, and the required-set check) caught it immediately. The traversal is
+   now driven by JSON Schema keywords, and the specific case has its own named guard.
+
+The general lesson, and the reason the safety argument is structured the way it is: FastMCP keeps the
+*advertised* schema (`Tool.parameters`, built at `tools/base.py:84`) separate from the *validating*
+model (`fn_metadata.arg_model`, used by `Tool.run` at `tools/base.py:101`). That separation is what
+makes this change safe — but "I only touched the advertised copy" is an assertion about a third-party
+library's internals, so it is pinned by a test rather than trusted.

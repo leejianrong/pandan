@@ -149,6 +149,14 @@ def test_compaction_does_not_touch_the_validator():
     the validator must still carry the very ``title`` keys we stripped from the
     advertised copy. If this ever fails, compaction has reached the call path and
     is no longer cosmetic.
+
+    **Mutation-tested, with an honest caveat.** The *second* assertion carries the
+    weight: dropping an argument during compaction turns it red. The first one is
+    weaker than it looks — a mutation setting ``arg_model.model_config["title"] =
+    None`` left it GREEN, because Pydantic's ``model_json_schema()`` derives the
+    title from the class and ignores that config change after the fact. So read
+    assertion 1 as cheap insurance against someone rebuilding ``arg_model`` from the
+    compacted schema, not as a tight guard.
     """
     for tool in mcp._tool_manager.list_tools():
         validator_schema = tool.fn_metadata.arg_model.model_json_schema(by_alias=True)
