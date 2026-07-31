@@ -109,12 +109,19 @@ jobs:
       - name: Stamp build provenance
         run: uv run --frozen python packaging/stamp_build.py
 
+      # `--add-data` carries the packaged `pandan` skill (V48, KAN-431) into the
+      # onefile, where it unpacks under sys._MEIPASS — `--collect-submodules` only
+      # sweeps up importable modules, never data files. The dest path mirrors the
+      # source so `context.packaged_skill_path()` finds it either way; a build
+      # without it still installs the hook and just reports the skill as unbundled.
+      # Both shipped legs are POSIX (linux + macos-arm64), so `:` is the separator.
       - name: Build --onefile binary
         run: >-
           uv run --frozen --group build pyinstaller --onefile
           --name "${{ matrix.asset }}"
           --collect-submodules pandan_cli
           --collect-submodules pandan_client
+          --add-data "pandan_cli/skills:pandan_cli/skills"
           packaging/pyinstaller_entry.py
 
       # Regression guard (KAN-81, linux only): assert the built onefile requires

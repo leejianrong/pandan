@@ -10,4 +10,4 @@ from __future__ import annotations
 # Bumped on every user-visible CLI change, in the SAME PR as the change (V50,
 # KAN-435 — enforced by the CI `CLI version bump` guard + the pre-push hook).
 # Must stay equal to `version` in pyproject.toml; a unit test asserts it.
-__version__ = "0.8.0"
+__version__ = "0.10.0"
