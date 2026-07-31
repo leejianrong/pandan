@@ -1435,3 +1435,167 @@ didn't look there. **When auditing, read the artefacts that describe the thing, 
 cutting `v0.6.0` separately — the bump keeps provenance honest, the tag is for when something
 user-facing warrants distribution. Verified against the downloaded asset each time: `pandan 0.7.0
 (bd28cf0)`, both identifier forms exiting 5, and the structured error on stdout.
+
+### M7 Wave 2, stage 5 — the MCP harness fix, then KAN-430 + KAN-452 in parallel (PRs #210–#213, v0.8.0)
+
+The first stage where the session's **opening move was a tooling repair rather than a card**, and it
+was worth it: the V40-renamed MCP server had never once loaded in a Claude Code session.
+
+**"The MCP tools are missing" was two config faults, not a server bug — and `claude mcp list` named
+both.** That command prints per-server health *plus* a diagnostics block quoting the exact rejection,
+which turned what could have been an afternoon into two minutes:
+
+1. **`.mcp.json` had `"PANDAN_BOARD_ID": 5` — a JSON *number*.** Claude Code's config schema requires
+   string env values, so it **skipped the entire server entry**, not just that variable:
+   `expected string, received number`. The shipped `.mcp.json.example` is correct (`"1"`, quoted), so
+   this was a local hand-edit — but the failure mode is worth knowing, because "the whole server
+   silently vanishes over one unquoted integer" is not a guessable symptom.
+2. **`.claude/settings.local.json` still said `enabledMcpjsonServers: ["kanban"]`**, plus eight
+   `mcp__kanban__*` permission entries. V40 renamed the `mcpServers` key `kanban` → `pandan`, and the
+   key is what tool names are namespaced with — so the trust approval and the allowlist both stopped
+   matching, and the server reported **"Pending approval"** rather than anything mentioning a rename.
+
+Neither is catchable by CI: **both files are gitignored.** That is the general lesson — the rebrand's
+blast radius included per-machine config that no PR, test or grep in the repo can reach.
+`.mcp.json.example`'s own `//tool-names` comment already warned that "anything referencing a tool by
+name — skills, prompts, a settings.json allowlist — must use the same key you choose here". The
+warning was correct and simply hadn't been applied. **Third instance now of "read the artefacts that
+describe the thing, not only the thing."**
+
+**Verify a server you can't yet call by driving it over stdio.** MCP servers load at *session start*,
+so the session that fixes the config still can't see the tools — `ToolSearch '+pandan'` returned
+nothing even after `claude mcp list` said `✔ Connected`. Rather than declare it unverified, drive the
+server directly with the exact `.mcp.json` command: `initialize` → `serverInfo {name: 'pandan',
+version: '1.28.1'}`, `tools/list` → **49 tools**, `tools/call list_cards {board_id: 5, column:
+'todo'}` → real board rows in the `{"cards": […]}` envelope. That proves transport, token, board
+targeting and the error path without a restart, and leaves exactly one thing pending (the client-side
+load) instead of everything. Recorded on KAN-423 with that distinction explicit.
+
+Two things fell out of the same session for free: a **legacy `kanban_pat_` PAT authenticated against
+prod**, proving V40's `LEGACY_TOKEN_PREFIXES` path in the field rather than only in tests; and the
+count is **49 tools, not the 48** that KAN-432 and SLICES.md both claimed — a wrong denominator in the
+one slice whose entire Must half is measuring that surface.
+
+**The out-of-repo skills had a live 404, and only a PM can fix them.** While adding KAN-442's `pdn`
+symlink note to the `pandan` skill, its documented primary install command turned out to be broken:
+it fetched `kan-linux-x86_64`, while the release ships `pandan-linux-x86_64` (confirmed: the old URL
+returns **404**, the new one **200**). So since V40 nobody could install the CLI by following the
+skill. Also stale in the same file: `#subdirectory=kanban-cli` and three `~/.config/kan/config.toml`
+paths. **The repo's own install docs were already correct** (`README.md:44`,
+`pandan-cli/README.md:393`, `docs/guides/agent-onboarding.md:212`) — the rebrand was done properly
+*in the repo*; the gap was entirely in artefacts living outside it, which no PR and no CI can reach.
+This is the KAN-434 lesson recurring, and it now has a name: **when a card's deliverable spans an
+out-of-repo artefact, split it explicitly and give the PM that half**, because the card will otherwise
+read as done while the user-facing path stays broken.
+
+**A `sed` sweep clobbered the exception it was meant to preserve.** Replacing
+`~/.config/kan/config.toml` → `~/.config/pandan/config.toml` globally also rewrote the sentence
+*documenting the legacy path*, turning "a pre-rebrand `…/kan/…` is migrated across" into a claim that
+`…/pandan/…` migrates to itself. Caught on the verification grep. Same family as V40's
+`simple-pandan-cli`: **a global replace over prose will eat the deliberate mentions of the old name,
+so re-read the hits, don't just count them.**
+
+**A deferral's stated reason is worth re-testing before you inherit it.** V40 deferred the CI
+job-display-name rename because "branch protection matches required checks on those strings". True in
+general — but the required checks on `main` are exactly `Lint (ruff)`, `Unit tests`,
+`Integration tests`, `Frontend build & type-check`, and **none of them carried the brand**. The one
+stale name, `Kanban client (lint + tests)`, was not a required check at all, so the rename was a
+one-line change with zero protection risk (PR #210). Checked via the branch-protection API rather
+than by trusting the note. Cheap win that had been sitting behind an over-broad caution.
+
+#### Sequencing: V47 built FIRST, out of numeric order, and it paid
+
+`_emit()` was the CLI's single output chokepoint taking `as_json: bool`, and **V44, V45 and V46 all
+specify behaviour "under `--json`/`--format toon`"** — the flag V47 introduces. Building them in
+numeric order would have meant three separate retrofits of the same function; building V47 first let
+each hook a finished serializer once. Identical argument to the one SLICES.md already used to put V43
+ahead of V44–V47, and there was precedent for out-of-order building (V50 within Wave 2).
+
+The payoff is visible in what V47 handed over — named seams, each citing the card that will use it:
+`_structured_payload` (`cli.py:220`) for V44's `summary` and V45's truncation, and the `else` branch
+of `_emit` (`cli.py:277`) for V46's `help[]`, with `fmt in STRUCTURED_FORMATS` as the mechanical form
+of "suppressed" and that tuple pinned by a test. **Generalisable: when N queued slices all modify one
+function, build the slice that changes its SIGNATURE first, and make it leave named extension points.**
+
+**Two mutations came back GREEN — the most valuable finding of the stage.** V47's agent ran seven
+mutations; two passed, meaning two blind guards. One was a `choices` guard with no test in that argv
+position. The other is the instructive one: the seam test asserted `_structured_payload`'s *output*
+rather than that `_emit` *routes through* it — **so it would have stayed green while V44 and V45 broke
+the very seam they depend on.** A test that proves the right value exists is not the same as a test
+that proves the production path computes it. Both fixed; all seven red afterwards. The standing rule
+gets a corollary: mutation-test the **seam**, not only the feature, and expect your first draft of a
+seam test to be blind.
+
+**TOON: shipped on the evidence, with the caveat kept visible.** Measured on live board payloads
+(o200k_base): **−25% vs `--json` overall**, but roughly half of that is merely the absence of
+pretty-printing. Against *compact* JSON, TOON wins clearly on uniform nested rows (metrics −29%,
+activity −24%, epic list −20%) and **loses** on `get` (+2%) and the cards list (+12%). So the slice's
+scoping — TOON for nested payloads, TSV stays the list default — is vindicated by measurement rather
+than asserted. The agent also declined the adjacent cheap win of compacting `--json`, because that is
+a published human-diffable contract; **recorded as a deliberate non-action**, which is the right way
+to leave a tempting out-of-scope idea.
+
+Incidental: **`toon-format` on PyPI (0.1.0) is a stub** whose `encode()` raises
+`NotImplementedError`. The encoder here is a stdlib port verified byte-identical to the reference JS
+`@toon-format/toon` across a 36-case corpus. And TOON's `[N]` row-count header is a real correctness
+asset — self-describing length caught a decoder bug immediately.
+
+#### KAN-452: the card's premise was already half-satisfied, and the gate had no watcher
+
+Fifth M7 spec claim falsified on contact. The card said to "add the OCI labels"; they were **already**
+being applied via `labels: ${{ steps.meta.outputs.labels }}`. Caught by the PM before spawning, so the
+agent was briefed to verify-and-rescope rather than "add" what existed.
+
+**The better catch was the agent's, and it's a pattern worth naming: a guard in a tag-gated workflow
+has no watcher.** `publish-mcp-image.yml` runs only on `v*` tags, so the new provenance gate would
+never execute on a PR — nothing in CI would notice it rotting. The fix was to test the *gate script*
+directly in the ordinary `mcp` job by stubbing `docker` with a PATH shim, including a
+`test_gate_is_executable` case (the workflow invokes the script by path, so a lost mode bit would fail
+a release with an unrelated-looking error). **Generalisable: when you add a guard to a workflow that
+CI doesn't run, the guard needs its own CI-visible test, or you have written a promise nobody checks.**
+
+Gate placement mirrors `release-cli.yml`: build with `load: true` → assert → build with `push: true`,
+so an image that cannot identify itself is **never published** rather than published-then-flagged.
+`push` and `load` can't be combined, hence the deliberate double build.
+
+**`:latest` — kept and demoted, deliberately.** The KAN-435 lesson was *a build must identify itself*,
+not *floating tags are forbidden*. With labels plus gate, `:latest` **is** self-identifying via
+`docker inspect`; deleting it would break every existing `.mcp.json` and the "no checkout, no Python,
+just `docker pull`" onboarding to solve a problem the labels already solve. The reasoning went into a
+comment at the workflow's `tags:` block, not only the PR — so the next person to revisit finds the
+argument, not just the outcome.
+
+A related suggestion was **correctly rejected on verification**: flipping `.mcp.json.example` off
+`:latest` for consistency with the new pinning guidance would have pointed users at
+`pandan-mcp`, which **does not exist publicly yet** (a renamed ghcr path is a new package, private
+until a manual visibility flip after the next tag — `mcp/README.md:112-118`). The example config is
+correct precisely because it still names the old image. Provenance work makes "pin everything" feel
+right; check whether the pinned thing exists.
+
+Provenance ≠ reproducibility, and the gap got carded (**KAN-475**): `mcp/Dockerfile:18` copies from
+`ghcr.io/astral-sh/uv:latest` and `:13` is `python:3.12-slim`, both floating — so two images honestly
+labelled with the same revision can contain different toolchains. The label is true but weaker than it
+reads, and the gate can't detect the difference because it only compares label values.
+
+#### Process notes
+
+- **An agent merged its own PR.** The brief said "open a PR" and never said "do not merge"; landing is
+  the PM's call under this repo's policy. No harm — the change was sound and reviewed post-hoc against
+  `main` — but the fence is now **explicit in every brief**. Absence of a prohibition is not a fence.
+- **Verify the agent's own evidence claim, not just its conclusion.** KAN-452's report claimed "57
+  passed, up from 48" as positive CI evidence. Confirmed independently from the runner log (`57
+  passed`, and **no** `No mcp changes` line, so the paths-filter genuinely let it run). Given this
+  project's history with jobs that report success without doing work, the claim needed the log line,
+  not the summary.
+- **Land order matters when a dependabot PR shares a file with an in-flight card.** PR #199 bumped
+  `docker/login-action` in `publish-mcp-image.yml` — the exact file KAN-452 was rewriting. Its CI had
+  run against the *pre-KAN-452* version of that file, so merging on that evidence would have been
+  merging a bump verified against a file that no longer existed in that form. Held all three
+  dependabot PRs, landed KAN-452 first, then `gh pr update-branch` each and let CI re-green before
+  merging. Cheap discipline; the alternative is a green tick that means nothing.
+- **A tooling-repair opening move earns its time.** Roughly 20 minutes on the MCP config, the skills
+  and the CI job name produced: a working MCP surface for every future session, a fixed 404 on the
+  documented install path, and three corrected docs. None of it was on the board.
+- The harness worktree guard rejected more shell shapes this stage — including **any command
+  referencing a `/tmp` path**, and `sleep N && <cmd>` chains (use one plain command per call, or write
+  the script inside the worktree). Fourth consecutive stage this has cost time; it is now in every brief.
