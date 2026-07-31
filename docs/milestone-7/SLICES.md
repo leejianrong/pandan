@@ -25,10 +25,10 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 
 | Slice | What | Part | Wave | Card | Ends in (demo) |
 |-------|------|:----:|:----:|------|----------------|
-| **V40 · Rebrand sweep** | code, CLI, MCP, skills, docs | N1 | 1 | KAN-423 | `pandan list` works; the UI, README and board all say *pandan*; a `KANBAN_*`-configured client still works with a deprecation notice |
+| **V40 · Rebrand sweep** ✅ | code, CLI, MCP, skills, docs | N1 | 1 | KAN-423 | `pandan list` works; the UI, README and board all say *pandan*; a `KANBAN_*`-configured client still works with a deprecation notice |
 | **V41 · Rebrand deploy identity** ⏸️ **deferred** | Fly app, ghcr, OAuth, CI | N2 | 1 | KAN-424 *(blocked-by KAN-439)* | — deferred behind the k8s homelab migration; the in-place renames are carved out as **KAN-437** |
-| **V50 · CLI release discipline** | version-bump-on-fix + discriminating `--version` | A0 | 2 | KAN-435 | `pandan --version` says which build this is; a stale binary is detectable, not silent |
-| **V42 · `--fields` + round-trip tests** | projection flag; pin the shipped ref handling | A1 | 2 | KAN-425 | `--fields` widens the row; a per-verb test feeds each printed identifier back |
+| **V50 · CLI release discipline** ✅ | version-bump-on-fix + discriminating `--version` | A0 | 2 | KAN-435 | `pandan --version` says which build this is; a stale binary is detectable, not silent |
+| **V42 · `--fields` + round-trip tests** ✅ | projection flag; pin the shipped ref handling | A1 | 2 | KAN-425 | `--fields` widens the row; a per-verb test feeds each printed identifier back |
 | **V43 · Error contract** | structured errors, exit codes | A2 | 2 | KAN-426 | A bad flag, a bad value and a missing token each print a parseable error on **stdout** with the documented exit code |
 | **V44 · Aggregates** | summary on every list verb | A3 | 2 | KAN-427 | `pandan list` ends with `42 cards · 12 todo · 5 in_progress · 25 done`; no second call needed for a count |
 | **V45 · Truncation** | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
@@ -47,8 +47,11 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 > prioritised **first** in Wave 2. Audit against `uv run python -m pandan_cli` from `pandan-cli/`,
 > never a `kan` on `PATH` — see the [shaping](SHAPING.md)'s methodology note.
 
-> **Status:** 🚧 **in progress (1/10 shipped, 1 deferred).** **V40 / KAN-423 is shipped** (two PRs —
-> structural then semantic; see its slice note). **V41 / KAN-424 is ⏸️ deferred**, `blocked-by`
+> **Status:** 🚧 **in progress (3/11 shipped, 1 deferred).** **V40 / KAN-423 is shipped** (two PRs —
+> structural then semantic; see its slice note), and Wave 2 has begun: **V50 / KAN-435** shipped as
+> **v0.5.0** (release provenance in `--version` + the version-bump guard) and **V42 / KAN-425** as
+> **v0.6.0** (`--fields` + the identifier round-trip suite). **V43 / KAN-426** is the CLI's error
+> contract. **V41 / KAN-424 is ⏸️ deferred**, `blocked-by`
 > **KAN-439** (k8s homelab migration), with **KAN-437** carved out for the in-place renames.
 > Board cards **KAN-423…KAN-432** + **KAN-435** under the three `M7:` epics
 > **EPIC-66** (Pandan Rebrand), **EPIC-67** (Agent-Ergonomic CLI), **EPIC-68** (MCP Right-Sizing).
@@ -196,7 +199,7 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
 - **Notes:** **builds first in Wave 2**, before the other AXI slices. Every guarantee they add is
   unverifiable in the field while "which build am I running?" has no answer.
 
-### V42 · `--fields` projection + identifier round-trip regression tests (A1) — KAN-425
+### V42 · `--fields` projection + identifier round-trip regression tests (A1) — KAN-425 ✅
 - **Build:** de-scoped from the original plan (see the correction note). The **round-trip half is
   already shipped** — `_id_or_ticket_arg` + `_parse_id_or_ticket` accept `KAN-`/`EPIC-` refs
   case-insensitively wherever an id is taken (KAN-285), and an unknown ref already exits `1` with
@@ -208,23 +211,39 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
     ten-day-old fix could be mistaken for a live defect.
 - **Tests:** a **round-trip test per id-taking verb** (`get`/`update`/`move`/`delete`/`dep`/`link`/
   `comment`/`needs-human`/`resolve` + the epic verbs): list, take the printed identifier verbatim, feed
-  it back, assert success. Ref parsing: mixed case, `#KAN-1`, a bare int, an unresolvable ref (exit 1,
+  it back, assert success. Ref parsing: mixed case, a bare int, an unresolvable ref (exit 1,
   not exit 2), an epic ref handed to a card verb. `--fields` selects, rejects unknown names, and leaves
   the default row untouched.
 - **Acceptance:** the `--fields` demo + the round-trip suite; green. CLI-only — no deploy.
+- **Non-goal, recorded: a leading `#` (`#KAN-1`) is NOT accepted.** An earlier draft of this slice
+  listed `#`-tolerance as a test case; that was invention, not a requirement. The contract is *"any
+  identifier the tool prints must be accepted"*, and nothing prints `#KAN-1` — while leniency in an
+  identifier parser buys a future ambiguity for no measured need. It stays a usage error (exit `2`),
+  pinned by a test so the decision is visible rather than accidental.
+- **Shipped** as **v0.6.0** (PR #205): `--fields` on all ten list verbs with the vocabulary derived
+  from the row's own `--json` keys (so it can't drift from the API), the 4-field default row pinned
+  byte-identically, and 77 new tests — one round-trip per id-taking verb (13 card-ticket, 6 epic-ticket,
+  8 numeric-id, plus `link rm`). `--sort`'s help line was reworded `Fields:` → `Sort keys:` with a test,
+  killing the ambiguity that made the audit misread it. `--fields` deliberately does **not** touch
+  `--json` (a verbatim passthrough; V44 adds `summary` there).
 
 ### V43 · Structured errors on stdout + documented exit codes (A2) — KAN-426
-- **Build:** AXI 6, narrower than first assumed — the audit found the **exit codes are already
-  correct** (`0` success, `1` runtime error, `2` argparse error; `get KAN-99999` already exits `1` with
-  `no card found with ticket KAN-99999`). So this slice is about *stream and shape*, plus pinning what
-  already works: emit a parseable error on **stdout** (single-line, or TOON/JSON matching `--format`)
-  carrying a stable **machine code**, the human message and the offending argument; **document** the
-  0/1/2 contract in `--help` and the CLI README and pin it with tests; guarantee **no verb prompts**
-  when stdin isn't a tty — `login`'s `getpass` becomes tty-gated and fails structured otherwise. Keep
-  the usage text on `--help`.
+- **Build:** AXI 6 — *stream and shape*, plus pinning and repairing what already exists. Emit a
+  parseable error on **stdout** (single-line, or JSON/TOON matching the output flag) carrying a stable
+  **machine code**, the human message and the offending argument; guarantee **no verb prompts** when
+  stdin isn't a tty (`login`'s `getpass` is already tty-gated — give it a structured failure instead of
+  a bare stderr line); keep the usage text on `--help`.
+  **Document and pin the real scheme, which is six codes, not three** (the earlier "0/1/2 contract"
+  here was wrong): `0` ok, `1` general/config, `2` usage (argparse), `3` `401`, `4` `403`, `5` `404`.
+  **Do not renumber them** — they're a published scripting contract.
+  **And fix the one genuine inconsistency:** client-side ref-resolution failure must return **`5`**,
+  not `1`, so `get 999999` and `get KAN-999999` agree on "no such card" (it applies to every verb that
+  resolves a ref, not just `get`).
 - **Tests:** CLI unit — one case per failure class asserting **stream, shape and exit code**: unknown
-  flag (2), invalid enum value (2), missing token (1), 404 (1), 401 (1), transport error (1), success
-  (0). `login` with a non-tty stdin errors structured instead of hanging.
+  flag (2), invalid enum value (2), missing token (1), 404 (5), 401 (3), 403 (4), transport error (1),
+  success (0), and both identifier forms of a missing card agreeing on 5. `login` with a non-tty stdin
+  errors structured instead of hanging. The exit-code scheme and the code→exit table are pinned by
+  literal-value tests.
 - **Acceptance:** the three-error demo; suite green. CLI-only — no deploy.
 - **Notes:** this slice defines the error shape the rest of Wave 2 emits, so it lands before V44–V47.
 

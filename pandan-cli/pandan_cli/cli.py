@@ -16,13 +16,24 @@ line (``pts=-`` when unestimated, reading the API's ``story_points``). List verb
 take ``--fields a,b,c`` to widen that minimal default row on demand (V42, KAN-425);
 it shapes the **human** row only — ``--json`` stays a verbatim passthrough.
 
-Exit codes (for scripting):
+Failures are **structured and on stdout** (V43, KAN-426 — AXI 6): one tab-separated
+row ``error<TAB><code><TAB><message><TAB><arg>`` (``-`` when no single argument is at
+fault), or the same as JSON under ``--json``. stdout is the machine channel, so an
+agent parses one stream; stderr keeps only human extras (argparse's usage block, the
+``KANBAN_*`` deprecation notice). No verb ever prompts when stdin isn't a tty.
+
+Exit codes (for scripting) — **stable, never renumbered**:
     0  success
     1  general / config / non-mapped API error
     2  usage error (argparse's own convention)
     3  401 unauthorized (bad/missing token)
-    4  403 forbidden (board isn't yours)
-    5  404 not found
+    4  403 forbidden (board exists but isn't yours)
+    5  404 not found — including a KAN-/EPIC- ticket that resolves to nothing, so
+       the code doesn't depend on whether you addressed the card by id or by ticket
+
+The rule that decides 1 vs 2: **argparse rejected argv → 2; the CLI rejected a value
+at runtime → 1.** ``ERROR_CODES`` below is the whole vocabulary, and each machine
+``code`` maps to exactly one exit code.
 """
 from __future__ import annotations
 
@@ -33,6 +44,7 @@ import sys
 from collections.abc import Sequence
 from typing import Any
 
+import httpx
 from pandan_client import PandanApiError, PandanClient
 
 from . import build_info
@@ -54,7 +66,115 @@ EXIT_AUTH = 3
 EXIT_FORBIDDEN = 4
 EXIT_NOT_FOUND = 5
 
-_STATUS_EXIT = {401: EXIT_AUTH, 403: EXIT_FORBIDDEN, 404: EXIT_NOT_FOUND}
+# --- the error contract (V43, KAN-426 — AXI 6) -------------------------------
+# Every machine `code` maps to exactly one exit code. **Both are a published
+# contract**: scripts branch on the exit code and agents branch on the code string,
+# so entries may be ADDED but never renumbered or renamed. A test pins this table.
+ERROR_CODES: dict[str, int] = {
+    # argparse rejected argv itself (unknown flag, bad --column value, missing arg).
+    "usage": EXIT_USAGE,
+    # The CLI rejected a value at runtime → 1 (see the module docstring's 1-vs-2 rule).
+    "config": EXIT_ERROR,                 # no token, or unreadable config
+    "board_required": EXIT_ERROR,         # verb needs a board; none given or configured
+    "confirmation_required": EXIT_ERROR,  # destructive verb without --yes
+    "invalid_input": EXIT_ERROR,          # parsed but unusable (bad JSON, wrong shape)
+    "invalid_ref": EXIT_ERROR,            # an EPIC- ticket where a card is wanted, etc.
+    "unknown_field": EXIT_ERROR,          # --fields named a field the row doesn't have
+    "no_token": EXIT_ERROR,               # login/config set got no token to save
+    # API-mapped.
+    "unauthorized": EXIT_AUTH,            # 401
+    "forbidden": EXIT_FORBIDDEN,          # 403
+    "not_found": EXIT_NOT_FOUND,          # 404, or a ticket that resolves to nothing
+    "api_error": EXIT_ERROR,              # any other non-2xx
+    # The request never got an answer, or the CLI itself broke.
+    "transport": EXIT_ERROR,
+    "unexpected": EXIT_ERROR,
+}
+
+# HTTP status → machine code. Anything else is "api_error" (exit 1).
+_STATUS_CODE = {401: "unauthorized", 403: "forbidden", 404: "not_found"}
+# Kept as a derived view (one source of truth) — status → exit code.
+_STATUS_EXIT = {status: ERROR_CODES[code] for status, code in _STATUS_CODE.items()}
+
+
+class CliError(Exception):
+    """A failure with a **stable machine code**, the human message, and optionally the
+    offending argument / HTTP status. The code decides the exit code (``ERROR_CODES``),
+    so a raise site picks the *meaning* and never a number."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        arg: str | None = None,
+        status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.arg = arg
+        self.status = status
+        # KeyError here is a programming error: every code must be in the table.
+        self.exit_code = ERROR_CODES[code]
+
+
+# Whether errors render as JSON. Set from argv at the top of ``run()`` because an
+# argparse failure *is* an error and happens before the parsed namespace exists.
+_ERRORS_AS_JSON = False
+
+
+def _set_error_json(as_json: bool) -> None:
+    global _ERRORS_AS_JSON
+    _ERRORS_AS_JSON = as_json
+
+
+def _as_cli_error(exc: BaseException) -> CliError:
+    """Classify any exception into the error contract."""
+    if isinstance(exc, CliError):
+        return exc
+    if isinstance(exc, PandanApiError):
+        code = _STATUS_CODE.get(exc.status_code, "api_error")
+        return CliError(str(exc), code=code, status=exc.status_code)
+    if isinstance(exc, ConfigError):
+        return CliError(str(exc), code="config")
+    if isinstance(exc, httpx.HTTPError):
+        # No answer from the API: connect/read timeout, DNS, refused connection.
+        return CliError(f"{type(exc).__name__}: {exc}", code="transport")
+    return CliError(f"{type(exc).__name__}: {exc}", code="unexpected")
+
+
+def _error_payload(err: CliError) -> dict[str, Any]:
+    """The ``--json`` error object. Every key is always present (``null`` when it
+    doesn't apply) so a consumer never has to test for absence."""
+    return {
+        "error": {
+            "code": err.code,
+            "message": err.message,
+            "arg": err.arg,
+            "status": err.status,
+            "exit_code": err.exit_code,
+        }
+    }
+
+
+def _error_row(err: CliError) -> str:
+    """The human/greppable form: four tab-separated columns, so `cut -f2` is the code
+    and `cut -f3` the message. Newlines/tabs inside the message are flattened."""
+    message = err.message.replace("\t", " ").replace("\n", " ")
+    return "\t".join(("error", err.code, message, err.arg or "-"))
+
+
+def _print_error(err: CliError, *, as_json: bool | None = None) -> int:
+    """Print the structured error to **stdout** and return its exit code."""
+    if as_json is None:
+        as_json = _ERRORS_AS_JSON
+    if as_json:
+        print(json.dumps(_error_payload(err), indent=2, default=str))
+    else:
+        print(_error_row(err))
+    return err.exit_code
+
 
 COLUMNS = ("todo", "in_progress", "done")
 PRIORITIES = ("none", "low", "medium", "high", "urgent")
@@ -586,9 +706,11 @@ def _validate_fields(fields: list[str], rows: list[Any], noun: str) -> None:
     available = sorted(known | {a for a, target in FIELD_ALIASES.items() if target in known})
     for name in fields:
         if _resolve_field(name) not in known:
-            raise ConfigError(
+            raise CliError(
                 f"unknown --fields name {name!r} for {noun} rows; "
-                f"available: {', '.join(available)}"
+                f"available: {', '.join(available)}",
+                code="unknown_field",
+                arg=name,
             )
 
 
@@ -665,7 +787,11 @@ def _parse_id_or_ticket(raw: str) -> tuple[int | None, str | None]:
         return int(v), None
     m = _TICKET_RE.match(v)
     if m is None:
-        raise ConfigError(f"expected a numeric id or a KAN-/EPIC- ticket, got {raw!r}")
+        raise CliError(
+            f"expected a numeric id or a KAN-/EPIC- ticket, got {raw!r}",
+            code="invalid_ref",
+            arg=str(raw),
+        )
     return None, f"{m.group(1).upper()}-{m.group(2)}"
 
 
@@ -677,7 +803,11 @@ def _resolve_card_id(client: PandanClient, raw: str | int) -> int:
     if id_ is not None:
         return id_
     if not ticket.startswith("KAN-"):
-        raise ConfigError(f"{ticket} is not a card ticket (cards are KAN-…)")
+        raise CliError(
+            f"{ticket} is not a card ticket (cards are KAN-…)",
+            code="invalid_ref",
+            arg=ticket,
+        )
     cursor: str | None = None
     while True:
         result = (
@@ -690,7 +820,12 @@ def _resolve_card_id(client: PandanClient, raw: str | int) -> int:
                 return int(card["id"])
         cursor = result.get("next_cursor")
         if not cursor:
-            raise ConfigError(f"no card found with ticket {ticket}")
+            # not_found → exit 5, the same code the API returns for `get <numeric id>`
+            # of a card that doesn't exist. Before V43 this was exit 1, so one logical
+            # failure reported two different codes depending on the identifier form.
+            raise CliError(
+                f"no card found with ticket {ticket}", code="not_found", arg=ticket
+            )
 
 
 def _resolve_epic_id(client: PandanClient, raw: str | int) -> int:
@@ -701,11 +836,15 @@ def _resolve_epic_id(client: PandanClient, raw: str | int) -> int:
     if id_ is not None:
         return id_
     if not ticket.startswith("EPIC-"):
-        raise ConfigError(f"{ticket} is not an epic ticket (epics are EPIC-…)")
+        raise CliError(
+            f"{ticket} is not an epic ticket (epics are EPIC-…)",
+            code="invalid_ref",
+            arg=ticket,
+        )
     for epic in client.list_epics(board_id=None).get("epics", []):
         if str(epic.get("ticket_number", "")).upper() == ticket:
             return int(epic["id"])
-    raise ConfigError(f"no epic found with ticket {ticket}")
+    raise CliError(f"no epic found with ticket {ticket}", code="not_found", arg=ticket)
 
 
 def _resolve_epic_opt(client: PandanClient, raw: str | int | None) -> int | None:
@@ -778,8 +917,10 @@ def _cmd_move(client: PandanClient, config: Config, args: argparse.Namespace) ->
 
 def _cmd_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
-        raise ConfigError(
-            f"refusing to delete card {args.card_id} without confirmation; pass --yes"
+        raise CliError(
+            f"refusing to delete card {args.card_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
         )
     return client.delete_card(_resolve_card_id(client, args.card_id))
 
@@ -790,7 +931,11 @@ def _cmd_next(client: PandanClient, config: Config, args: argparse.Namespace) ->
     path-scoped with no API-side fallback."""
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
+        raise CliError(
+            "a board is required; pass --board or set PANDAN_BOARD_ID",
+            code="board_required",
+            arg="--board",
+        )
     if args.claim:
         return client.dispatch(
             board, assignee=args.assignee, label=args.label, priority=args.priority
@@ -814,7 +959,11 @@ def _cmd_metrics(client: PandanClient, config: Config, args: argparse.Namespace)
     (``--board`` or PANDAN_BOARD_ID)."""
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
+        raise CliError(
+            "a board is required; pass --board or set PANDAN_BOARD_ID",
+            code="board_required",
+            arg="--board",
+        )
     return client.board_metrics(board, since=args.since, window=args.window)
 
 
@@ -824,7 +973,11 @@ def _cmd_activity(client: PandanClient, config: Config, args: argparse.Namespace
     required (``--board`` or PANDAN_BOARD_ID)."""
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
+        raise CliError(
+            "a board is required; pass --board or set PANDAN_BOARD_ID",
+            code="board_required",
+            arg="--board",
+        )
     return client.list_activity(
         board,
         limit=args.limit,
@@ -899,8 +1052,10 @@ def _cmd_epic_update(client: PandanClient, config: Config, args: argparse.Namesp
 
 def _cmd_epic_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
-        raise ConfigError(
-            f"refusing to delete epic {args.epic_id} without confirmation; pass --yes"
+        raise CliError(
+            f"refusing to delete epic {args.epic_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
         )
     return client.delete_epic(_resolve_epic_id(client, args.epic_id))
 
@@ -913,14 +1068,22 @@ def _cmd_epic_delete(client: PandanClient, config: Config, args: argparse.Namesp
 def _cmd_label_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
+        raise CliError(
+            "a board is required; pass --board or set PANDAN_BOARD_ID",
+            code="board_required",
+            arg="--board",
+        )
     return client.list_labels(board)
 
 
 def _cmd_label_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
+        raise CliError(
+            "a board is required; pass --board or set PANDAN_BOARD_ID",
+            code="board_required",
+            arg="--board",
+        )
     # KAN-288: color accepts either the positional or the --color flag (flag wins),
     # falling back to a neutral default so it can be omitted entirely.
     color = args.color_opt or args.color_pos or DEFAULT_LABEL_COLOR
@@ -929,8 +1092,10 @@ def _cmd_label_create(client: PandanClient, config: Config, args: argparse.Names
 
 def _cmd_label_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
-        raise ConfigError(
-            f"refusing to delete label {args.label_id} without confirmation; pass --yes"
+        raise CliError(
+            f"refusing to delete label {args.label_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
         )
     return client.delete_label(args.label_id)
 
@@ -971,7 +1136,11 @@ def _build_view_query(client: PandanClient, args: argparse.Namespace) -> dict[st
 def _require_view_board(args: argparse.Namespace, config: Config) -> int:
     board = _resolve_board(args.board, config)
     if board is None:
-        raise ConfigError("a board is required; pass --board or set PANDAN_BOARD_ID")
+        raise CliError(
+            "a board is required; pass --board or set PANDAN_BOARD_ID",
+            code="board_required",
+            arg="--board",
+        )
     return board
 
 
@@ -987,8 +1156,10 @@ def _cmd_view_create(client: PandanClient, config: Config, args: argparse.Namesp
 
 def _cmd_view_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
-        raise ConfigError(
-            f"refusing to delete view {args.view_id} without confirmation; pass --yes"
+        raise CliError(
+            f"refusing to delete view {args.view_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
         )
     return client.delete_view(_require_view_board(args, config), args.view_id)
 
@@ -1013,8 +1184,10 @@ def _cmd_cycle_create(client: PandanClient, config: Config, args: argparse.Names
 
 def _cmd_cycle_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
-        raise ConfigError(
-            f"refusing to delete cycle {args.cycle_id} without confirmation; pass --yes"
+        raise CliError(
+            f"refusing to delete cycle {args.cycle_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
         )
     return client.delete_cycle(_require_view_board(args, config), args.cycle_id)
 
@@ -1035,13 +1208,17 @@ def _load_json_arg(value: str) -> Any:
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ConfigError(f"invalid JSON: {exc}") from exc
+        raise CliError(f"invalid JSON: {exc}", code="invalid_input") from exc
 
 
 def _cmd_batch_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     updates = _load_json_arg(args.updates)
     if not isinstance(updates, list):
-        raise ConfigError("batch-update expects a JSON array of {id, ...fields} objects")
+        raise CliError(
+            "batch-update expects a JSON array of {id, ...fields} objects",
+            code="invalid_input",
+            arg="JSON",
+        )
     return client.update_cards(updates)
 
 
@@ -1052,14 +1229,20 @@ def _cmd_template_list(client: PandanClient, config: Config, args: argparse.Name
 def _cmd_template_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     cards = _load_json_arg(args.cards)
     if not isinstance(cards, list):
-        raise ConfigError("template create expects a JSON array of card objects for --cards")
+        raise CliError(
+            "template create expects a JSON array of card objects for --cards",
+            code="invalid_input",
+            arg="--cards",
+        )
     return client.create_template(_require_view_board(args, config), args.name, cards)
 
 
 def _cmd_template_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
-        raise ConfigError(
-            f"refusing to delete template {args.template_id} without confirmation; pass --yes"
+        raise CliError(
+            f"refusing to delete template {args.template_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
         )
     return client.delete_template(_require_view_board(args, config), args.template_id)
 
@@ -1166,7 +1349,11 @@ def _cmd_config_show(args: argparse.Namespace) -> int:
 
 def _validate_board_id_arg(raw: str | None) -> None:
     if raw is not None and raw.strip() and not raw.strip().lstrip("-").isdigit():
-        raise ConfigError(f"--board-id must be an integer, got {raw!r}")
+        raise CliError(
+            f"--board-id must be an integer, got {raw!r}",
+            code="invalid_input",
+            arg="--board-id",
+        )
 
 
 def _cmd_config_set(args: argparse.Namespace) -> int:
@@ -1177,34 +1364,55 @@ def _cmd_config_set(args: argparse.Namespace) -> int:
     if getattr(args, "token_stdin", False):
         token = sys.stdin.readline().strip()
         if not token:
-            print("pandan: no token read from stdin", file=sys.stderr)
-            return EXIT_ERROR
+            raise CliError("no token read from stdin", code="no_token", arg="--token-stdin")
     elif args.token is not None:
         token = args.token
     if args.api_url is None and args.board_id is None and token is None:
-        print(
-            "pandan: nothing to set (pass --api-url / --board-id / --token[-stdin])",
-            file=sys.stderr,
+        raise CliError(
+            "nothing to set (pass --api-url / --board-id / --token[-stdin])",
+            code="invalid_input",
         )
-        return EXIT_ERROR
     path = write_config_file(api_url=args.api_url, token=token, board_id=args.board_id)
     print(f"wrote {path}")
     return EXIT_OK
 
 
+def _stdin_is_tty() -> bool:
+    """Whether stdin is an interactive terminal. Wrapped so it can be faked in tests
+    and so the one place that decides "may I prompt?" is obvious."""
+    try:
+        return bool(sys.stdin.isatty())
+    except (AttributeError, ValueError):  # detached / closed stdin
+        return False
+
+
 def _cmd_login(args: argparse.Namespace) -> int:
-    """Save a PAT to the config file. Prompts (hidden) on a TTY, else reads one line
-    from stdin — so the token never appears on the command line."""
+    """Save a PAT to the config file, without it ever touching argv.
+
+    **Never prompts non-interactively** (AXI 6, V43): the hidden ``getpass`` prompt is
+    reached only when stdin is a real tty and ``--token-stdin`` wasn't asked for.
+    Otherwise the token is read as one line from stdin (``… | pandan login``), and if
+    nothing arrives the command fails with a structured error rather than blocking on a
+    prompt no one can answer."""
     _validate_board_id_arg(args.board_id)
-    if getattr(args, "token_stdin", False) or not sys.stdin.isatty():
+    from_stdin = getattr(args, "token_stdin", False) or not _stdin_is_tty()
+    if from_stdin:
         token = sys.stdin.readline().strip()
     else:
         import getpass
 
         token = getpass.getpass("Paste your Pandan PAT (pandan_pat_…): ").strip()
     if not token:
-        print("pandan: no token provided", file=sys.stderr)
-        return EXIT_ERROR
+        raise CliError(
+            (
+                "no token read from stdin — pipe one in (`… | pandan login "
+                "--token-stdin`) or run in a terminal to be prompted"
+                if from_stdin
+                else "no token provided"
+            ),
+            code="no_token",
+            arg="--token-stdin" if from_stdin else None,
+        )
     path = write_config_file(api_url=args.api_url, token=token, board_id=args.board_id)
     print(f"saved token to {path} (mode 0600)")
     return EXIT_OK
@@ -1235,8 +1443,25 @@ def _add_fields_arg(parser: argparse.ArgumentParser, example: str) -> None:
     )
 
 
+class ErrorContractParser(argparse.ArgumentParser):
+    """An ``ArgumentParser`` whose failures obey the error contract (V43, KAN-426).
+
+    argparse's own ``error()`` writes ``prog: error: …`` to **stderr** and exits 2. AXI
+    6 wants the machine-readable failure on **stdout**, so we print the structured row
+    there and keep only the human usage block on stderr. The exit code stays **2** —
+    argparse's convention, and part of the published contract.
+
+    Subparsers inherit this class automatically (``add_subparsers`` defaults
+    ``parser_class`` to ``type(self)``), so nested verbs report identically."""
+
+    def error(self, message: str):  # noqa: D102 - argparse API
+        self.print_usage(sys.stderr)
+        _print_error(CliError(message, code="usage"))
+        raise SystemExit(EXIT_USAGE)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = ErrorContractParser(
         prog="pandan",
         description="Manage Pandan cards, boards, and epics from the command line.",
         epilog=(
@@ -1248,7 +1473,11 @@ def build_parser() -> argparse.ArgumentParser:
             "So the PAT can stay in a file and never touch the command line. Run\n"
             "`pandan login` once to save it; `pandan config show` prints the effective config.\n"
             "\n"
-            "Exit codes: 0 ok, 1 error, 2 usage, 3 unauthorized, 4 forbidden, 5 not found."
+            "Exit codes: 0 ok, 1 error, 2 usage, 3 unauthorized, 4 forbidden, 5 not found\n"
+            "(a KAN-/EPIC- ticket that resolves to nothing is also 5).\n"
+            "Errors print one row on STDOUT: error<TAB>code<TAB>message<TAB>arg\n"
+            "(a JSON {\"error\": {...}} object with --json). No verb ever prompts when\n"
+            "stdin is not a terminal."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1953,10 +2182,18 @@ def _normalize_sort_argv(argv: list[str]) -> list[str]:
 
 
 def run(argv: Sequence[str] | None = None) -> int:
-    """Parse args, dispatch, print, and return an exit code (no ``sys.exit``)."""
-    parser = build_parser()
+    """Parse args, dispatch, print, and return an exit code (no ``sys.exit``).
+
+    Every failure funnels through ``_print_error``: one structured row on **stdout**
+    plus the exit code its machine code maps to (V43, KAN-426)."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    # An argparse failure is itself a structured error, and it happens before there is
+    # a parsed namespace to read --json from — so seed the render mode from argv.
+    _set_error_json("--json" in raw_argv)
+    parser = build_parser()
     args = parser.parse_args(_normalize_sort_argv(raw_argv))
+    as_json = bool(getattr(args, "as_json", False))
+    _set_error_json(as_json)
 
     # Local commands (login / config …) touch only the config file — no token, no
     # client, no network. Dispatch them before resolving or requiring config.
@@ -1964,29 +2201,22 @@ def run(argv: Sequence[str] | None = None) -> int:
     if local_func is not None:
         try:
             return local_func(args)
-        except ConfigError as exc:
-            print(f"pandan: {exc}", file=sys.stderr)
-            return EXIT_ERROR
+        except Exception as exc:
+            return _print_error(_as_cli_error(exc), as_json=as_json)
 
     try:
         # warmup hits the public /api/health, so it doesn't need a token.
         config = load_config(require_token=getattr(args, "require_token", True))
     except ConfigError as exc:
-        print(f"pandan: {exc}", file=sys.stderr)
-        return EXIT_ERROR
+        return _print_error(CliError(str(exc), code="config"), as_json=as_json)
 
     try:
         with PandanClient(config.api_url, config.token) as client:
             result = args.func(client, config, args)
-    except ConfigError as exc:  # e.g. delete without --yes
-        print(f"pandan: {exc}", file=sys.stderr)
-        return EXIT_ERROR
-    except PandanApiError as exc:
-        print(f"pandan: {exc}", file=sys.stderr)
-        return _STATUS_EXIT.get(exc.status_code, EXIT_ERROR)
-    except Exception as exc:  # network/timeout/unexpected — keep it clean for scripts
-        print(f"pandan: {exc}", file=sys.stderr)
-        return EXIT_ERROR
+    except Exception as exc:
+        # CliError (delete without --yes, an unresolvable ticket …), PandanApiError
+        # (status → code), httpx (transport), anything else (unexpected).
+        return _print_error(_as_cli_error(exc), as_json=as_json)
 
     # ``noun`` defaults to "card" (card verbs are top-level and set no noun);
     # the board/epic subparsers set it so the delete summary reads correctly.
@@ -1996,13 +2226,12 @@ def run(argv: Sequence[str] | None = None) -> int:
     try:
         _emit(
             result,
-            as_json=args.as_json,
+            as_json=as_json,
             noun=getattr(args, "noun", "card"),
             fields=getattr(args, "fields", None),
         )
-    except ConfigError as exc:
-        print(f"pandan: {exc}", file=sys.stderr)
-        return EXIT_ERROR
+    except CliError as exc:
+        return _print_error(exc, as_json=as_json)
     # warmup never throws (a still-waking/failed server is a status, not an
     # exception), so it maps that status to a scripting-friendly exit code:
     # 0 when awake, 1 otherwise (retry the CI pre-step / investigate).

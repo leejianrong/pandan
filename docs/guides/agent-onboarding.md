@@ -243,8 +243,13 @@ until pandan warmup; do sleep 2; done   # block until the API is awake
 pandan list --column todo               # now the real work
 ```
 
-The CLI uses distinct exit codes for scripting — `3` for `401`, `4` for `403`, `5` for `404` —
-so a job can react to auth versus not-found without parsing text.
+The CLI uses distinct exit codes for scripting — `3` for `401`, `4` for `403`, `5` for `404`
+(including a `KAN-`/`EPIC-` ticket that matches nothing) — so a job can react to auth versus
+not-found without parsing text. And when it does fail, the failure is **machine-readable on
+stdout**: one `error<TAB>code<TAB>message<TAB>arg` row, or a `{"error": {…}}` object with
+`--json`, so `jq -r .error.code` is enough to branch. Nothing needs stderr, and no verb ever
+prompts when stdin isn't a terminal. Full code table:
+[`pandan-cli/README.md`](https://github.com/leejianrong/simple-kanban/blob/main/pandan-cli/README.md).
 
 ## Self-hosting
 

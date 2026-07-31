@@ -127,9 +127,11 @@ pandan epic list --fields ticket,name,lead,target_date
   `blocked_by` → `3,9`), and a projected row is always **one line**.
 - **Names are case-insensitive** and surrounding spaces are ignored
   (`--fields " Ticket , title "` works).
-- **An unknown name is an error naming it**, and listing what is valid:
-  `pandan: unknown --fields name 'titel' for card rows; available: assignee, …`
-  (exit `1`; an empty `--fields ""` is a usage error, exit `2`).
+- **An unknown name is a structured error naming it** (see
+  [Errors](#errors-structured-on-stdout-v43-kan-426)), with the offending field in its
+  own column and the valid vocabulary in the message — exit `1`:
+  `error  unknown_field  unknown --fields name 'titel' for card rows; available: assignee, …  titel`.
+  An empty `--fields ""` is argparse's business, so it's a usage error, exit `2`.
 - **`--fields` shapes the human row only — it never changes `--json`.** `--json` is a
   verbatim passthrough of the full payload (see below), so there is nothing to
   project; combining the two flags is allowed and the JSON is byte-identical.
@@ -190,7 +192,81 @@ Run `pandan --help`, `pandan <command> --help`, `pandan board --help`, or
 `pandan epic --help` for the full option list. `pandan --version` (or `-v`) prints the
 CLI version (e.g. `pandan 0.4.0`) and exits.
 
+### Errors: structured, on stdout (V43, KAN-426)
+
+**A failure prints one row on `stdout`** — the machine channel — and nothing on
+stderr. Four tab-separated columns, so `cut -f2` is the code and `cut -f3` the message:
+
+```
+error<TAB><code><TAB><message><TAB><arg>
+```
+
+`<arg>` is the offending argument or value, or `-` when no single one is at fault:
+
+```console
+$ pandan get KAN-999999
+error	not_found	no card found with ticket KAN-999999	KAN-999999    # exit 5
+
+$ pandan delete 42
+error	confirmation_required	refusing to delete card 42 without confirmation; pass --yes	--yes   # exit 1
+```
+
+With `--json` the same failure is a JSON object instead — **all five keys always
+present** (`null` where they don't apply), so a consumer never tests for absence:
+
+```console
+$ pandan list --board 11 --json
+{
+  "error": {
+    "code": "forbidden",
+    "message": "403: that board isn't yours — call list_boards …",
+    "arg": null,
+    "status": 403,
+    "exit_code": 4
+  }
+}
+```
+
+`jq -e .error` is therefore the "did it fail?" test, and `jq -r .error.code` the branch:
+
+```bash
+out=$(pandan get "$ref" --json) || echo "failed: $(jq -r .error.code <<<"$out")"
+```
+
+**What still uses stderr:** only human extras that a machine shouldn't parse —
+argparse's `usage:` block on a usage error, and the `KANBAN_*` deprecation notice.
+`--help` is untouched: human text on stdout, exit `0`.
+
+**Machine codes.** Add-only: a new failure class may appear, but a code is never
+renamed and never remapped to a different exit code.
+
+| `code` | Exit | When |
+|--------|:----:|------|
+| `usage` | `2` | argparse rejected argv (unknown flag, bad `--column` value, missing argument) |
+| `config` | `1` | no token, or config that can't be read |
+| `board_required` | `1` | the verb needs a board and none was given or configured |
+| `confirmation_required` | `1` | a destructive verb without `--yes` |
+| `invalid_input` | `1` | a value parsed but unusable (bad JSON, wrong shape, non-integer `--board-id`) |
+| `invalid_ref` | `1` | an `EPIC-` ticket where a card is wanted (or the reverse) |
+| `unknown_field` | `1` | `--fields` named a field the row doesn't have |
+| `no_token` | `1` | `login` / `config set` got no token to save |
+| `unauthorized` | `3` | `401` — bad or missing PAT |
+| `forbidden` | `4` | `403` — the board exists but isn't yours |
+| `not_found` | `5` | `404`, **or** a `KAN-`/`EPIC-` ticket that resolves to nothing |
+| `api_error` | `1` | any other non-2xx |
+| `transport` | `1` | the request got no answer (timeout, DNS, connection refused) |
+| `unexpected` | `1` | a bug in the CLI — please report it |
+
+**No verb ever prompts when stdin isn't a terminal.** `pandan login` shows its hidden
+prompt only on a real tty; otherwise it reads one line from stdin
+(`… | pandan login --token-stdin`) and fails with `no_token` rather than blocking on a
+prompt nobody can answer.
+
 ### Exit codes (for scripting)
+
+**Stable — these numbers are a contract and are never renumbered.** Pinned by tests
+(`test_exit_code_scheme_is_pinned_by_literal_numbers`) and all six verified against the
+deployed API.
 
 | Code | Meaning |
 |------|---------|
@@ -198,8 +274,21 @@ CLI version (e.g. `pandan 0.4.0`) and exits.
 | `1` | general / config / non-mapped API error |
 | `2` | usage error (argparse convention) |
 | `3` | `401` unauthorized (bad/missing token) |
-| `4` | `403` forbidden (board isn't yours) |
-| `5` | `404` not found |
+| `4` | `403` forbidden — the board **exists but isn't yours** (verified against a real foreign board; a board id that doesn't exist is `5`, not `4`) |
+| `5` | `404` not found — **including** a `KAN-`/`EPIC-` ticket that matches nothing |
+
+The rule that decides `1` vs `2`: **argparse rejected argv → `2`; the CLI rejected a
+value at runtime → `1`.**
+
+> **`5` covers both identifier forms.** Before v0.7.0, `pandan get 999999` exited `5`
+> (the API's `404`) while `pandan get KAN-999999` exited `1` (resolved client-side,
+> found nothing) — the same logical failure reported two ways, which defeats branching
+> on the code. Every verb that resolves a ticket now returns `5` for "no such card /
+> epic", and a test asserts the two forms agree.
+
+> **One nonzero exit is not an error:** `pandan warmup` prints `waking  <detail>` and
+> exits `1` while the API is still waking, by design (`until pandan warmup; do sleep 2;
+> done`). It is a *status*, so it has no `error` row.
 
 ## Configuration
 
