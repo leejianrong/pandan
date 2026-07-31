@@ -14,10 +14,18 @@ description: >-
 Pandan is API-first: every board action is a plain `/api/v1` REST call, and there are two thin
 clients over it. The **`pandan` CLI is the primary way to drive the board** — it's a single binary, easy
 to shell out to, scriptable, and works in CI. The **MCP server (`mcp__pandan__*` tools) is the
-fallback**, for when the CLI isn't installed or errors. As of **v0.3.0** the CLI and MCP are at
-**full parity** over `/api/v1` — cards, boards, epics, labels, saved views, card templates,
-dependencies, work-links, comments, dispatch/claim, needs-human handoff, metrics, and the activity
-feed are all reachable from either.
+fallback**, for when the CLI isn't installed or errors. Cards, boards, epics, labels, saved views,
+card templates, dependencies, work-links, comments, dispatch/claim, needs-human handoff, metrics and
+the activity feed are all reachable from either.
+
+> **Not quite full parity — the relationship is MCP ⊇ CLI.** This section previously claimed "full
+> parity as of v0.3.0" while the *same file* documented a `curl` workaround for a missing CLI verb
+> forty lines below. Verified 2026-07-31 (KAN-432, ADR 0019): `pandan board` has only `list` and
+> `create`, so **`update_board` and `delete_board` are MCP-only**; `create_cards` (batch) has no CLI
+> verb; and `pandan next --claim` claims whatever is *next* rather than a chosen card, so it is not an
+> exact substitute for `claim_card`. Everything else is reachable from both. Don't repeat the "full
+> parity" shorthand — it was inherited into a roadmap card and nearly justified deleting the MCP
+> surface. Closing these four gaps is tracked as **KAN-502**.
 
 Prefer `pandan`. Drop to MCP only when you have to, and say why when you do.
 
@@ -340,8 +348,9 @@ Keep it short and reproducible: include `pandan --version`, the exact command an
 workaround you used if any. Mention you were using the `pandan` skill.
 
 Known gap (as of `pandan 0.3.0`): the `pandan board` group has only `list` and `create` — no
-`get`/`update`/`delete` — so **renaming or editing a board isn't possible from the CLI** despite the
-"full parity" note above. Use the MCP `update_board` tool, or a raw REST call, until it lands
+`get`/`update`/`delete` — so **renaming or editing a board isn't possible from the CLI**. This is one of
+the gaps the MCP ⊇ CLI note at the top of this file records; it is *why* that note exists. Use the MCP
+`update_board` tool, or a raw REST call, until it lands
 (tracked in <https://github.com/leejianrong/pandan/issues/172>):
 
 ```bash
