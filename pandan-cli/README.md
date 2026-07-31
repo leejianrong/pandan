@@ -16,60 +16,86 @@ with the repo's thin ethos.
 > **`pandan` and `pdn` are the same command.** Both console scripts point at the same
 > entry point, so `pdn list` ≡ `pandan list` — the short one exists so the rename off
 > `kan` (V40, [ADR 0018](../docs/adr/0018-pandan-rebrand.md)) costs no keystrokes. Every
-> example below uses `pandan` for clarity.
+> example below uses `pandan` for clarity. **`pdn` only materialises on the `uv tool
+> install` path**; the prebuilt binary is a single executable, so there you make the
+> alias yourself with one `ln -s` — see [Install](#install).
 
 ## Commands
 
-Card verbs are top-level; boards, epics, labels, saved views and templates are
-nested groups so their verbs don't collide with the card verbs (parity with the
-`/api/v1` surface).
+Card verbs are top-level; `notify`, `board`, `epic`, `label`, `view`, `cycle`,
+`template`, `dep`, `link`, `comment` and `config` are nested groups so their verbs
+don't collide with the card verbs (parity with the `/api/v1` surface).
+
+**Two flags are factored out of every row to keep the table readable:**
+
+- **`--format {human,json,toon}` is on every verb**, together with its alias `--json`
+  (≡ `--format json`). Both parse *before or after* the subcommand, so
+  `pandan --json list` and `pandan list --format toon` are equally valid — see
+  [Output formats](#output-formats-human-default--json--toon).
+- **`--fields LIST` is on every *list* verb and nowhere else** — `list`, `activity`,
+  `notify list`, `board list`, `epic list`, `label list`, `view list`, `cycle list`,
+  `template list`, `comment list` (see [`--fields`](#widening-the-row---fields-v42-kan-425)).
+
+Everything else each verb accepts is spelled out below. **The rows are in
+`pandan --help` order on purpose**: this table has drifted from the CLI three times
+(KAN-35, KAN-433, KAN-451), so keep it diffable against
+`uv run python -m pandan_cli --help` (from source — never a binary on your `PATH`)
+rather than spot-fixing it.
 
 | Command | Endpoint |
 |---------|----------|
-| `pandan list [--board N] [--column C] [--epic ID] [--limit N] [--fields F,…] [--json]` | `GET /cards` (V3 query API) |
-| `pandan get <card_id> [--json]` | `GET /cards/{id}` |
-| `pandan activity [--board N] [--actor L] [--action V] [--limit N] [--cursor C] [--json]` | `GET /boards/{id}/activity` |
-| `pandan create <title> [--board N] [--description D] [--column C] [--points N] [--assignee A] [--epic ID] [--json]` | `POST /cards` |
-| `pandan update <card_id> [--title T] [--description D] [--points N] [--assignee A] [--epic ID] [--json]` | `PATCH /cards/{id}` |
-| `pandan move <card_id> <column> [--position N] [--json]` | `POST /cards/{id}/move` |
-| `pandan delete <card_id> --yes [--json]` | `DELETE /cards/{id}` |
-| `pandan next [--board N] [--claim] [--assignee A] [--label ID] [--priority P] [--json]` | `GET /boards/{id}/next` (peek); with `--claim` → `POST /boards/{id}/dispatch` (atomic claim) |
-| `pandan needs-human <card_id> [--note N] [--json]` | `POST /cards/{id}/needs-human` |
-| `pandan resolve <card_id> [--json]` | `POST /cards/{id}/resolve` |
-| `pandan batch-update <JSON \| -> [--json]` | `PATCH /cards/batch` (atomic multi-card edit) |
-| `pandan metrics [--board N] [--since ISO] [--window SPAN] [--json]` | `GET /boards/{id}/metrics` |
-| `pandan board list [--json]` | `GET /boards` |
-| `pandan board create <name> [--json]` | `POST /boards` |
-| `pandan epic list [--board N] [--json]` | `GET /epics` |
-| `pandan epic create <name> [--board N] [--description D] [--json]` | `POST /epics` |
-| `pandan epic update <epic_id> [--name N] [--description D] [--json]` | `PATCH /epics/{id}` |
-| `pandan epic delete <epic_id> --yes [--json]` | `DELETE /epics/{id}` |
-| `pandan label list [--board N] [--json]` | `GET /boards/{id}/labels` |
-| `pandan label create <name> [color] [--color C] [--board N] [--json]` | `POST /boards/{id}/labels` |
-| `pandan label delete <label_id> --yes [--json]` | `DELETE /labels/{id}` |
-| `pandan view list [--board N] [--json]` | `GET /boards/{id}/views` |
-| `pandan view create <name> [--board N] [--column C] [--epic ID] [--priority P] [--label ID] [--due-before ISO] [--overdue] [--needs-human] [--assignee A] [--sort SPEC] [--json]` | `POST /boards/{id}/views` |
-| `pandan view delete <view_id> [--board N] --yes [--json]` | `DELETE /boards/{id}/views/{view_id}` |
-| `pandan template list [--board N] [--json]` | `GET /boards/{id}/templates` |
-| `pandan template create <name> --cards <JSON \| -> [--board N] [--json]` | `POST /boards/{id}/templates` |
-| `pandan template delete <template_id> [--board N] --yes [--json]` | `DELETE /boards/{id}/templates/{template_id}` |
-| `pandan template apply <template_id> [--board N] [--json]` | `POST /boards/{id}/templates/{template_id}/apply` |
-| `pandan dep add <card_id> --blocked-by BLOCKER_ID [--json]` | `POST /cards/{id}/dependencies` |
-| `pandan dep rm <card_id> --blocked-by BLOCKER_ID [--json]` | `DELETE /cards/{id}/dependencies/{blocker_id}` |
-| `pandan dep list <card_id> [--json]` | `GET /cards/{id}` (its `blocked_by` / `blocks`) |
-| `pandan link add <card_id> --url U --label L [--json]` | `POST /cards/{id}/links` |
-| `pandan link rm <card_id> --link-id ID [--json]` | `DELETE /cards/{id}/links/{link_id}` |
-| `pandan comment add <card_id> --body B [--json]` | `POST /cards/{id}/comments` |
-| `pandan comment list <card_id> [--json]` | `GET /cards/{id}/comments` |
-| `pandan warmup [--json]` | `GET /api/health` |
-| `pandan --version` (or `-v`) | *(local — prints the CLI version, e.g. `pandan 0.4.0`, and exits)* |
+| `pandan warmup` | `GET /api/health` |
+| `pandan list [--board N] [--column C] [--epic ID] [--cycle ID] [--priority P] [--label ID] [--due-before ISO] [--overdue] [--needs-human] [--assignee A] [--q TEXT] [--sort SPEC] [--limit N]` | `GET /cards` (V3 query API) |
+| `pandan get <card_id>` | `GET /cards/{id}` |
+| `pandan create <title> [--board N] [--description D] [--column C] [--points N] [--assignee A] [--epic ID] [--cycle ID] [--priority P] [--due ISO] [--label ID]` | `POST /cards` |
+| `pandan update <card_id> [--title T] [--description D] [--points N] [--assignee A] [--epic ID] [--cycle ID] [--priority P] [--due ISO] [--label ID]` | `PATCH /cards/{id}` |
+| `pandan move <card_id> <column> [--position N]` | `POST /cards/{id}/move` |
+| `pandan delete <card_id> --yes` | `DELETE /cards/{id}` |
+| `pandan next [--board N] [--claim] [--assignee A] [--label ID] [--priority P]` | `GET /boards/{id}/next` (peek); with `--claim` → `POST /boards/{id}/dispatch` (atomic claim) |
+| `pandan needs-human <card_id> [--note N]` | `POST /cards/{id}/needs-human` |
+| `pandan resolve <card_id>` | `POST /cards/{id}/resolve` |
+| `pandan metrics [--board N] [--since ISO] [--window SPAN]` | `GET /boards/{id}/metrics` |
+| `pandan activity [--board N] [--actor L] [--action V] [--limit N] [--cursor C]` | `GET /boards/{id}/activity` |
+| `pandan notify list [--unread]` | `GET /notifications` (V37, KAN-301 — your own inbox, **not** board-scoped, so no `--board`) |
+| `pandan notify read <id>` | `PATCH /notifications/{id}` (stamps `read_at`; idempotent) |
+| `pandan board list` | `GET /boards` |
+| `pandan board create <name>` | `POST /boards` |
+| `pandan epic list [--board N]` | `GET /epics` |
+| `pandan epic create <name> [--board N] [--description D] [--target-date ISO] [--lead L]` | `POST /epics` |
+| `pandan epic update <epic_id> [--name N] [--description D] [--target-date ISO] [--lead L]` | `PATCH /epics/{id}` |
+| `pandan epic delete <epic_id> --yes` | `DELETE /epics/{id}` |
+| `pandan label list [--board N]` | `GET /boards/{id}/labels` |
+| `pandan label create <name> [COLOR] [--color C] [--board N]` | `POST /boards/{id}/labels` |
+| `pandan label delete <label_id> --yes` | `DELETE /labels/{id}` |
+| `pandan view list [--board N]` | `GET /boards/{id}/views` |
+| `pandan view create <name> [--board N] [--column C] [--epic ID] [--priority P] [--label ID] [--due-before ISO] [--overdue] [--needs-human] [--assignee A] [--sort SPEC]` | `POST /boards/{id}/views` |
+| `pandan view delete <view_id> [--board N] --yes` | `DELETE /boards/{id}/views/{view_id}` |
+| `pandan cycle list [--board N]` | `GET /boards/{id}/cycles` (V33, KAN-297) |
+| `pandan cycle create <name> [--board N] [--starts-on ISO] [--ends-on ISO]` | `POST /boards/{id}/cycles` |
+| `pandan cycle delete <cycle_id> [--board N] --yes` | `DELETE /boards/{id}/cycles/{cycle_id}` (cards are detached, not deleted) |
+| `pandan cycle metrics <cycle_id> [--board N]` | `GET /boards/{id}/cycles/{cycle_id}/metrics` (V34, KAN-298 — burndown / velocity) |
+| `pandan batch-update <JSON \| ->` | `PATCH /cards/batch` (atomic multi-card edit) |
+| `pandan template list [--board N]` | `GET /boards/{id}/templates` |
+| `pandan template create <name> --cards <JSON \| -> [--board N]` | `POST /boards/{id}/templates` |
+| `pandan template delete <template_id> [--board N] --yes` | `DELETE /boards/{id}/templates/{template_id}` |
+| `pandan template apply <template_id> [--board N]` | `POST /boards/{id}/templates/{template_id}/apply` |
+| `pandan dep add <card_id> --blocked-by BLOCKER_ID` | `POST /cards/{id}/dependencies` |
+| `pandan dep rm <card_id> --blocked-by BLOCKER_ID` | `DELETE /cards/{id}/dependencies/{blocker_id}` |
+| `pandan dep list <card_id>` | `GET /cards/{id}` (its `blocked_by` / `blocks`) |
+| `pandan link add <card_id> --url U --label L` | `POST /cards/{id}/links` |
+| `pandan link rm <card_id> --link-id ID` | `DELETE /cards/{id}/links/{link_id}` |
+| `pandan comment add <card_id> --body B` | `POST /cards/{id}/comments` |
+| `pandan comment list <card_id>` | `GET /cards/{id}/comments` |
+| `pandan --version` (or `-v`) | *(local — prints the version **and the build's provenance**, then exits; see [Is my `pandan` stale?](#is-my-pandan-stale))* |
 | `pandan login [--api-url U] [--board-id N] [--token-stdin]` | *(local — saves the PAT to the config file)* |
 | `pandan config set [--api-url U] [--board-id N] [--token-stdin \| --token T]` | *(local — writes the config file)* |
-| `pandan config show [--json]` | *(local — prints the effective config, token redacted)* |
+| `pandan config show` | *(local — prints the effective config, token redacted)* |
 | `pandan config path` | *(local — prints the config file path)* |
 
-Valid columns are `todo`, `in_progress`, `done`. `delete` requires `--yes` as a
-guard against accidental destruction.
+Valid columns are `todo`, `in_progress`, `done`; valid priorities are `none`, `low`,
+`medium`, `high`, `urgent`. `delete` requires `--yes` as a guard against accidental
+destruction. A cycle is assigned as a *field edit* — `pandan update <card> --cycle <id>`
+— and filtered with `pandan list --cycle <id>`; there is no `cycle add-card` verb.
 
 **Ids accept tickets.** Anywhere a card or epic id is taken (`get`/`update`/`move`/
 `delete`, `--epic`, `dep --blocked-by`, `epic update`/`delete`, …) you can pass the
@@ -88,12 +114,32 @@ before a batch of `pandan` calls so the wake cost is paid once. It needs **no
 until pandan warmup; do sleep 2; done   # block until the API is awake
 ```
 
-Every command takes `--json` to print the API's raw response (for piping, e.g.
-`pandan list --json | jq`); without it you get a concise tab-separated summary
-(`ticket  column  title  pts=N` for cards — `pts=-` when unestimated, reading the
-API's `story_points`; `ticket  name` for epics, `id  name` for boards) suitable for
-`grep`/`cut`. Every **list** verb also takes `--fields` to widen that row on demand
-(below).
+### Output formats: `human` (default) · `json` · `toon`
+
+Every command takes **`--format {human,json,toon}`** (V47, KAN-430):
+
+- **`human`** — the default. A concise tab-separated summary
+  (`ticket  column  title  pts=N` for cards — `pts=-` when unestimated, reading the
+  API's `story_points`; `ticket  name` for epics, `id  name` for boards) suitable for
+  `grep`/`cut`. Every **list** verb also takes `--fields` to widen that row on demand
+  (below). Being key-free, it is already the cheapest list output — which is why V47
+  left it as the default.
+- **`json`** — the API's raw response, indented, for piping:
+  `pandan list --format json | jq`.
+- **`toon`** — the *same* object in [TOON](https://toonformat.dev/), which prints a
+  uniform array's field names once in a header instead of once per row. Much cheaper on
+  the **nested** payloads; see [When to reach for `--format toon`](#when-to-reach-for---format-toon-v47-kan-430).
+
+**`--json` is a supported alias for `--format json` — not deprecated, and going
+nowhere.** It predates `--format` and every script using it keeps working. If both are
+given, **`--format` wins regardless of order** (`pandan dep list KAN-430 --json
+--format toon` prints TOON, and so does the reverse). Both flags also parse *before*
+the subcommand, so `pandan --json dep list KAN-430` works too.
+
+`json` and `toon` are the two **structured** formats: they render one shared payload
+through one shaping function (`_structured_payload` → `_render_structured` in
+`pandan_cli/cli.py`) and differ only in the serializer, so they cannot describe
+different data. Anything below that says "the structured formats" means both.
 
 ### Widening the row: `--fields` (V42, KAN-425)
 
@@ -113,8 +159,8 @@ pandan epic list --fields ticket,name,lead,target_date
   `label list`, `view list`, `cycle list`, `template list`, `comment list`,
   `notify list`. (Not the single-entity verbs like `get` — their payload is the whole
   record already; `--fields` there is an unrecognised argument, not a no-op.)
-- **The vocabulary is the row's own `--json` keys** — whatever `pandan list --json`
-  shows for a card is a valid field name (`title`, `assignee`, `priority`, `column`,
+- **The vocabulary is the row's own structured keys** — whatever `pandan list --json`
+  (or `--format toon`) shows for a card is a valid field name (`title`, `assignee`, `priority`, `column`,
   `story_points`, `labels`, `blocked`, `blocked_by`, `due_date`, `needs_human`,
   `epic_id`, `cycle_id`, `created_at`, `updated_at`, `description`, …). Deriving it
   from the payload rather than a hand-kept list is deliberate: it cannot drift from
@@ -132,22 +178,27 @@ pandan epic list --fields ticket,name,lead,target_date
   own column and the valid vocabulary in the message — exit `1`:
   `error  unknown_field  unknown --fields name 'titel' for card rows; available: assignee, …  titel`.
   An empty `--fields ""` is argparse's business, so it's a usage error, exit `2`.
-- **`--fields` shapes the human row only — it never changes `--json`.** `--json` is a
-  verbatim passthrough of the full payload (see below), so there is nothing to
-  project; combining the two flags is allowed and the JSON is byte-identical.
+- **`--fields` shapes the human row only — it never changes the structured formats**
+  (matching the flag's own help text: *"Affects human output only, never --format
+  json/toon"*). Both are a verbatim passthrough of the full payload (see below), so
+  there is nothing to project; combining the flags is allowed and the `json`/`toon`
+  output is byte-identical either way.
 - The **empty state** (`(no cards)`) and the pagination hint
   (`(more — next cursor: …)`) print unchanged under a projection.
 - Not to be confused with `--sort`'s **sort keys**, which order the rows rather than
   choose the columns.
 
-### The `--json` output shape (KAN-434)
+### The `--json` / `--format toon` output shape (KAN-434)
 
-**`--json` always prints a JSON *object*, never a bare array** — `pandan list --json`
+**One table covers both structured formats**: `json` and `toon` serialize the *same*
+object, so the keys below are identical either way — only the syntax differs.
+
+**A structured result is always an *object*, never a bare array** — `pandan list --json`
 is `{"cards": [...]}`, so the `jq` filter is `.cards[]`, **not** `.[]`. The shape
 varies by verb, so pick the right key from this table:
 
-| Verb(s) | Top-level `--json` shape |
-|---------|--------------------------|
+| Verb(s) | Top-level shape |
+|---------|-----------------|
 | `list` | `{"cards": [<card>, …]}` — plus `"next_cursor": "<str>"` when more pages remain |
 | `activity` | `{"activity": [<event>, …]}` — plus `"next_cursor"` as above |
 | `board list` | `{"boards": [<board>, …]}` |
@@ -169,18 +220,19 @@ varies by verb, so pick the right key from this table:
 | `metrics`, `cycle metrics` | the **bare metrics object** (`board_id`, `throughput`, `cycle_time`, `aging_wip`, `by_assignee`; the cycle one is `committed`/`completed`/`velocity`/`burndown`) |
 | `config show` | the bare local-config object (`api_url`, `token` *(redacted)*, `board_id`, `config_file`, `mcp_json`) |
 
-Worked `jq` one-liners:
+Worked `jq` one-liners (`jq` wants JSON, so these use `--json`, not `toon`):
 
 ```bash
 pandan list --json | jq -r '.cards[] | "\(.ticket_number)\t\(.title)"'   # one line per card
 pandan list --json | jq '.cards | length'                                # count them
 pandan next --json | jq -r '.card.ticket_number // "none ready"'         # the envelope is "card"
-pandan get KAN-7 --json | jq -r .title                                   # single reads are BARE
+pandan get KAN-430 --json | jq -r .title                                 # single reads are BARE
 ```
 
-**Why the envelope, and why it won't be flattened.** `--json` is a deliberate
-verbatim passthrough of the client result — the CLI applies no reshaping of its own
-(see `_emit` in `pandan_cli/cli.py`). The **list** envelopes are added by the shared
+**Why the envelope, and why it won't be flattened.** Both structured formats are a
+deliberate verbatim passthrough of the client result — the CLI applies no reshaping of
+its own (see `_structured_payload` in `pandan_cli/cli.py`). The **list** envelopes are
+added by the shared
 [`pandan-client`](../pandan-client/): a raw `GET /api/v1/cards` returns a *bare array*
 and the client wraps it as `{"cards": [...]}` so out-of-band metadata has somewhere to
 live — `next_cursor` (the `X-Next-Cursor` keyset pagination header) already rides there,
@@ -188,9 +240,67 @@ and slice **V44 (KAN-427)** adds a `summary` field beside `cards`. So the envelo
 load-bearing: **don't "fix" it into a bare array** — that would break pagination and
 V44, and silently change a working contract for every existing consumer.
 
+### When to reach for `--format toon` (V47, KAN-430)
+
+`--format toon` prints the same object as `--json` in
+[TOON](https://toonformat.dev/) — a YAML-shaped, **key-deduplicating** syntax. An array
+of uniform objects declares its field names *once* in a header and then prints one
+comma-separated row per element, so `metrics`' 57-row `by_assignee` block stops paying
+for 57 copies of `{"assignee": …, "throughput": …, "wip": …}`:
+
+```console
+$ pandan metrics --format toon
+board_id: 5
+throughput: 63
+cycle_time:
+  count: 56
+  avg_seconds: 3574.783683714286
+aging_wip:
+  count: 3
+  items[3]{card_id,ticket_number,assignee,age_seconds}:
+    427,KAN-427,"agent:v44-aggregates",276.923511
+    442,KAN-442,"agent:cli-readme",272.891595
+    451,KAN-451,"agent:cli-readme",270.685508
+by_assignee[57]{assignee,throughput,wip}:
+  "agent:cli-ergonomics",4,0
+  "agent:cli-readme",0,2
+  …
+```
+
+**Reach for it when the payload is uniform nested rows; don't when it isn't.** Measured
+on the real Pandan Roadmap board in `o200k_base` tokens:
+
+| payload | `--json` | `toon` | Δ vs `--json` | Δ vs *compact* json |
+|---------|---------:|-------:|--------------:|--------------------:|
+| `metrics` | 2077 | 912 | **−56%** | −29% |
+| `activity --limit 50` | 6480 | 3729 | **−42%** | −24% |
+| `dep list` | 21 | 13 | **−38%** | 0% |
+| `epic list` (23 epics, with rollups) | 4814 | 3031 | **−37%** | −20% |
+| `get KAN-430` | 303 | 250 | −17% | **+2%** |
+| `list --limit 50` | 15533 | 14044 | −10% | **+12%** |
+
+Two honest caveats the table makes visible, and neither is a defect:
+
+1. **About half of the headline saving is just the missing pretty-printing.** `--json`
+   is indented by design (a human-diffable, published contract), so the fairer
+   comparison is the last column — against *compact* JSON. The tabular payloads still
+   win clearly there; the small ones don't.
+2. **TOON pays for uniform *rows*, not for objects or for ragged nesting.** A single
+   `get` is **worse than compact JSON (+2%)**, and the cards list is **worse (+12%)** —
+   its rows carry non-uniform nested arrays (`labels`, `blocked_by`, `links`), which
+   defeats the header trick. For a cards list the default `human`/`--fields` rows are
+   already key-free and remain the cheapest option of the three; that is exactly why
+   V47 did not move the default.
+
+So: `metrics`, `cycle metrics`, `activity`, `epic list`, and `template`/`view` reads
+are where it earns its keep. It is **encode-only** (`pandan_cli/toon.py`, stdlib only)
+— the CLI writes TOON for an agent to read and nothing in the product parses it back,
+so pipe TOON to a model, not to `jq`.
+
 Run `pandan --help`, `pandan <command> --help`, `pandan board --help`, or
 `pandan epic --help` for the full option list. `pandan --version` (or `-v`) prints the
-CLI version (e.g. `pandan 0.4.0`) and exits.
+CLI version **plus its build provenance** and exits — see
+[Is my `pandan` stale?](#is-my-pandan-stale).
 
 ### Errors: structured, on stdout (V43, KAN-426)
 
@@ -231,6 +341,19 @@ $ pandan list --board 11 --json
 
 ```bash
 out=$(pandan get "$ref" --json) || echo "failed: $(jq -r .error.code <<<"$out")"
+```
+
+**Errors follow `--format` too**, so a `--format toon` caller never gets a surprise JSON
+error — it's the same five keys in TOON:
+
+```console
+$ pandan get KAN-999999 --format toon
+error:
+  code: not_found
+  message: no card found with ticket KAN-999999
+  arg: KAN-999999
+  status: null
+  exit_code: 5
 ```
 
 **What still uses stderr:** only human extras that a machine shouldn't parse —
@@ -343,6 +466,21 @@ binary** (no Python needed). Both work today — pick whichever fits.
 Whichever you pick, `pandan --version` tells you **which build you are running**, not
 just a number — see [Is my `pandan` stale?](#is-my-pandan-stale) before reporting a bug.
 
+> **The `pdn` alias only comes from the `uv tool install` path (KAN-442).** `pdn` is a
+> `[project.scripts]` entry, and console scripts are generated by the *packaging*
+> installer — so `uv tool install`/`pip install` lay down both `pandan` and `pdn`, while
+> the PyInstaller `--onefile` release ships **exactly one executable per platform**
+> (`pandan-linux-x86_64`, `pandan-macos-arm64`). Binary users therefore get `pandan` and
+> no `pdn` until they make the alias themselves:
+>
+> ```bash
+> ln -sf ~/.local/bin/pandan ~/.local/bin/pdn   # one-liner; do this after any binary install
+> ```
+>
+> This asymmetry is documented rather than engineered away on purpose: a one-line symlink
+> beats an install script or a second frozen 20 MB binary. **Don't "fix" it by deleting
+> this note** — the note *is* the fix.
+
 ### From source (uv)
 
 The CLI depends on the sibling `pandan-client` package by **path**
@@ -353,8 +491,8 @@ the realistic source-install options.
 
 ```bash
 git clone https://github.com/leejianrong/pandan.git
-cd simple-kanban
-uv tool install ./pandan-cli        # installs `pandan` (and `pdn`) on your PATH
+cd pandan
+uv tool install ./pandan-cli        # installs BOTH `pandan` and `pdn` on your PATH
 ```
 
 `uv tool install` resolves the `../pandan-client` path source relative to the
@@ -382,8 +520,9 @@ uv run pandan --help                    # run without installing
 
 Each version ships a single self-contained executable — no Python needed (built with
 PyInstaller `--onefile`, which freezes the interpreter + `pandan_cli` + the bundled
-`pandan-client` + `httpx` into one file). The latest release is **v0.4.0**. Grab the
-asset for your OS/arch, mark it executable, and put it on your `PATH`.
+`pandan-client` + `httpx` into one file). Grab the asset for your OS/arch from the
+[latest release](https://github.com/leejianrong/pandan/releases/latest), mark it
+executable, and put it on your `PATH`.
 
 The `releases/latest/download/…` URL always resolves to the newest release's asset,
 so it needs no editing per version:
@@ -393,6 +532,7 @@ so it needs no editing per version:
 curl -L -o pandan https://github.com/leejianrong/pandan/releases/latest/download/pandan-linux-x86_64
 chmod +x pandan
 mv pandan ~/.local/bin/               # or: sudo mv pandan /usr/local/bin/ for system-wide
+ln -sf ~/.local/bin/pandan ~/.local/bin/pdn   # the `pdn` alias — the onefile ships only `pandan`
 pandan --help
 ```
 
@@ -400,7 +540,7 @@ On macOS (Apple Silicon), swap the asset for `pandan-macos-arm64`. If you have t
 GitHub CLI, `gh release download` pulls a pinned version instead:
 
 ```bash
-gh release download v0.4.0 --pattern pandan-linux-x86_64
+gh release download v0.7.0 --pattern pandan-linux-x86_64   # a pinned version
 ```
 
 Only two binaries ship: **`pandan-linux-x86_64`** and **`pandan-macos-arm64`** — browse them on the
@@ -473,6 +613,8 @@ pandan create "Wire up CI" --column todo --points 3
 pandan list --column in_progress
 pandan list --json | jq '.cards[].title'  # NB: .cards[], not .[] — see "The --json output shape"
 pandan get KAN-12 --json | jq -r .column  # single reads are a bare object, no envelope
+pandan metrics --format toon              # nested payload → TOON is ~56% cheaper than --json
+pandan notify list --unread               # your inbox: what needs a human
 pandan move 12 done
 pandan epic create "Onboarding" --description "New-user flow"
 pandan delete 12 --yes
