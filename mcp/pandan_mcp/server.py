@@ -21,6 +21,14 @@ grow. New board capability lands in the **CLI** first; adding a tool here means
 amending ADR 0019 and the pin in ``tests/test_schema.py``. See ``README.md``
 (*Why 49 tools, and why that is frozen*) for the reasoning and the numbers.
 
+**The read tools are shaped (KAN-501).** ADR 0019 measured one un-narrowed
+``list_cards`` against a real 121-card board at ~44,900 tokens — 5.1× the entire
+schema surface, in a single result — and found the cost is *field breadth*, not
+pretty-printing. So every read below takes ``fields`` (the keys to keep; ~-84% on
+that page) and truncates long free text with a true-total hint unless ``full=true``.
+Omit both and you get exactly what the API returned. See ``shaping.py``, and
+``scripts/measure_read_payload_tokens.py`` to re-run the numbers.
+
 Run with ``python -m pandan_mcp`` (or the ``pandan-mcp`` script); Claude Code
 launches it over stdio per the .mcp.json snippet in the README.
 """
@@ -33,6 +41,7 @@ from pandan_client import PandanClient
 
 from .config import load_config
 from .schema import compact_advertised_schemas
+from .shaping import shape
 
 Column = Literal["todo", "in_progress", "done"]
 Priority = Literal["none", "low", "medium", "high", "urgent"]
@@ -157,6 +166,8 @@ def list_cards(
     sort: str | None = None,
     limit: int | None = None,
     cursor: str | None = None,
+    fields: list[str] | None = None,
+    full: bool = False,
 ) -> dict[str, Any]:
     """List/query stories. ``board_id`` targets one board (defaults to
     PANDAN_BOARD_ID; omit both to span all your boards). Other filters (AND-ed):
@@ -175,8 +186,14 @@ def list_cards(
     an explicit ``sort`` overrides ``q`` ranking. Paginate with limit; if more results
     remain the response includes ``next_cursor`` to pass back as ``cursor`` (not
     available together with ``sort`` or ``q``).
+
+    **Pass ``fields``** — the keys to keep on each row, e.g.
+    ``["ticket_number","title","column","assignee"]`` (aliases: ticket, pts). A full
+    22-key page of a busy board costs ~9× a narrowed one; an unknown name errors and
+    lists the valid ones. Descriptions are cut to 500 chars with a
+    ``(truncated, N chars total …)`` hint — ``full=true`` returns them whole.
     """
-    return _client_instance().list_cards(
+    result = _client_instance().list_cards(
         board_id=_board(board_id),
         column=column,
         epic_id=epic_id,
@@ -193,19 +210,36 @@ def list_cards(
         limit=limit,
         cursor=cursor,
     )
+    return shape(result, fields=fields, full=full)
 
 
 @mcp.tool()
-def list_epics(board_id: int | None = None) -> dict[str, Any]:
+def list_epics(
+    board_id: int | None = None,
+    fields: list[str] | None = None,
+    full: bool = False,
+) -> dict[str, Any]:
     """List epics. ``board_id`` targets one board (defaults to PANDAN_BOARD_ID;
-    omit both to span all your boards)."""
-    return _client_instance().list_epics(board_id=_board(board_id))
+    omit both to span all your boards). ``fields`` narrows each row to those keys
+    (e.g. ``["ticket_number","name","progress"]``); descriptions are truncated with a
+    size hint unless ``full=true``."""
+    return shape(
+        _client_instance().list_epics(board_id=_board(board_id)),
+        fields=fields,
+        full=full,
+    )
 
 
 @mcp.tool()
-def get_card(card_id: int) -> dict[str, Any]:
-    """Fetch a single story by its numeric id."""
-    return _client_instance().get_card(card_id)
+def get_card(
+    card_id: int,
+    fields: list[str] | None = None,
+    full: bool = False,
+) -> dict[str, Any]:
+    """Fetch a single story by its numeric id. ``fields`` narrows the returned keys;
+    a long description is truncated with a size hint unless ``full=true`` (this
+    project's own cards run to ~3.4k characters)."""
+    return shape(_client_instance().get_card(card_id), fields=fields, full=full)
 
 
 @mcp.tool()
@@ -458,13 +492,18 @@ def add_comment(card_id: int, body: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def list_comments(card_id: int) -> dict[str, Any]:
+def list_comments(
+    card_id: int,
+    fields: list[str] | None = None,
+    full: bool = False,
+) -> dict[str, Any]:
     """List a story's notes (comments), oldest-first: ``{"comments": [...]}``. Each
     comment carries id, body, author_id, and created_at. Comments are not inlined on
     card reads (a card can accumulate many), so this is a dedicated read. Authorized
-    via the card's own board — no ``board_id`` needed.
+    via the card's own board — no ``board_id`` needed. ``fields`` narrows each row;
+    bodies are truncated with a size hint unless ``full=true``.
     """
-    return _client_instance().list_comments(card_id)
+    return shape(_client_instance().list_comments(card_id), fields=fields, full=full)
 
 
 # --- board labels (M5 V11 API / KAN-244 tools) ----------------------------
@@ -575,6 +614,7 @@ def metrics(
     board_id: int | None = None,
     since: str | None = None,
     window: str | None = None,
+    fields: list[str] | None = None,
 ) -> dict[str, Any]:
     """Report derived flow metrics for a board — throughput (cards done in the
     period), cycle time (first in_progress → done: avg/median/p90 seconds), aging
@@ -583,10 +623,15 @@ def metrics(
     + card timestamps; nothing is written. ``board_id`` targets one board (defaults
     to PANDAN_BOARD_ID). Bound the period with ``since`` (an ISO-8601 timestamp) or
     ``window`` (``7d`` / ``24h`` / ``30m``); omit both for all time. Authorized via
-    the board (you must be able to read it).
+    the board (you must be able to read it). ``fields`` narrows the report to whole
+    top-level sections (e.g. ``["throughput","cycle_time"]``) — the aging-WIP and
+    per-assignee sections grow with the board, so drop the ones you won't read.
     """
-    return _client_instance().board_metrics(
-        _require_board(board_id), since=since, window=window
+    return shape(
+        _client_instance().board_metrics(
+            _require_board(board_id), since=since, window=window
+        ),
+        fields=fields,
     )
 
 
@@ -597,6 +642,8 @@ def activity(
     cursor: str | None = None,
     actor: str | None = None,
     action: str | None = None,
+    fields: list[str] | None = None,
+    full: bool = False,
 ) -> dict[str, Any]:
     """Read a board's activity feed (KAN-18), newest-first — one row per successful
     create / update / delete / move of a card, epic or board. ``board_id`` targets
@@ -606,13 +653,19 @@ def activity(
     Paginate with ``limit``; if more rows remain the response includes
     ``next_cursor`` to pass back as ``cursor``. Authorized via the board (you must
     be able to read it). Returns ``{"activity": [...], "next_cursor"?: str}``.
+    ``fields`` narrows each row (e.g. ``["created_at","actor","action","summary"]``);
+    a row's ``summary`` sentence is truncated with a size hint unless ``full=true``.
     """
-    return _client_instance().list_activity(
-        _require_board(board_id),
-        limit=limit,
-        cursor=cursor,
-        actor=actor,
-        action=action,
+    return shape(
+        _client_instance().list_activity(
+            _require_board(board_id),
+            limit=limit,
+            cursor=cursor,
+            actor=actor,
+            action=action,
+        ),
+        fields=fields,
+        full=full,
     )
 
 
@@ -760,7 +813,11 @@ def delete_cycle(cycle_id: int, board_id: int | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
-def cycle_metrics(cycle_id: int, board_id: int | None = None) -> dict[str, Any]:
+def cycle_metrics(
+    cycle_id: int,
+    board_id: int | None = None,
+    fields: list[str] | None = None,
+) -> dict[str, Any]:
     """Report derived burndown / velocity metrics for a cycle/iteration (V34).
     Reports committed vs completed (stories + story points), velocity (completed
     points), and a per-day burndown of remaining work over the cycle's
@@ -768,8 +825,13 @@ def cycle_metrics(cycle_id: int, board_id: int | None = None) -> dict[str, Any]:
     from the cycle's card state + the activity feed; nothing is written.
     ``board_id`` targets one board (defaults to PANDAN_BOARD_ID). 404 if no such
     cycle is on that board; authorized via the board (you must be able to read it).
+    ``fields`` narrows the report to whole top-level sections — drop ``burndown`` if
+    you only want the velocity numbers, it is one row per day of the cycle.
     """
-    return _client_instance().cycle_metrics(_require_board(board_id), cycle_id)
+    return shape(
+        _client_instance().cycle_metrics(_require_board(board_id), cycle_id),
+        fields=fields,
+    )
 
 
 # --- V49: shrink what every session pays for the schemas above --------------
