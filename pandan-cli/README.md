@@ -118,6 +118,42 @@ before a batch of `pandan` calls so the wake cost is paid once. It needs **no
 until pandan warmup; do sleep 2; done   # block until the API is awake
 ```
 
+### Bare `pandan` shows you the board (V46, KAN-429)
+
+Running `pandan` with **no arguments** prints live, actionable state and exits **0** — not
+usage. You get which build and which executable is answering, one line on what the tool
+is, then the default board's open cards with [V44's aggregate](#aggregates-on-every-list-verb-v44-kan-427):
+
+```
+$ pandan
+pandan 0.12.0 (bd28cf0) — /home/jian/.local/bin/pandan
+Manage Pandan cards, boards, and epics from the command line. `pandan --help` for usage.
+https://simple-kanban-jian.fly.dev · board 5 · open cards (todo, in_progress):
+KAN-305	todo	(human) Cloudflare edge setup for prod…	pts=-
+…
+12 cards · 10 todo · 2 in_progress · 0 done · 2 needs-human
+help: pandan list --column todo
+help: pandan next --claim
+help: pandan get <id>
+```
+
+`--help` still prints the usage text, unchanged. With **no board configured** you get the
+board list instead; with **no token**, the usual [structured error](#errors-structured-on-stdout-v43-kan-426)
+rather than a stack trace. The `· 0 done` is correct rather than odd — the aggregate
+describes *the rows printed*, and this view is open cards only.
+
+**`help:` lines are templates, never pre-filled.** The placeholder is literal — you get
+`pandan move <id> in_progress`, not a guess at which card you meant. Fixed flags are
+carried forward, runtime values are left for you. They're suppressed under `--json` and
+`--format toon`, since a structured consumer wants data, not advice. Every hint is tested
+to actually parse against the real parser, which is how a long-standing invalid example
+(`comment add <id> "…"` — the body is `--body`) was caught.
+
+Because a bare invocation makes a network call and this project's backend scales to zero,
+the overview runs on a tighter budget than other verbs (~40 s ceiling rather than the
+client's ~71 s) and prints a waiting notice on a tty only, so a redirected or piped run
+stays clean.
+
 ### Output formats: `human` (default) · `json` · `toon`
 
 Every command takes **`--format {human,json,toon}`** (V47, KAN-430):
