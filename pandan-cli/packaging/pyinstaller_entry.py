@@ -5,7 +5,7 @@ PyInstaller freezes a *script*, not a module, so it can't be pointed at
 (``from .cli import run``) which fails once it is executed as the top-level
 ``__main__`` with no parent package. This tiny launcher imports the console
 entry point *absolutely* and calls it, which is exactly what the ``pandan``
-console-scripts (``pandan``/``pdn`` = ``pandan_cli.__main__:main``) do.
+console-script (``pandan`` = ``pandan_cli.__main__:main``) does.
 """
 from __future__ import annotations
 
