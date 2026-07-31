@@ -383,6 +383,12 @@ def test_compaction_leaves_output_schemas_untouched():
             "third field (KAN-518) decided NOT to compact outputSchema — reversing "
             "that is an ADR amendment, not a cleanup."
         )
-        # ...and the compaction rule itself is unchanged: applied to this schema it
-        # *would* strip the title, which is precisely why the scoping is the guard.
-        assert compact_schema(tool.outputSchema) != tool.outputSchema
+        # ...and the assertion above is not vacuous: the compaction rule *would*
+        # strip this title if it were ever pointed at outputSchema. Scoping is the
+        # only thing holding it back, which is exactly what makes it a decision
+        # guard. If compact_schema stops being title-stripping, this half goes red
+        # and the guard above stops meaning anything.
+        assert compact_schema(tool.outputSchema) != tool.outputSchema, (
+            f"{tool.name}: compact_schema no longer changes this outputSchema, so "
+            "the guard above passes vacuously — the compaction rule itself moved"
+        )
