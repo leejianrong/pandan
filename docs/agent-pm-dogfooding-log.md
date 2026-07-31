@@ -2194,3 +2194,92 @@ The honest caveat the agent volunteered: this PR touches both `scripts/git-hooks
 **cannot itself** demonstrate the hook-only case empirically — the `ci.yml:74-84` filter config is the
 evidence, not this run. That is exactly the isolate-the-variable discipline the PM got wrong last stage,
 applied unprompted by an agent.
+
+#### KAN-519 (PR #244): the reported bug had already been fixed, and the audit is what paid
+
+**The card's headline claim was false, and it was false by exactly one slice.** KAN-519 says
+`template apply` falls through `_humanize` to raw `json.dumps` because its `{"created": [...]}` envelope
+is not in `_LIST_ENVELOPES`. Verified against `main` before landing: `created` has been in
+`_LIST_ENVELOPES` (`cli.py:1013`) **and** `_CARD_ENVELOPES` (`:1029`) since **KAN-502**, which added it
+for `batch-create`'s identical envelope. `template apply` has printed card rows plus a V44 aggregate
+since that slice landed — one card before KAN-519 was filed.
+
+The agent did not quietly rewrite anything. `template apply` is untouched and gains a regression test
+pinning what it already does, "so the card's claim can never become true by accident".
+
+**The class audit the card demanded found the family's real live instance.** `update_cards` returns
+`{"updated": [<CardRead>, …]}` (`pandan-client/pandan_client/client.py:696`, `PATCH /cards/batch`,
+`response_model=list[CardRead]`), and `updated` was in **no** table — so `pandan batch-update` printed
+indented JSON with no `--json` asked for and no aggregate. Reachable only by enumerating the class,
+which is precisely the reason the card gave for existing. *Generalisable, and sharper than the usual
+form: **the audit clause outlived the bug report.** A card whose specific claim rots can still be worth
+running if it also asks you to enumerate the class — and this is the third consecutive instance of that
+family found by enumeration rather than by report.*
+
+**A hand-written list is what let three instances ship, so the guard is a scanner.**
+`test_every_returned_envelope_key_is_classified` reads the keys **out of the client's source** with
+`ast`, over all 54 public `PandanClient` methods, and asserts every one is either a known list envelope
+or an explicitly classified non-envelope — set **equality**, so a stale exemption fails too. A new client
+method returning `{"restored": [...]}` now fails on the PR that adds it.
+
+**And the scanner is proved sound before anything is concluded from it**, which is the KAN-502 lesson
+applied one level deeper. `test_the_scanner_actually_found_the_shapes_it_claims_to` pins the **exact key
+sets** of five specific methods rather than a count, covering all three shapes the AST walk must handle
+— a dict literal at the `return`, a dict built into a local first, and a key added by subscript
+(`result["next_cursor"] = …`) — plus the passthrough it must ignore. A walk that quietly stopped seeing
+any one of them fails there, naming it, instead of turning the audit into a tautology. *Generalisable:
+when your guard is a scanner, the non-emptiness proof should pin **shapes**, not a count — a count only
+proves the walk found something, not that it found the hard cases.*
+
+**A second card claim died on contact: `--fields` is not free.** KAN-519 asserted that a card envelope
+"also gets `--fields` support and truncation for free, since both now dispatch on `_list_envelope`".
+Truncation genuinely is free — V45 cuts at `_structured_payload`, which no verb knows about. `--fields`
+is **not**: the flag is declared per-subparser by `_add_fields_arg`, and `batch-create`, `batch-update`
+and `template apply` all lack it, so the renderer would serve a projection nobody can request. The agent
+declined to widen three parsers inside a fix PR — the KAN-478-out-of-V44 precedent — and recorded it in
+the test docstring. Filed as **KAN-583**.
+
+#### KAN-517 (PR #245): the measurement overturned the card's own example
+
+The card set the discipline explicitly — *do not shape for symmetry; measure first, and shape only where
+the payload justifies ~+80 resident tokens* — and then offered "a board list" as its example of a payload
+too small to bother with. **Measured, `list_boards` is 1,157 tokens over 8 boards, 5.8× the card's own
+200-token bar, and 84% removable** (six of a board row's ten keys are autosync/webhook settings a
+discovery call never reads). The agent followed the measurement over the prior and shaped it — `fields`
+only, no `full`, because a board row carries no free text. *Generalisable: a card that tells you to
+measure instead of assuming can still contain an assumption. Its examples are priors, not data.*
+
+The headline finding was elsewhere entirely. **`list_notifications` measured 14,326 tokens over 127 rows
+— 1.8× the entire resident tool surface, in one result** — because `GET /notifications`
+(`backend/app/routers/notifications.py:32-44`) takes **no `limit` and returns no cursor**, so it hands
+back the caller's whole history and only ever grows. Narrowed to `["id","kind","body"]` it is 4,658
+(−67%). That is the same shape as V49's central finding (`list_cards` at ~45k) and it had been sitting
+one tool over.
+
+**Six of the nine stayed raw, and that is the deliverable too.** `next`, `dispatch`, `list_labels`,
+`list_views`, `list_templates` and `list_cycles` measured **7–474 tokens** against the real account. Two
+of the refusals are reasoned rather than merely small: `dispatch` is a **mutation**, so shaping it would
+open a category KAN-501 never opened — and shaping only its read-only twin `next` would manufacture a
+fresh `next`/`dispatch` asymmetry of exactly the kind this card exists to remove.
+
+Net resident **7,940 → 8,162 (+222)**. One narrowed inbox read repays it 43×.
+
+**The asymmetry fix is pinned as an equality, which is the part worth copying.**
+`test_get_epic_and_list_epics_agree_about_the_same_epic` asserts the two reads return *the same string*,
+not that `get_epic` truncates — an equality cannot drift apart in either direction. And because an
+equality is satisfiable by both sides going wrong together, it is backed by
+`assert fetched != EPIC["description"]`: the agreed-on value must really be the truncated one. That is a
+blind guard closed at design time rather than found by mutation.
+
+**Eight mutations, all red** — including three that guard the *decision* rather than the code: adding
+`fields` to `get_epic`, adding `fields` to `next`, and accepting a `fields` argument without wiring it
+through. That last shape is the KAN-475 lesson ported into a different medium: an argument the schema
+advertises and the handler ignores is a capability that lies, and it fails no test unless you write one.
+The agent also volunteered an honest caveat — under the mutation that unshapes `get_epic`,
+`test_get_epic_full_returns_the_epic_completely_untouched` stays green, correctly, because it guards a
+different property; a second mutation exists for that one.
+
+**A third gap in the card's enumeration.** The "nine unshaped reads" list — carried in both the card and
+`mcp/README.md` — omits `get_board` (140 tokens) and `list_dependencies` (21). Both far below the bar, so
+no action, but the published list was never complete. Third M7 instance of a **count** being wrong after
+48-vs-49 tools and `BoardUpdate`'s six fields.
