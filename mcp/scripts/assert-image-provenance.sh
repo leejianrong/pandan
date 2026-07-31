@@ -13,7 +13,10 @@
 # the assertion the labels are merely present, not non-regressible.
 #
 # The CI gate runs this BEFORE the push (the image is built with `load: true`
-# first), so an image that can't identify itself is never published.
+# first), so an image that cannot identify itself is never published.
+#
+# Depends on nothing but bash + docker — no jq — so a user can run it against an
+# image they pulled to answer "is my image stale?" (see mcp/README.md).
 #
 # Usage:
 #   mcp/scripts/assert-image-provenance.sh <image-ref> <expected-revision> [expected-version]
@@ -50,26 +53,40 @@ echo "image:              $ref"
 echo "expected revision:  $expected_revision"
 echo "expected version:   ${expected_version:-<not checked>}"
 
-if ! labels=$(docker image inspect "$ref" --format '{{json .Config.Labels}}' 2>/dev/null); then
+# One `key=value` line per label. `range` over a nil map (a label-less image)
+# yields nothing rather than erroring, which is exactly the case the gate exists
+# to catch, so it must not blow up here.
+if ! label_lines=$(docker image inspect "$ref" \
+    --format '{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}
+{{end}}' 2>/dev/null); then
   echo "::error::image '$ref' is not in the local docker daemon — build it with 'load: true' (CI) or 'docker pull' it first"
   exit 1
 fi
-# A label-less image inspects as JSON null; normalise so jq below still works
-# and the missing-label branch produces the real diagnostic.
-if [ "$labels" = "null" ] || [ -z "$labels" ]; then
-  labels='{}'
-fi
 
 echo "OCI labels carried by the image:"
-printf '%s' "$labels" | jq -S . || true
+if [ -n "${label_lines//[[:space:]]/}" ]; then
+  printf '%s\n' "$label_lines" | grep -v '^[[:space:]]*$' | sort | sed 's/^/  /'
+else
+  echo "  (none)"
+fi
 
+# First `<key>=` line wins; the value is everything after the first `=`.
 label_of() {
-  printf '%s' "$labels" | jq -r --arg k "$1" '.[$k] // ""'
+  local key="$1" line
+  while IFS= read -r line; do
+    case "$line" in
+      "$key="*)
+        printf '%s' "${line#"$key"=}"
+        return 0
+        ;;
+    esac
+  done <<<"$label_lines"
+  return 0
 }
 
 failed=0
 
-revision=$(label_of "$REV_LABEL")
+revision="$(label_of "$REV_LABEL")"
 if [ -z "$revision" ]; then
   echo "::error::$ref carries no $REV_LABEL label — the image cannot say which commit built it. Is 'labels: \${{ steps.meta.outputs.labels }}' still wired into the build step?"
   failed=1
@@ -81,11 +98,11 @@ else
 fi
 
 if [ -n "$expected_version" ]; then
-  # Independent of metadata-action: derived from the git tag by the caller, so
-  # this catches a mis-wired tag/label mapping and not just a missing label.
+  # Independent of metadata-action: the caller derives this from the git tag, so
+  # it catches a mis-wired tag/label mapping and not merely a missing label.
   # (Assumes the repo's `vX.Y.Z` tag convention — a deliberately non-semver tag
   # would trip this, which is the intended "stop and look" outcome.)
-  version=$(label_of "$VER_LABEL")
+  version="$(label_of "$VER_LABEL")"
   if [ -z "$version" ]; then
     echo "::error::$ref carries no $VER_LABEL label — the image cannot say which release it is"
     failed=1
@@ -97,7 +114,7 @@ if [ -n "$expected_version" ]; then
   fi
 fi
 
-created=$(label_of "$CREATED_LABEL")
+created="$(label_of "$CREATED_LABEL")"
 if [ -z "$created" ]; then
   echo "::error::$ref carries no $CREATED_LABEL label — the image cannot say when it was built"
   failed=1

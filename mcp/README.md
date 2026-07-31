@@ -190,6 +190,15 @@ its job summary, so you never have to hunt for it. If a `docker inspect` shows a
 `revision` you don't recognise, `git log -1 <revision>` tells you exactly how far
 behind you are — that is the whole point of the labels.
 
+The gate script is also the one-liner for *"is my pulled image my checkout?"* —
+it needs only bash + docker:
+
+```bash
+mcp/scripts/assert-image-provenance.sh \
+  ghcr.io/leejianrong/pandan-mcp:latest "$(git rev-parse HEAD)"
+# exit 0 → the image was built from this commit; exit 1 → it wasn't, and it says so
+```
+
 > **Why keep `:latest` at all?** It was worth asking (KAN-452): the lesson from
 > the CLI was that a build must be able to **identify itself**, not that floating
 > tags are forbidden. With the labels and the release gate, `:latest` *is*
