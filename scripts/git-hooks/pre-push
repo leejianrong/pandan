@@ -22,11 +22,18 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 zero="0000000000000000000000000000000000000000"
 
-# Resolve a stable base ref for new branches / stdin-less fallbacks.
+# Resolve a stable base ref for new branches / stdin-less fallbacks. Track
+# whether it resolved at all: an unresolvable base and a branch that simply adds
+# nothing beyond the base both yield an empty branch range, and they need
+# opposite treatment (KAN-484 — see the fail-safe note below).
+base_resolved=1
 if git rev-parse --verify -q origin/main >/dev/null; then
   base_ref="origin/main"
+elif git rev-parse --verify -q main >/dev/null; then
+  base_ref="main"
 else
   base_ref="main"
+  base_resolved=0
 fi
 
 # Compute the set of files changed by the push. A pre-push hook gets
@@ -107,10 +114,16 @@ fi
 changed="$(printf '%s\n' "$changed" | sed '/^$/d' | sort -u)"
 branch_changed="$(printf '%s\n' "$branch_changed" | sed '/^$/d' | sort -u)"
 
-# Fail safe, not open: in a clone with neither `origin/main` nor `main` the
-# branch range comes back empty. Fall back to the incremental set so the policy
-# is still evaluated on *something* rather than silently skipped.
-if [ -z "$branch_changed" ]; then
+# Fail safe, not open: in a clone with neither `origin/main` nor `main` the branch
+# range comes back empty, which would silently skip the policy. Fall back to the
+# incremental set so it is still evaluated on *something*.
+#
+# Gated on `base_resolved` on purpose. An empty branch range with a *resolvable*
+# base means something different — the tip is already an ancestor of the base, so
+# the branch adds nothing to police, and CI would compute the same empty diff and
+# skip its step too. Falling back there would re-open exactly the KAN-484 bug in
+# that corner, so don't.
+if [ "$base_resolved" -eq 0 ] && [ -z "$branch_changed" ]; then
   branch_changed="$changed"
 fi
 

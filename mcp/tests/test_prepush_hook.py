@@ -327,3 +327,54 @@ def test_test_selection_stays_incremental_while_the_policy_goes_branch_wide(scra
     assert "backend: ruff + unit tests" in result.stdout
     # Policy: branch-wide — still evaluated, and satisfied by the earlier bump.
     assert "version bump present" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# The fail-safe when the branch range can't be computed. Two empty-range causes
+# that need opposite treatment, which is why the hook tracks `base_resolved`.
+# ---------------------------------------------------------------------------
+
+
+def test_policy_falls_back_to_the_push_when_no_base_ref_exists(scratch):
+    """No `main` and no `origin/main`: policy over nothing would fail OPEN."""
+    scratch.git("switch", "-q", "-c", BRANCH)
+    scratch.git("update-ref", "-d", "refs/remotes/origin/main")
+    scratch.git("branch", "-q", "-D", "main")
+
+    first = scratch.commit("docs: notes", {"docs/notes.md": "more notes\n"})
+    tip = scratch.commit(
+        "feat: cli change, no bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n"},
+    )
+    # No base means no branch range at all — confirm that, so this test can't
+    # pass by accidentally still having one.
+    for ref in ("refs/heads/main", "refs/remotes/origin/main"):
+        probe = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", ref],
+            cwd=scratch.path,
+            capture_output=True,
+            text=True,
+        )
+        assert probe.returncode != 0, f"{ref} still exists: {probe.stdout}"
+    assert_version_guard_fired(scratch.push(tip, first))
+
+
+def test_a_tip_already_merged_into_the_base_is_not_policed(scratch):
+    """The other empty-range cause. CI computes the same empty diff and skips.
+
+    Falling back to the push range here would re-open KAN-484 in this corner, so
+    the fallback is gated on the base ref being genuinely unresolvable.
+    """
+    scratch.git("switch", "-q", "-c", BRANCH)
+    first = scratch.commit("docs: notes", {"docs/notes.md": "more notes\n"})
+    tip = scratch.commit(
+        "feat: cli change, no bump",
+        {"pandan-cli/pandan_cli/cli.py": "def main():\n    return 1\n"},
+    )
+    # main (and origin/main) now contain the branch tip.
+    scratch.set_origin_main(tip)
+    assert scratch.git("merge-base", "refs/remotes/origin/main", tip) == tip
+
+    result = scratch.push(tip, first)
+    assert_passed(result)
+    assert "the version did not" not in result.stdout
