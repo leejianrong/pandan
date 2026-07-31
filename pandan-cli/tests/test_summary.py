@@ -295,8 +295,13 @@ def test_epic_rollup_spread_sums_the_returned_epics_child_stories():
 
 
 def test_notification_read_unread_split_totals_the_rows():
+    """A sums-to-count assertion alone is a **blind guard** — `unread = 0` satisfies it
+    (mutation-tested). So pin the split itself against the rows' `read_at`."""
     _, result, _ = POPULATED["notify list"]
     _, summary = cli._summary_for(result)
+    rows = result["notifications"]
+    assert summary["unread"] == sum(1 for n in rows if not n["read_at"]) == 2
+    assert summary["read"] == sum(1 for n in rows if n["read_at"]) == 1
     assert summary["unread"] + summary["read"] == summary["count"]
 
 
@@ -384,10 +389,18 @@ def test_an_empty_result_prints_its_definitive_zero_state(monkeypatch, capsys, v
 @pytest.mark.parametrize("verb", VERBS)
 def test_an_empty_result_keeps_its_prose_zero_state_too(monkeypatch, capsys, verb):
     """The pre-V44 ``(no cards)`` line is the AXI 5 promise and must survive the
-    aggregate landing beneath it — asserted separately so a regression names itself."""
+    aggregate landing beneath it — asserted separately so a regression names itself.
+
+    The obvious spelling of this (``_humanize(result) in out``) is a **blind guard**:
+    it passes for a humanizer that returns the empty string, because ``"" in out`` is
+    always true. Mutation-tested. So assert the prose exists, is non-empty, and comes
+    FIRST — above the aggregate, where a reader meets it."""
     argv, result, _ = EMPTY[verb]
     out = run_capture(monkeypatch, capsys, argv, result)
-    assert cli._humanize(result) in out
+    prose = cli._humanize(result).splitlines()
+    assert prose and all(line.strip() for line in prose)
+    assert out.splitlines()[: len(prose)] == prose
+    assert len(out.splitlines()) == len(prose) + 1  # exactly one aggregate line
 
 
 # --- 4. structured formats carry a `summary` object, not a trailing line -----
