@@ -2322,3 +2322,177 @@ written down** — `uv run python -m pandan_cli board update --help` shows all f
 `pandan board __nope__` enumerates `list, get, create, update, delete`, which is how `board get` was
 confirmed rather than assumed. That is the invalid-choice trick from stage 7 used for its intended
 purpose: never document a command you have not watched the parser accept.
+
+#### KAN-518 (PR #247): the decision was *not to*, and the argument is structural
+
+The card's three steps — measure, decide whether the headline should include it, only then consider
+compacting — were followed in order, and the interesting outcome is at each of the last two.
+
+**The measurement: 836 compact tokens for all 49 `outputSchema` objects**, 1,277 at `indent=2`; a client
+forwarding all four fields pays 9,145 rather than the headline's 8,162. The row settles something the PM
+had asserted on reasoning and can now assert on data: **836 / 179 / 17 across 49 / 11 / 1 tools is a flat
+~17 tokens per tool**, because the object's size does not depend on the signature. Argument-adding slices
+— KAN-501, KAN-517, and the KAN-529 change running concurrently with this one — cannot move it at all.
+Only the freeze can.
+
+**Decision 1: keep it out of the headline, with evidence instead of a shrug.** Whether `outputSchema`
+reaches the *model's* context is client-dependent, and the concrete fact is that **the Anthropic Messages
+API tool definition has no `output_schema` field** — so a client bridging MCP to that API has nowhere to
+put it and pays zero, while an MCP-native client forwarding the whole definition pays all 836. No single
+headline is true for both, which is the same reason ADR 0019 already brackets compact against `indent=2`.
+The real defect was never the missing number: **it was that the omission was silent**, so a reader had no
+way to know the field existed. It no longer is.
+
+**Decision 2: do not compact — and V49's safety argument does not transfer, structurally.** This is the
+finding worth keeping. V49 could rewrite `inputSchema` because advertised and validating are *separate
+objects* (`Tool.parameters` vs `fn_metadata.arg_model`) **and** FastMCP registers with
+`validate_input=False`, so the lowlevel `jsonschema.validate` never fires. For `outputSchema` **neither
+half holds**, verified by the PM independently in the installed SDK: `Tool.output_schema` is a
+`cached_property` returning `self.fn_metadata.output_schema` — *the same dict object, not a copy* — and
+`lowlevel/server.py` runs `jsonschema.validate(instance=…, schema=tool.outputSchema)` on **every** tool
+result, gated only on the schema being non-None, with no `validate_output` opt-out. The advertised copy
+*is* the live one. Declining ≤346 tokens rather than mutate a request-path object is the right trade, and
+it is pinned by a test that goes red **if a future SDK separates them** — the signal to re-read the
+decision rather than relax the test.
+
+*Generalisable: "the same class of artefact" is an argument about the DATA. Whether it is safe to rewrite
+is an argument about the OBJECT GRAPH, and the two can diverge for two fields of the same tool.*
+
+**The best guard in the PR is the one that proves the other guard isn't vacuous.**
+`test_compaction_leaves_output_schemas_untouched` asserts the title survives — which would pass trivially
+if `compact_schema` stopped stripping titles at all. So the same test also asserts
+`compact_schema(tool.outputSchema) != tool.outputSchema`: the compaction rule *would* strip it if pointed
+here, and scoping is the only thing holding it back. Six mutations, all red; the last one's failure read
+`<no message>`, and *reading that output* produced a second commit adding one.
+
+**One card claim died, and it is a trap for whoever reopens this.** The generated titles are **not**
+derived from the registered tool name — Pydantic names the model after the *function*, so the tool
+registered as `next` (function `next_ready`) advertises **`next_readyDictOutput`**. A guard asserting
+`f"{tool.name}DictOutput"` would be wrong for exactly 1 of 49.
+
+**And the ADR correction went wider than the sentence it was sent to fix.** Instructed to grep the whole
+file rather than the paragraph, the agent found **two more** present-tense stale assertions beyond the
+one it was pointed at — `Context` §1's "the whole 49-tool surface costs 8,775" and the option-(b)
+fairness paragraph's "today's 8,775". Sixth instance of the milestone's recurring lesson, and the second
+time the *whole-file grep specifically* is what caught it.
+
+#### KAN-513 (PR #248): the deploy card, and the hole it found on the way
+
+**The decision was partial on purpose.** Bound `uv` to the `0.12` series; leave `node:22-slim` and
+`python:3.12-slim` floating; document all three at the top of the Dockerfile. The argument is that the
+three inputs are not equivalent: `3.12` and `22` are upstream *compatibility lines* that promise a
+language version and self-update for security patches — the property that matters most for an
+internet-facing deploy — whereas `:latest` on a **pre-1.0** tool makes no version promise at all. `:0.12`
+is the coarsest bound astral publishes (there is no `:0` tag — checked), and today it resolves to the
+same digest as `:latest`, so the bound cost the image nothing.
+
+**The agent argued against its own change in the file, which is why the change is trustworthy.** Building
+this exact Dockerfile against `uv:0.5` — seven minor series back — installs the same 51 packages from
+`backend/uv.lock` with no error. So the bound is *not* a prediction that minors break; it is insurance
+against the one unbounded event `:latest` cannot exclude, uv 1.0 landing on an ordinary Tuesday and
+taking the next deploy, possibly a hotfix. That counter-evidence is written into the Dockerfile beside
+the decision.
+
+**A green mutation, correctly classified as a false belief and acted on.** The `uv:0.5` build *was* the
+mutation, and it came back green — but discriminating, because the image then reported `uv 0.5.31`, so
+the tag genuinely selects the binary. It falsified the agent's own draft claim that "a too-old uv fails
+loudly", which was removed and replaced with the measurement. *Generalisable: a green mutation that
+changes what you WRITE is doing its job as surely as a red one that changes what you ship.*
+
+**Both of the card's dead claims confirmed dead, and the second one got further than the PM did.**
+`flyctl deploy --help` shows it accepts **both** `--build-arg` *and* `--label` — so *more* of the MCP
+pattern is portable than the PM's framing said. The assert half still has nowhere to live, and the agent
+gave three reasons rather than one: `flyctl deploy --remote-only` is a **single** build (the MCP workflow
+resolves digests up front precisely because it builds *twice*, so with one build there is nothing to make
+consistent); there is no gate step; and **nobody pulls this image**, so there is no consumer for the
+claim — Fly already records the deployed digest per release. *Generalisable: "why does this pattern
+exist" is a better question than "does this pattern apply", and it can reject a port that a
+capability check would have approved.*
+
+**The finding that outlived the card: CI never builds this file.** `.github/workflows/ci.yml` contains
+**zero** references to `Dockerfile`; it matches no paths filter, including the `app` union. `deploy.yml`'s
+filter *does* match it. So a Dockerfile-only change reports green CI **having run nothing**, and then
+ships to production. PR #248 is itself the proof, and the evidence isolates the variable: it changed only
+`./Dockerfile` and `.github/dependabot.yml`, and the per-step conclusions show `Lint (ruff)` →
+`Skip (no backend changes)` with checkout, `Install uv` and `Ruff lint` never running — 3–5s jobs, 13
+green checks, no work done. **The PM therefore did not trust CI on this one**: built the image locally and
+verified `uv 0.12.0`, Python 3.12.13, Debian 13.6, `/app/static/{index.html,assets}` and alembic 1.18.5
+before merging. Carded as **KAN-584**.
+
+*Generalisable: this is a fifth shape of "guard with no watcher", and the first that is not a guard at
+all — it is a **build input with no guard**. The previous four were guards that failed to run; this is a
+file whose only validation happens after the merge, in production.*
+
+Prod-verified after the deploy on the merge SHA: `/api/health` and `/api/health/live` both `200 ok`, SPA
+`200` with its hashed bundle serving 480,144 bytes, `/docs` `200`, and an authenticated read **and write**
+round-trip (moving KAN-513 itself to `done` was the write).
+
+#### KAN-526 (PR #251): the deferral reason was true about the wrong function
+
+The card was explicitly revisitable and "leave it, documented" was pre-authorised. The agent fixed it,
+and the reason it could is the finding.
+
+**The coupling the card priced out was never on the table.** The card deferred because suppression would
+require `_emit` to know whether a hint is "about rows", and `_emit` is deliberately a printer that never
+learns which verb ran — a property V44/V45/V46/V47 all lean on. That is all true, **and the deciding fact
+is one call frame up**: `run()` already holds both the parsed namespace *and* the result, and hints are
+already assembled there by `_hint_lines(args)`. Passing the result to `_hint_lines` puts the predicate
+where the hints are built; `_emit` still receives a finished `list[str]`. Its **code is byte-identical to
+`main`** — only its docstring changed, because the old text said hints come "from the parsed namespace"
+and that would now be a lie. *Generalisable: before pricing a coupling, check the CALLER. A property that
+is genuinely load-bearing for one function does not constrain the frame that calls it.*
+
+**The card's enumeration was one short, and the missing case is the worst one.** The card asks about
+`overview`, "the other aggregate-bearing hinted verb". There is a third: `pandan next` on a drained board
+prints `(no card ready)` and then `help: pandan move <id> in_progress`. It is not aggregate-bearing, so it
+fell outside the card's framing — and it has **no aggregate after it**, so the dead hints are the last
+thing the caller reads, in the state an agent polling the board hits most often. Nothing in the card was
+falsified; its frame just did not reach the case.
+
+**The rule is structural, which is what makes the per-verb answer fall out for free.** A template carrying
+the `<id>` slot takes its referent *from the result*, so a result naming no entity drops it and keeps
+everything else. No hint-table split, no per-hint predicate list. The card worried the answer "may differ
+per verb and should not be a blanket rule" — and it does differ, automatically: an empty `overview` keeps
+`pandan list --column todo` and `pandan next --claim` (the two hints an empty board actually wants) and
+drops only `pandan get <id>`.
+
+**`_names_no_entity` is an enumeration of the empty shapes, not a falsiness test**, and the docstring says
+why: every other hinted verb returns exactly one entity that is never "empty", so a general truthiness
+check is how a hint would silently vanish from a verb that should have one.
+
+**Six mutations, all red, and two of them are controls rather than checks.** Mutation 2 (drop *always*
+fires) reddened 50 tests including all 13 params of "a populated result still prints the whole hint
+table" — the anti-blanket control. Mutation 3 (drop *all* hints on empty, not just the `<id>` ones)
+reddened **exactly one** test, the "not a blanket rule" guard, and nothing else — a precision result that
+tells you the guard is aimed at exactly the property it claims. Mutation 2 also reddened the empty-drop
+test's own *populated precondition*, which is the non-vacuity proof doing its job.
+
+#### Stage 8 closing counts
+
+**Seven cards, seven implementer PRs, four PM docs commits, `v0.19.1` → `v0.22.0`** across three batches,
+landing strictly serialized. No version collision this stage — the floors held because landing order
+matched assignment order, which is the first time that has happened while running three agents.
+
+- **Falsified spec claims: 6 this stage, M7 total 15.** Two before any agent spawned (both in KAN-513's
+  card), and four on contact: KAN-523's mechanism (`base_ref` already fell back to a local `main`),
+  KAN-519's entire headline (already fixed by KAN-502, one card earlier), KAN-529's "the client needs
+  nothing" (it whitelists), and KAN-518's title-derivation (function name, not tool name). Plus two
+  *incomplete* enumerations that falsified nothing but missed the best case — KAN-517's nine unshaped
+  reads were eleven, and KAN-526's two hinted verbs were three.
+- **Blind guards found: 0.** For the first time in the milestone, not one mutation came back green as a
+  blind test. Two came back green as **false beliefs** and both were acted on rather than papered over
+  (KAN-513's "a too-old uv fails loudly"; KAN-517's `full`-only mutation staying green because it guards
+  a different property, which the agent volunteered rather than hid). The milestone total stays at ten.
+- **Three doc claims were already false before the stage began**, all found by grepping rather than
+  reading: `CLAUDE.md`'s "**every** read tool takes `fields` + `full`" (KAN-501 shaped seven; six stay raw),
+  `mcp/README.md`'s unshaped-reads list (named three tools KAN-517 had just shaped, omitted two it never
+  contained), and ADR 0019's two remaining present-tense `8,775`s. *The whole-file grep has now caught a
+  stale claim on three separate occasions; reading the paragraph you were pointed at has caught none.*
+- **Cards filed from findings: 2** — KAN-583 (`--fields` is declared per-subparser, so three
+  card-bearing verbs render a projection nobody can request) and KAN-584 (CI never builds the root
+  Dockerfile).
+- **`v0.19.1` is the latest tag** (cut at the end of stage 7, the first since `v0.12.0`), so this stage
+  leaves **three** unreleased bumps: `0.20.0`, `0.21.0`, `0.22.0`. The tag stays discretionary and was
+  not cut — but the consequence is the familiar one: KAN-519's `batch-update` fix, KAN-529's autosync
+  flags and KAN-526's hint suppression reach a user only on a build that contains them, and
+  `pandan --version` on a released binary will read `0.19.1` while source reads `0.22.0`.
