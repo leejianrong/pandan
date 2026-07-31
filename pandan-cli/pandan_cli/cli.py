@@ -33,7 +33,7 @@ from typing import Any
 
 from pandan_client import PandanApiError, PandanClient
 
-from . import __version__
+from . import build_info
 from .config import (
     DEFAULT_API_URL,
     Config,
@@ -1072,12 +1072,15 @@ def build_parser() -> argparse.ArgumentParser:
     # `pandan --version` / `-v`: pure argparse action=version — prints to stdout and
     # exits 0 before the required subcommand is enforced. No importlib.metadata
     # lookup, so it works in the frozen PyInstaller onefile binary too.
+    # The string also carries the *build provenance* (V50, KAN-435): a released
+    # binary prints the commit it was frozen from, a source run says so outright,
+    # so a stale install is detectable rather than silently identical to source.
     parser.add_argument(
         "-v",
         "--version",
         action="version",
-        version=f"pandan {__version__}",
-        help="print the CLI version and exit",
+        version=build_info.version_string(),
+        help="print the CLI version + build commit and exit",
     )
     # A shared parent so --json works before OR after the subcommand
     # (e.g. `pandan --json list` and `pandan list --json` both parse).
@@ -1089,7 +1092,10 @@ def build_parser() -> argparse.ArgumentParser:
         # SUPPRESS so an absent subcommand-level --json does not clobber a global
         # `pandan --json <cmd>` already parsed by the main parser below.
         default=argparse.SUPPRESS,
-        help="print the raw JSON from the API (for piping, e.g. | jq)",
+        help=(
+            "print the raw JSON from the API (for piping, e.g. | jq). List verbs return "
+            'the API envelope, not a bare array: `list --json | jq \'.cards[]\'`'
+        ),
     )
     parser.add_argument(
         "--json",
