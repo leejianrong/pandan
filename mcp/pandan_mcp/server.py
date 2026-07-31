@@ -858,3 +858,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# (scratch: verifying CI paths-filter — this branch is not for merge)
