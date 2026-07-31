@@ -394,6 +394,24 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   and the runner's interpreter excludes subcommand invocations from that measure where the local ones
   include them, so the column lands one space narrower and `batch-update`'s help wraps onto its own
   line. Every word was identical. A byte pin there would have pinned the interpreter, not this CLI.
+  > **Superseded in part by KAN-492 (v0.18.0).** Three of this section's claims no longer describe
+  > the code, and they are left above because the *reasoning* is still the record of why V46 shipped
+  > as it did:
+  > 1. **`overview` is no longer unlisted.** The "registered with no `help=` kwarg" mechanism above is
+  >    exactly what KAN-492 reversed; the verb now appears in `--help`.
+  > 2. **The golden is no longer only a captured-from-`main` artefact.** It has since been
+  >    *deliberately regenerated*, so "the guard cannot be a restatement of the new code" holds for the
+  >    original capture but is no longer what protects it. That job now belongs to
+  >    `test_no_top_level_verb_is_hidden_from_help`, which asserts the property directly — every verb
+  >    argparse *accepts* is one `--help` *lists* (`sub._choices_actions == sub.choices`) — so
+  >    "regenerate the golden" can never again mean "hide the thing that changed".
+  > 3. **AXI-10 was a one-slice regression guard, not a permanent freeze.** Treating it as permanent
+  >    is what cost this slice its flagship hint and shipped a working verb undiscoverable. It is now a
+  >    change-detector.
+  >
+  > The interpreter-vs-CLI byte-pin lesson **stands unchanged** and is the durable finding here.
+  > Note for future verbs: the current widest invocation is `batch-update` (12 chars), so a longer one
+  > reflows the whole help block and produces a large golden diff — mechanical churn, not damage.
 - **The bare call is bounded** (a scale-to-zero deploy is the normal case, not an edge case). The
   shared client's defaults — 35 s read + one retry after a 1 s backoff
   ([client.py:36-39](../../pandan-client/pandan_client/client.py)) — are a ~71 s worst case, right for
@@ -502,6 +520,19 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
     than editing `~/.claude/skills/…` directly, which is exactly how KAN-434's out-of-repo half went
     unshipped. A locally modified skill is never clobbered without `--force-skill` and never deleted
     by `uninstall`.
+    > **Extended by KAN-505 (v0.17.0), which the dual-homing immediately made necessary.** Comparing
+    > the installed copy against *the build you invoked* meant an untouched file reported
+    > `locally modified` whenever your `pandan` was merely a release behind — and that pointed at the
+    > destructive fix, since `locally modified` is the state that invites `--force-skill`, which would
+    > then have downgraded the skill. The installed copy turned out to carry **no provenance at all**,
+    > so the direction was genuinely undecidable; rather than guess, `install` now writes an inert
+    > build stamp (a trailing HTML comment — *not* frontmatter, which is the harness's metadata
+    > contract) and `status` distinguishes a stale **binary** from an edited **skill**, reporting
+    > `locally modified` only when version *and* commit match, i.e. the one case that proves a hand
+    > edit. Copies installed before that landed are unstamped forever and say so instead of claiming a
+    > direction. Comparisons run on the stamp-stripped body, so the stamp itself can't make an
+    > untouched file look edited — which would have turned `uninstall`'s "never delete a modified
+    > skill" promise into "never delete anything".
   - **Unconfigured** (`PANDAN_BOARD_ID` or `PANDAN_TOKEN` missing) is read as a no-op *plus* a clear
     message *plus* `exit 1` with the `config` error code: config is resolved before the settings path
     is even opened, so the file is provably never created, and an installer that exits 0 without
