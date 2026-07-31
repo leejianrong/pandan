@@ -23,8 +23,15 @@
 # would silently produce an UNWATCHED pin — which looks maintained and isn't. The
 # MCP image instead resolves both inputs to digests at release time and records
 # them as labels its release gate asserts; see the KAN-475 section of
-# mcp/README.md. The repo-root Dockerfile floats the same inputs and is tracked
-# separately as KAN-513.
+# mcp/README.md.
+#
+# KAN-513 answered the same question for the repo-root Dockerfile and reached the
+# same place by a different route: it keeps `node:22-slim` / `python:3.12-slim`
+# floating and merely BOUNDS the uv ref to the `0.12` series (a moving tag, not a
+# digest), so there is still nothing here for a `docker` ecosystem to bump. It
+# deliberately does NOT copy the MCP image's build-arg/label provenance, because
+# `flyctl deploy --remote-only` gives that pattern nowhere to assert the labels.
+# The reasoning lives at the top of ./Dockerfile.
 version: 2
 updates:
   # --- Python (uv projects) ----------------------------------------------------
