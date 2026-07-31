@@ -46,6 +46,23 @@ still a string) and ``--full`` restores every body everywhere. A **single** ``ge
 also now prints that description at all, which it never did before: it used to be a
 one-line summary, so the body was invisible without ``--json``.
 
+**A bare ``pandan`` shows state, not usage** (V46, KAN-429 — AXI 8). With no verb at
+all it prints its own identity (version + build provenance + the exact executable to
+re-invoke), a one-sentence description, and then the **default board's open cards**
+with V44's aggregate — exit **0**. No default board configured → the board list (the
+content you need to pick one). No token → V43's structured config error, same as any
+other verb. ``--help`` still prints the usage text, byte-for-byte unchanged (AXI 10),
+because the bare branch is an argv **allow-list** (``_is_bare_invocation``): anything
+that isn't "no verb, at most the global output flags" reaches argparse untouched.
+
+**Results carry ``help[]`` next-step hints** (V46, KAN-429 — AXI 9): a ``help: pandan
+move <id> in_progress`` line per plausible next step, printed after the result.
+They are **templates** — a fixed flag is carried forward (``--board 7``), every
+runtime value stays parameterised (``<id>``, ``"…"``, ``N``) — and they are
+suppressed under ``--format json``/``toon``. Hints attach to the *decision-point*
+verbs only, never to a list verb, whose last stdout line is V44's aggregate and a
+published ``tail -1`` contract (see ``_HINTS``).
+
 Failures are **structured and on stdout** (V43, KAN-426 — AXI 6): one tab-separated
 row ``error<TAB><code><TAB><message><TAB><arg>`` (``-`` when no single argument is at
 fault), or the same object serialized under ``--format json``/``toon``. stdout is the
@@ -71,6 +88,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import sys
 from collections.abc import Sequence
 from typing import Any
@@ -398,6 +416,7 @@ def _emit(
     fields: list[str] | None = None,
     full: bool = False,
     limit: int = DEFAULT_MAX_TEXT_CHARS,
+    hints: list[str] | None = None,
 ) -> None:
     """Print a command result in ``fmt`` — the CLI's single output chokepoint.
 
@@ -416,10 +435,12 @@ def _emit(
     line it deliberately is **not** suppressed for structured consumers; the flag is
     their escape hatch instead.
 
-    **V46 (KAN-429)** hangs its ``help[]`` next-step hints off the human branch
-    below — after the ``_humanize`` line and *inside* the ``else``, which is what
-    "suppressed under ``--json``/``--format toon``" means mechanically. Put them
-    **after** the V44 summary line, so the aggregate stays the last *data* line.
+    ``hints`` are V46's ``help[]`` next-step templates (KAN-429), printed here and
+    **only** on the human branch — after the ``_humanize`` line and *inside* the
+    ``else``, which is what "suppressed under ``--json``/``--format toon``" means
+    mechanically — and after the V44 summary line, so the aggregate stays the last
+    *data* line. They are built by ``_hint_lines`` from the parsed namespace, so this
+    function stays a printer and never has to know which verb ran.
     """
     if fmt in STRUCTURED_FORMATS:
         print(_render_structured(_structured_payload(result, full=full, limit=limit), fmt))
@@ -432,6 +453,8 @@ def _emit(
     found = _summary_for(result)
     if found is not None:
         print(_summary_line(*found))
+    for line in hints or ():
+        print(line)
 
 
 def _humanize(
@@ -454,6 +477,19 @@ def _humanize(
     comment/notification line's ``body``; and a ``--fields`` projection of a
     free-text column. List *rows* never grow a description block — a hundred-card
     `list` must stay a hundred lines."""
+    # The content-first overview (V46, KAN-429). Matched FIRST so it can't be
+    # pre-empted by the `cards`/`boards` branch below, then delegated straight back
+    # here for the inner payload — the banner is the only thing this branch renders,
+    # so open cards and the no-board board list both print exactly as their own verb
+    # would. `tool` is the CLI's own key; no API payload has one.
+    if isinstance(result, dict) and "tool" in result:
+        inner = {key: value for key, value in result.items() if key != "tool"}
+        return "\n".join(
+            (
+                _tool_banner(result["tool"]),
+                _humanize(inner, noun=noun, fields=fields, limit=limit),
+            )
+        )
     if fields:
         projected = _project_rows(result, fields, limit=limit)
         if projected is not None:
@@ -1217,6 +1253,209 @@ def _summary_line(kind: str, summary: dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
+# --- next-step hints (V46, KAN-429 — AXI 9) ---------------------------------
+# Contextual disclosure: a result says what the *plausible next command* is, so the
+# caller doesn't have to go read `--help` to find out. Three rules make this a
+# feature rather than noise:
+#
+# * **A hint is a template, never a filled-in command.** Runtime values stay
+#   parameterised — `<id>`, `"…"`, `N` — because a template teaches the shape of the
+#   next call, while a pre-filled `pandan move 412 in_progress` invites executing a
+#   mutation nobody chose. It is also the only honest rendering after a *set* of
+#   rows, where there is no single id to fill. Pinned by a test that asserts both
+#   that the placeholder survives AND that no identifier from the result leaked in.
+# * **Fixed flags are carried forward.** Exactly one: an explicit `--board <n>`,
+#   substituted into the `{board}` slot of the templates that accept it. A board
+#   that resolved from `PANDAN_BOARD_ID` is deliberately NOT carried — the next
+#   command resolves it the same way, so spelling it out would be noise. Only
+#   templates carrying the `{board}` slot are board-scoped, so a hint can never
+#   grow a flag its verb doesn't accept.
+# * **Decision-point verbs only — never a list verb.** A list verb's last stdout
+#   line is V44's aggregate, and the parser epilog promises exactly that ("Every
+#   list verb ends with a pre-computed aggregate"), i.e. `tail -1`. Appending hints
+#   there would break a published contract for the verbs whose next step is already
+#   obvious from the rows. Hints go where the next step is genuinely ambiguous: a
+#   single entity, a mutation's receipt, and the bare overview — which is the one
+#   aggregate-bearing verb with hints, and can afford them because it ships in this
+#   same slice with no prior `tail -1` contract to break.
+HINT_PREFIX = "help:"
+
+# The slot an explicit ``--board`` is substituted into. Plain ``str.replace``, not
+# ``str.format`` — the templates are full of ``"…"`` and ``<id>`` and must never
+# depend on brace escaping.
+_HINT_BOARD_SLOT = "{board}"
+
+_HINTS: dict[str, tuple[str, ...]] = {
+    "overview": (
+        "pandan list --column todo{board}",
+        "pandan next --claim{board}",
+        "pandan get <id>",
+    ),
+    "get": ("pandan move <id> in_progress", 'pandan comment add <id> --body "…"'),
+    "create": ("pandan move <id> in_progress", "pandan update <id> --points N"),
+    "update": ("pandan get <id>",),
+    "move": ('pandan comment add <id> --body "…"', "pandan move <id> done"),
+    "next": ("pandan move <id> in_progress", 'pandan needs-human <id> --note "…"'),
+    "needs-human": ("pandan resolve <id>",),
+    "resolve": ("pandan move <id> done",),
+    "comment add": ("pandan comment list <id>",),
+    "board create": (
+        "pandan config set --board-id <id>",
+        'pandan create "<title>" --board <id>',
+    ),
+    "epic create": ('pandan create "<title>" --epic <id>{board}',),
+}
+
+
+def _hint_lines(args: argparse.Namespace) -> list[str]:
+    """The ``help[]`` lines for this invocation — empty for a verb with no hints.
+
+    Read off the namespace (each hinted subparser ``set_defaults(hints=…)``), so the
+    templates live in one table next to each other rather than at their raise sites."""
+    templates: tuple[str, ...] = getattr(args, "hints", ()) or ()
+    if not templates:
+        return []
+    # `is not None` and not truthiness: `--board 0` is not a real board id, but the
+    # distinction that matters here is "the caller named a board on the command line".
+    board = getattr(args, "board", None)
+    carried = f" --board {board}" if board is not None else ""
+    return [f"{HINT_PREFIX} {t.replace(_HINT_BOARD_SLOT, carried)}" for t in templates]
+
+
+# --- the content-first bare invocation (V46, KAN-429 — AXI 8) ----------------
+# `pandan` with no verb used to print argparse's usage on stderr, one
+# `error<TAB>usage<TAB>…` row on stdout, and exit 2 — a front door that answered a
+# question nobody asked. It now shows live state and exits 0.
+
+# The one-sentence "what is this" — shared with the parser's own ``description`` so
+# the banner and ``--help`` can't drift.
+TOOL_DESCRIPTION = "Manage Pandan cards, boards, and epics from the command line."
+
+# The verb the bare invocation is rewritten to. Registered as a real (if unlisted)
+# subcommand so `pandan overview` names the same code path and is testable by name.
+OVERVIEW_COMMAND = "overview"
+
+# "Open" = every column that isn't the terminal one, derived from COLUMNS so a new
+# board column (a cheap varchar + CHECK, see CLAUDE.md) counts as open by default
+# instead of silently vanishing from the front door.
+OPEN_COLUMNS = tuple(column for column in COLUMNS if column != "done")
+
+# Cards fetched in the overview's single request. One call, not one per column: the
+# API filters by a single `column`, and a second round trip on the command a human
+# types to "just look" is not worth the wall clock. A board bigger than this reports
+# its keyset cursor rather than paginating.
+OVERVIEW_FETCH_LIMIT = 200
+
+# Per-attempt timeout for that one request, with the client's cold-start retry
+# backoff dropped (see ``_client_options``).
+OVERVIEW_TIMEOUT = 20.0
+
+
+def _tool_identity(config: Config) -> dict[str, Any]:
+    """What this tool *is*, for the banner and for the structured payload.
+
+    ``executable`` is how to re-invoke **this** pandan (``context._self_argv``: the
+    frozen binary, or ``<python> -m pandan_cli``), never a ``pandan`` found on
+    ``$PATH`` — a stale one there has already caused two false bug reports on this
+    project, and AXI 8's ask for "the executable path" is precisely about being able
+    to tell which build answered."""
+    return {
+        "name": "pandan",
+        "version": build_info.version_string(),
+        "executable": shlex.join(context._self_argv()),
+        "description": TOOL_DESCRIPTION,
+        "api_url": config.api_url,
+    }
+
+
+def _tool_banner(tool: dict[str, Any]) -> str:
+    """The three human lines above the rows: identity, purpose, and what view this is.
+
+    The third line is load-bearing, not decoration — the rows below it are the *open*
+    subset of one page, so a reader who assumes "this is the board" would be wrong."""
+    lines = [
+        f"{tool['version']} — {tool['executable']}",
+        f"{tool['description']} `pandan --help` for usage.",
+    ]
+    board = tool.get("board_id")
+    if board is None:
+        lines.append(f"{tool['api_url']} · no default board configured · your boards:")
+    else:
+        lines.append(
+            f"{tool['api_url']} · board {board} · open cards "
+            f"({', '.join(OPEN_COLUMNS)}):"
+        )
+    return "\n".join(lines)
+
+
+def _announce_wait(config: Config) -> None:
+    """Tell a human at a terminal that we're about to wait on a possibly-sleeping API.
+
+    On **stderr** only, and only when stderr is a tty: stdout is the machine channel,
+    and a script or an agent capturing it must never find this line in its data. It
+    exists because the alternative bound — failing fast — is the wrong trade for the
+    one command someone types when they want to *see* something (see
+    ``_client_options`` for the bound that is applied)."""
+    if not getattr(sys.stderr, "isatty", lambda: False)():
+        return
+    print(
+        f"contacting {config.api_url} … (a scaled-to-zero deploy can take ~30s to wake)",
+        file=sys.stderr,
+    )
+
+
+def _cmd_overview(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """The bare invocation's content: identity + the default board's open cards.
+
+    Two shapes, one call each. With a board: the open rows of one page, so V44's
+    aggregate below them counts **the rows actually printed** (the filter is applied
+    here, not in ``_emit``, precisely so that invariant holds — a count of 42 over 17
+    printed rows would be a number the reader can't reconcile). The page's
+    ``next_cursor`` is carried through unchanged, so "there are more" is still said
+    out loud. Without a board: the board list, because that is the content a caller
+    with no default board actually needs, and it costs the same single request."""
+    _announce_wait(config)
+    tool = _tool_identity(config)
+    board = _resolve_board(args.board, config)
+    if board is None:
+        return {"tool": {**tool, "board_id": None}, **client.list_boards()}
+    page = client.list_cards(board_id=board, limit=args.limit)
+    cards = [
+        card
+        for card in (page.get("cards") or [])
+        if isinstance(card, dict) and card.get("column") in OPEN_COLUMNS
+    ]
+    return {
+        "tool": {**tool, "board_id": board},
+        "cards": cards,
+        "next_cursor": page.get("next_cursor"),
+    }
+
+
+_BARE_OK_FLAGS = frozenset({"--json", "--full"})
+
+
+def _is_bare_invocation(argv: list[str]) -> bool:
+    """True when argv names no command at all — at most the global output flags.
+
+    Deliberately an **allow-list**, not "no positional found": every argv outside it
+    (a verb, ``-h``, ``--version``, an unknown flag, a typo) reaches argparse exactly
+    as it did before this slice, so the new branch cannot change the behaviour of any
+    invocation that already worked. ``--json``/``--full``/``--format`` are admitted
+    because they say how to render, not what to do — ``pandan --format toon`` is
+    still a bare invocation."""
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token in _BARE_OK_FLAGS or token.startswith("--format="):
+            index += 1
+        elif token == "--format" and index + 1 < len(argv):
+            index += 2
+        else:
+            return False
+    return True
+
+
 # --- board resolution -------------------------------------------------------
 
 
@@ -1940,7 +2179,8 @@ class ErrorContractParser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = ErrorContractParser(
         prog="pandan",
-        description="Manage Pandan cards, boards, and epics from the command line.",
+        # Shared with the bare invocation's banner (V46) so the two can't drift.
+        description=TOOL_DESCRIPTION,
         epilog=(
             "Configuration keys (api_url / token / board_id), resolved per value in\n"
             "this order — first non-empty wins:\n"
@@ -2050,7 +2290,30 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
 
+    # ``required=True`` is load-bearing for AXI 10: it is what keeps the usage line
+    # reading ``<command> ...`` rather than ``[<command> ...]``, so ``--help`` stays
+    # byte-identical. The bare invocation therefore cannot come from argparse — it is
+    # an argv rewrite in ``run()`` (``_is_bare_invocation``) instead.
     sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
+
+    # The content-first bare invocation (V46, KAN-429 — AXI 8): `pandan` with no verb
+    # is rewritten to `pandan overview` in ``run()``. Registered **without** a
+    # ``help=`` kwarg on purpose — argparse only lists a subcommand in ``--help``
+    # when one is given (it builds the pseudo-action from `if 'help' in kwargs`), and
+    # AXI 10 asks for that text to stay byte-identical, so the verb is unlisted. It
+    # is still a real command: `pandan overview` is the same code path, which is what
+    # makes the front door testable by name and scriptable without a naked `pandan`.
+    p_overview = sub.add_parser(OVERVIEW_COMMAND, parents=[common])
+    p_overview.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_overview.add_argument(
+        "--limit", type=int, default=OVERVIEW_FETCH_LIMIT, help="max cards to fetch"
+    )
+    p_overview.set_defaults(
+        func=_cmd_overview,
+        hints=_HINTS[OVERVIEW_COMMAND],
+        # A tighter transport budget than the shared default — see ``_client_options``.
+        client_timeout=OVERVIEW_TIMEOUT,
+    )
 
     # ``warmup`` pings the public /api/health to wake a scaled-to-zero Fly+Neon
     # deploy before a batch of work (handy as a CI pre-step). It needs no token
@@ -2114,7 +2377,7 @@ def build_parser() -> argparse.ArgumentParser:
         "card_id", type=_id_or_ticket_arg, metavar="CARD",
         help="a card id or KAN-<n> ticket",
     )
-    p_get.set_defaults(func=_cmd_get)
+    p_get.set_defaults(func=_cmd_get, hints=_HINTS["get"])
 
     p_create = sub.add_parser("create", parents=[common], help="create a card")
     p_create.add_argument("title")
@@ -2140,7 +2403,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--label", type=int, action="append", metavar="LABEL_ID",
         help="attach a label by id (repeatable)",
     )
-    p_create.set_defaults(func=_cmd_create)
+    p_create.set_defaults(func=_cmd_create, hints=_HINTS["create"])
 
     p_update = sub.add_parser("update", parents=[common], help="edit a card's fields")
     p_update.add_argument(
@@ -2167,7 +2430,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--label", type=int, action="append", metavar="LABEL_ID",
         help="replace the card's labels with these ids (repeatable; omit to leave unchanged)",
     )
-    p_update.set_defaults(func=_cmd_update)
+    p_update.set_defaults(func=_cmd_update, hints=_HINTS["update"])
 
     p_move = sub.add_parser("move", parents=[common], help="move a card to a column")
     p_move.add_argument(
@@ -2176,7 +2439,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_move.add_argument("column", choices=COLUMNS)
     p_move.add_argument("--position", type=int, help="index within the column (default: append)")
-    p_move.set_defaults(func=_cmd_move)
+    p_move.set_defaults(func=_cmd_move, hints=_HINTS["move"])
 
     p_delete = sub.add_parser("delete", parents=[common], help="delete a card")
     p_delete.add_argument(
@@ -2202,7 +2465,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_next.add_argument(
         "--priority", choices=PRIORITIES, help="only cards at this priority or higher"
     )
-    p_next.set_defaults(func=_cmd_next)
+    p_next.set_defaults(func=_cmd_next, hints=_HINTS["next"])
 
     # --- needs-human handoff (M5 V13, KAN-246) -------------------------------
     p_needs_human = sub.add_parser(
@@ -2213,7 +2476,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="a card id or KAN-<n> ticket",
     )
     p_needs_human.add_argument("--note", help="an optional note describing the ask")
-    p_needs_human.set_defaults(func=_cmd_needs_human)
+    p_needs_human.set_defaults(func=_cmd_needs_human, hints=_HINTS["needs-human"])
 
     p_resolve = sub.add_parser(
         "resolve", parents=[common], help="clear a card's needs-human flag"
@@ -2222,7 +2485,7 @@ def build_parser() -> argparse.ArgumentParser:
         "card_id", type=_id_or_ticket_arg, metavar="CARD",
         help="a card id or KAN-<n> ticket",
     )
-    p_resolve.set_defaults(func=_cmd_resolve)
+    p_resolve.set_defaults(func=_cmd_resolve, hints=_HINTS["resolve"])
 
     # --- fleet reporting / metrics (M5 V17, KAN-250) -------------------------
     p_metrics = sub.add_parser(
@@ -2301,7 +2564,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_board_create = board_sub.add_parser("create", parents=[common], help="create a board")
     p_board_create.add_argument("name")
-    p_board_create.set_defaults(func=_cmd_board_create, noun="board")
+    p_board_create.set_defaults(
+        func=_cmd_board_create, noun="board", hints=_HINTS["board create"]
+    )
 
     # --- epic subcommands (nested group; parity with /api/v1/epics) ----------
     p_epic = sub.add_parser("epic", help="manage epics (list / create / update / delete)")
@@ -2323,7 +2588,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="a target/ship date (ISO-8601 timestamp)",
     )
     p_epic_create.add_argument("--lead", help="a free-text owner (person/agent handle)")
-    p_epic_create.set_defaults(func=_cmd_epic_create, noun="epic")
+    p_epic_create.set_defaults(
+        func=_cmd_epic_create, noun="epic", hints=_HINTS["epic create"]
+    )
 
     p_epic_update = epic_sub.add_parser("update", parents=[common], help="edit an epic's fields")
     p_epic_update.add_argument(
@@ -2675,7 +2942,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="a card id or KAN-<n> ticket",
     )
     p_comment_add.add_argument("--body", required=True, help="the note text (non-empty)")
-    p_comment_add.set_defaults(func=_cmd_comment_add)
+    p_comment_add.set_defaults(func=_cmd_comment_add, hints=_HINTS["comment add"])
 
     p_comment_list = comment_sub.add_parser(
         "list", parents=[common], help="list a card's notes, oldest-first"
@@ -2754,12 +3021,40 @@ def _resolve_format(args: argparse.Namespace) -> str:
     return FORMAT_JSON if getattr(args, "as_json", False) else FORMAT_HUMAN
 
 
+def _client_options(args: argparse.Namespace) -> dict[str, Any]:
+    """Per-verb transport overrides for the shared client — empty for every verb but
+    the bare overview (V46, KAN-429), so nothing else changes shape.
+
+    ``PandanClient`` defaults to a **35 s** read timeout plus one retry after a
+    **1 s** backoff (``pandan-client/pandan_client/client.py:36-39``), i.e. a ~71 s
+    worst case. That is the right trade for batch work against a scale-to-zero
+    deploy, and the wrong one for the single command a human types when they just
+    want to see the board. The overview halves the ceiling by shortening each attempt
+    and dropping the backoff: **two back-to-back ~20 s attempts ≈ 40 s**, which still
+    spans an observed ~30-40 s Fly cold wake (attempt 1 times out while the machine
+    boots; attempt 2 lands on it awake), while a genuinely dead host still fails at
+    the short connect timeout. Failing *faster* than that was rejected on purpose: a
+    front door that reports a transport error on a sleeping board is a front door the
+    caller just runs again, having learned nothing (``_announce_wait`` says what
+    we're waiting for instead). The retry itself is not disable-able from here —
+    ``retry_backoff=0`` only removes its sleep."""
+    timeout = getattr(args, "client_timeout", None)
+    if timeout is None:
+        return {}
+    return {"timeout": timeout, "retry_backoff": 0.0}
+
+
 def run(argv: Sequence[str] | None = None) -> int:
     """Parse args, dispatch, print, and return an exit code (no ``sys.exit``).
 
     Every failure funnels through ``_print_error``: one structured row on **stdout**
     plus the exit code its machine code maps to (V43, KAN-426)."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    # Content first (V46, KAN-429 — AXI 8): no verb → show state, not usage.
+    # **Prepended**, never appended: a trailing `--format` with no value must still
+    # fail argparse's own way ("expected one argument"), not as an invalid choice.
+    if _is_bare_invocation(raw_argv):
+        raw_argv = [OVERVIEW_COMMAND, *raw_argv]
     # An argparse failure is itself a structured error, and it happens before there is
     # a parsed namespace to read the format from — so seed the render mode from argv.
     _set_error_format(_format_from_argv(raw_argv))
@@ -2786,7 +3081,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         return _print_error(CliError(str(exc), code="config"), fmt=fmt)
 
     try:
-        with PandanClient(config.api_url, config.token) as client:
+        with PandanClient(config.api_url, config.token, **_client_options(args)) as client:
             result = args.func(client, config, args)
     except Exception as exc:
         # CliError (delete without --yes, an unresolvable ticket …), PandanApiError
@@ -2808,6 +3103,8 @@ def run(argv: Sequence[str] | None = None) -> int:
             # from the flag — so a whole session can be widened once, or one call.
             full=getattr(args, "full", False),
             limit=config.max_text_chars,
+            # V46 (KAN-429): the next-step templates for this verb, human-only.
+            hints=_hint_lines(args),
         )
     except CliError as exc:
         return _print_error(exc, fmt=fmt)

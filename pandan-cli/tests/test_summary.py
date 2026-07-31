@@ -234,6 +234,15 @@ def run_capture(monkeypatch, capsys, argv, result) -> str:
     monkeypatch.setattr(cli, "PandanClient", lambda *a, **k: FakeClient(result))
     assert cli.run(argv) == cli.EXIT_OK
     return capsys.readouterr().out
+def without_hints(out: str) -> str:
+    """``out`` minus V46's ``help:`` next-step lines (KAN-429), which ``_emit`` appends
+    after the result on the decision-point verbs (``get``/``create``/``move``/…).
+
+    Applied at the assertion site and deliberately **not** inside ``run_capture``:
+    every "stdout still parses as JSON/TOON" check in this suite must stay able to
+    catch a hint leaking into a structured format. The hints themselves are pinned in
+    ``tests/test_content_first.py``."""
+    return "".join(f"{line}\n" for line in out.splitlines() if not line.startswith(cli.HINT_PREFIX))
 
 
 # --- 1. every list verb ends with its aggregate -----------------------------
@@ -490,7 +499,7 @@ def test_a_non_list_result_gets_no_aggregate(monkeypatch, capsys, name):
     assert cli._summary_for(result) is None
     out = run_capture(monkeypatch, capsys, argv, result)
     assert "·" not in out
-    assert out == cli._humanize(result, noun="card") + "\n"
+    assert without_hints(out) == cli._humanize(result, noun="card") + "\n"
     # …and no `summary` key sneaks into the structured rendering either.
     structured = run_capture(monkeypatch, capsys, [*argv, "--json"], result)
     assert "summary" not in json.loads(structured)
