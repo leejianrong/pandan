@@ -35,7 +35,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 | **V46 · Content-first + disclosure** ✅ | bare command, `help[]` | A5 | 2 | KAN-429 | Bare `pandan` prints live board state and exits 0; results carry `help[]` next-step templates |
 | **V47 · TOON** | `--format toon` for nested payloads | A6 | 2 | KAN-430 | `pandan get KAN-304 --format toon` returns the same data as `--json`, materially cheaper |
 | **V48 · Ambient context** ✅ | session hook + packaged skill | A7 | 2 | KAN-431 | A fresh agent session already knows the open cards without calling anything |
-| **V49 · MCP right-sizing** *(tail)* | measure, decide, ADR, execute | A8 | 3 | KAN-432 | The MCP schema token cost is measured and published; the chosen surface is an ADR and is live |
+| **V49 · MCP right-sizing** *(tail)* | measure, decide, ADR, execute | A8 | 3 | KAN-432 | The MCP schema token cost is measured and published; the chosen surface is an ADR and is live — *measurement + ADR 0019 landed; the freeze is Phase 2* |
 
 > **Correction (2026-07-31, after the plan was first written).** The AXI audit's headline finding —
 > "the CLI prints identifiers it will not accept" — was an artefact of a **stale installed binary**.
@@ -512,6 +512,29 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   deploy (a new ghcr image publish).
 - **Notes:** deliberately last. Deciding what MCP can shed requires the CLI to *already* be
   AXI-conformant, or the comparison is against a worse baseline.
+
+> **Phase 1 landed (measure + decide + ADR); Phase 2 (execute) is the freeze.**
+> [ADR 0019](../adr/0019-mcp-surface-right-sizing.md) records it; the harness is
+> [`mcp/scripts/measure_tool_schema_tokens.py`](../../mcp/scripts/measure_tool_schema_tokens.py).
+> Confirmed **49 tools**, resident cost **8,775 `o200k_base`** tokens compact (12,825 pretty-printed —
+> the plan's ~10,076 sits inside that bracket). Options measured on the same yardstick, with (a) and (b)
+> built through FastMCP so the serializer is identical: **(a)** 11 entity tools + an `action` arg =
+> 4,338 (−51%); **(b)** one exec-`pandan` tool = 387 (−96%).
+>
+> **Two of this slice's premises were falsified, and they flip the answer.** (1) The CLI is **not** at
+> full parity — parity runs MCP ⊇ CLI; `pandan board` has only `list`/`create`, so `update_board` and
+> `delete_board` are unreachable from the CLI (the packaged skill already documents this under a
+> contradictory bolded "full parity" claim), and `claim_card`/`create_cards` lose atomicity and batching.
+> Removing tools would therefore be a silent ADR-0005 parity regression. (2) The resident cost is the
+> *small* half: a single `list_cards` against the real 121-card board returns **~45k tokens**, 5× the
+> entire schema surface, because the MCP adapter never got V42/V45/V47's payload shaping. Per-task the
+> CLI is 11.4× cheaper on real reads — the card's conclusion, for a different reason than the card gives.
+>
+> **Decision: (c)** — keep the breadth as the documented fallback, freeze its growth, and take the free
+> 16% (1,429 tokens of Pydantic `title`/`anyOf` serializer artefact) with no rename or removal.
+> Filed as follow-ups because that is where the tokens are: a `fields` argument on the MCP read tools
+> (~−84% on a real read) and closing the four CLI gaps (which is also what would make option (b)
+> available later).
 
 ---
 
