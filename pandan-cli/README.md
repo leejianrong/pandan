@@ -167,6 +167,17 @@ Every command takes **`--format {human,json,toon}`** (V47, KAN-430):
   `grep`/`cut`. Every **list** verb also takes `--fields` to widen that row on demand
   (below). Being key-free, it is already the cheapest list output — which is why V47
   left it as the default.
+  > **One row is one line — guaranteed** (KAN-485). Every cell holding free text (a card
+  > `title`, a comment or notification `body`, an activity `summary`, a link `label`/`url`,
+  > a board/epic/label/view/cycle/template `name`, an error message) has its tabs, newlines
+  > and carriage returns collapsed to single spaces, so a list verb's output line count
+  > always equals its row count and `cut -f<n>` cannot land in the middle of a body. The
+  > default row and `--fields` share **one** flattening rule, so they cannot drift — before
+  > KAN-485 they had, and `comment list --fields body` was safe while `comment list` was not.
+  > Flattening runs *before* [truncation](#content-truncation-v45-kan-428) and is
+  > length-preserving, so the size hint's total stays the true original length.
+  > Two deliberate exceptions: a saved view's `query` (already escaped by `json.dumps`) and
+  > the multi-line `description:` block of a single-entity read, which is prose by design.
 - **`json`** — the API's raw response, indented, for piping:
   `pandan list --format json | jq`.
 - **`toon`** — the *same* object in [TOON](https://toonformat.dev/), which prints a
