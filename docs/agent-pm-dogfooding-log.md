@@ -1368,3 +1368,70 @@ already adopted for ADRs — cite the `file:line`, which forces the grep.
 - **Agents in a worktree may hit `No anonymous write access` on `git push`** — the VS Code credential
   socket isn't reachable from a sub-agent shell. `git -c credential.helper='!gh auth git-credential'
   push` works; now documented in CLAUDE.md.
+
+### M7 Wave 2, stage 4 — KAN-425 + KAN-426 paired (PRs #205, #207, v0.6.0 → v0.7.0)
+
+Two slices, **one agent, two sequential PRs with a PM gate between them** — chosen because KAN-425's
+regression tests cover the identifier-resolution path KAN-426 then had to repair. Splitting them
+across agents would have meant two passes over `_parse_id_or_ticket`.
+
+**The pattern that finally became undeniable: a spec written from a read of the code is a hypothesis.**
+Four of the PM's M7 spec claims have now been falsified on contact, all in the same AXI audit:
+
+| Claimed | Actual |
+|---|---|
+| "no `startswith` guard in the PAT resolver" | one at `authz.py:85`; a prefix flip would have 401'd every token |
+| "the CLI prints identifiers it won't accept" | fixed ten days earlier by KAN-285 — the PM was on a stale binary |
+| "exit codes are 0/1/2, already correct" | a **six**-code scheme (`0/1/2/3=401/4=403/5=404`) |
+| "`login` prompts unconditionally" | never true — `getpass` was always behind `sys.stdin.isatty()` |
+
+Three of the four came from one row of one table. The mitigations now in force: **cite the `file:line`
+you verified at**, and **audit the source, never a binary on `$PATH`**. Worth noting the six-code scheme
+was *already documented correctly* in the `pandan` skill — the truth was written down; the audit just
+didn't look there. **When auditing, read the artefacts that describe the thing, not only the thing.**
+
+**Verification learnings**
+
+- **"Unverified" is a valid state to ship a spec in, and it paid off.** The PM flagged the `403 → 4`
+  row as unverified rather than asserting it (a probe with `--board 1` returned 5). The agent resolved
+  it properly: prod board **11** exists but isn't ours → `403` → exit **4**, while boards 1/2/3/4/12/14
+  → `404` → 5 — so the original probe had simply picked a board that doesn't exist. Policy confirmed at
+  `backend/app/authz.py:194-205`. Flagging the gap is what got it closed; asserting it would have
+  shipped a documented guess.
+- **Fix the class in the resolver, not the instances at the call sites.** The exit-code inconsistency
+  (`get 999999` → 5 but `get KAN-999999` → 1) was repaired inside `_resolve_card_id`/`_resolve_epic_id`,
+  so it covers **every** ref-taking verb including `dep --blocked-by` — not just the verbs someone
+  thought to test.
+- **Fix the text that misled you, not just the code.** `list --help` carried a bare `Fields:` line that
+  was `--sort`'s vocabulary and was the direct cause of the PM misreporting `--fields` as existing. It
+  became `Sort keys:` **with a test asserting the old wording is gone**. Closing the door behind a bug
+  is worth more than the bug fix.
+- **Named error codes beat numeric ones at the raise site.** One add-only `ERROR_CODES` table maps 14
+  names → exit numbers, so a raise site picks a *meaning* and never a number; 24 generic `ConfigError`
+  sites were converted. The 1-vs-2 rule (*argparse rejected argv → 2; the CLI rejected a runtime value
+  → 1*) lives in the table's comments, where the next person raising an error will actually read it.
+
+**Traps**
+
+- **`git checkout -- <file>` during a mutation test nearly destroyed a whole implementation.** It
+  restores from the **index**, and unstaged work never entered the object database, so no reflog or
+  `git fsck` recovers it. Survived only on a scratch copy. Now a documented rule in `CLAUDE.md` and in
+  the `dev-playbook` skill (*Testing and correctness* §5): commit or `git stash push -- <file>` first,
+  edit a copy, or `git apply` the mutation and `git apply -R` to reverse exactly it. The second PR
+  mutation-tested both halves *after committing* — reverting the exit-5 fix failed 16 tests, sending
+  errors back to stderr failed 50.
+- **Bulk-editing Python by regex dropped a trailing comma in six call sites.** Ruff caught it, but the
+  sequencing lesson stands: a regex sweep over source needs a syntax/lint pass as its own explicit step.
+- **The harness's worktree guard refuses shell complexity** — `for` loops with pipelines, heredocs
+  followed by `&&`, `VAR=… cmd` env injection, and `$( )` combined with redirects. The reliable pattern
+  is one plain command per call, or write a script to the scratchpad first. This has now cost time in
+  three consecutive slices; brief agents on it up front.
+- **`uv run` in a worktree prints a `VIRTUAL_ENV does not match` warning on every invocation** because
+  the parent checkout's `backend/.venv` is exported. Noise, not an error, but it pollutes captured
+  output — filter it when parsing command output programmatically.
+
+**Release cadence decision.** V50 makes a version bump *mandatory* per behavioural CLI change, but a
+**tag is still discretionary**. These two slices were batched into one release (`v0.7.0`) rather than
+cutting `v0.6.0` separately — the bump keeps provenance honest, the tag is for when something
+user-facing warrants distribution. Verified against the downloaded asset each time: `pandan 0.7.0
+(bd28cf0)`, both identifier forms exiting 5, and the structured error on stdout.
