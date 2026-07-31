@@ -113,8 +113,17 @@ live Roadmap board (id 5, 121 cards).
 | path | calls | tokens |
 |---|---:|---:|
 | MCP typed tools (`next` → `claim_card` → `add_comment`) | 3 | **622** |
-| CLI via exec, step-for-step (`next` → `move` → `update` → `comment add`) | 4 | **345** |
-| CLI via exec, collapsed (`next --claim` → `comment add`) | 2 | **158** |
+| CLI via exec, step-for-step (`next` → `move` → `update` → `comment add`) | 4 | **372** |
+| CLI via exec, collapsed (`next --claim` → `comment add`) | 2 | **185** |
+
+> **Corrected in Phase 2.** The first pass of this table read **345** and **158**, because its
+> `comment add` invocation omitted the required `--body` flag: the CLI returned a usage **error**, and
+> the measurement counted the error text as if it were a successful result. Re-run with the correct
+> invocation, the two CLI totals each rise by 27 tokens. The MCP total re-measured at exactly 622,
+> which is what makes the correction trustworthy rather than just different. **A subprocess-based cost
+> measurement must assert the exit code** — otherwise a failing command looks like a cheap one, and
+> cheap is precisely the answer you are hoping for. The conclusion is unchanged (the CLI is 1.7×–3.4×
+> cheaper on this task); the flaw biased it the way flaws usually go, in favour of the hypothesis.
 
 **Second task — "survey the board" (`list` + `metrics` + `get`)**, same 7-card board: MCP **2,041**,
 CLI defaults **317**, CLI narrowed with `--fields`/`--format toon` **327** (already at the floor —
