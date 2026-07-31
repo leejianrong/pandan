@@ -24,7 +24,10 @@ Nothing here touches the real repository. Each test builds a throwaway git repo
 in `tmp_path`, fabricates the `<local-ref> <local-sha> <remote-ref> <remote-sha>`
 lines git feeds a pre-push hook on stdin, and stubs `uv`/`npm` with shims on
 `PATH` so the hook's package checks are no-ops and only its range logic is under
-test.
+test. **Every subprocess goes through `_clean_env`** — read its docstring before
+adding one; these tests run inside a git hook, and inheriting that hook's `GIT_*`
+environment points them at the real repo. The fixture asserts the scratch git dir
+is the scratch one before it writes anything.
 
 Mutation-testing note (the trap this project already documented): switching
 branches swaps the hook itself, so point `PREPUSH_HOOK` at a version extracted
@@ -53,6 +56,31 @@ PACKAGE_DIRS = ("backend", "frontend", "mcp", "pandan-client", "pandan-cli")
 NOOP = "#!/bin/sh\nexit 0\n"
 
 
+def _clean_env(**extra: str) -> dict[str, str]:
+    """A subprocess env with git's ambient state stripped.
+
+    Non-negotiable, and the reason is a scar. This suite runs from inside a git
+    hook whenever the pre-push hook invokes the `mcp` tests — and a hook is
+    handed `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and friends in its
+    environment. Inherit those and every `git` call below silently retargets the
+    REAL repository instead of the scratch one: `git init` reuses it, `git add -A`
+    + `git commit` scribble the fixture's tree into it on a `feat/slice` branch,
+    and `update-ref refs/remotes/origin/main` rewrites a live remote-tracking ref.
+    That is not hypothetical — it happened once while building these tests
+    (KAN-484's branch ref and `origin/main` were both clobbered and had to be
+    recovered from the reflog).
+
+    Strip the whole `GIT_*` namespace rather than a denylist of the vars that bit
+    us, and pin config discovery at `/dev/null` so ambient user/system git config
+    (`core.hooksPath`, templates, signing) can't perturb a fixture either.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    env.update(extra)
+    return env
+
+
 def _init_version(version: str) -> dict[str, str]:
     return {
         "pandan-cli/pyproject.toml": f'[project]\nname = "pandan"\nversion = "{version}"\n',
@@ -69,14 +97,19 @@ class Scratch:
 
     # --- git plumbing -----------------------------------------------------
     def git(self, *args: str) -> str:
-        result = subprocess.run(
+        result = self.git_raw(*args)
+        assert result.returncode == 0, f"git {args} failed:\n{result.stdout}{result.stderr}"
+        return result.stdout.strip()
+
+    def git_raw(self, *args: str):
+        """Like `git` but tolerates a non-zero exit (for probing refs)."""
+        return subprocess.run(
             ["git", *args],
             cwd=self.path,
+            env=_clean_env(),
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0, f"git {args} failed:\n{result.stdout}{result.stderr}"
-        return result.stdout.strip()
 
     def write(self, files: dict[str, str]) -> None:
         for rel, text in files.items():
@@ -98,7 +131,7 @@ class Scratch:
     # --- the hook itself --------------------------------------------------
     def push(self, local_sha: str, remote_sha: str, ref: str = BRANCH):
         """Run the hook exactly as git would for one pushed ref."""
-        env = dict(os.environ)
+        env = _clean_env()
         env["PATH"] = f"{self.bin_dir}{os.pathsep}{env['PATH']}"
         # Don't let an ambient PREPUSH_HOOK leak into the hook's own environment.
         env.pop("PREPUSH_HOOK", None)
@@ -126,6 +159,17 @@ def scratch(tmp_path):
     repo.mkdir()
     s = Scratch(repo, bin_dir)
     s.git("init", "-q", "-b", "main")
+
+    # Safety belt, not decoration: assert we are really pointed at the scratch
+    # repo before anything writes. If the env scrubbing in `_clean_env` ever
+    # regresses, this fails loudly on the first fixture instead of quietly
+    # committing into the developer's real repository (see `_clean_env`).
+    git_dir = Path(s.git("rev-parse", "--absolute-git-dir"))
+    assert git_dir == (repo / ".git").resolve(), (
+        f"scratch git dir is {git_dir}, expected {(repo / '.git').resolve()} — "
+        "ambient GIT_* environment is leaking; refusing to touch a real repo"
+    )
+
     s.git("config", "user.email", "test@example.invalid")
     s.git("config", "user.name", "KAN-484 test")
     s.git("config", "commit.gpgsign", "false")
@@ -349,12 +393,7 @@ def test_policy_falls_back_to_the_push_when_no_base_ref_exists(scratch):
     # No base means no branch range at all — confirm that, so this test can't
     # pass by accidentally still having one.
     for ref in ("refs/heads/main", "refs/remotes/origin/main"):
-        probe = subprocess.run(
-            ["git", "rev-parse", "--verify", "-q", ref],
-            cwd=scratch.path,
-            capture_output=True,
-            text=True,
-        )
+        probe = scratch.git_raw("rev-parse", "--verify", "-q", ref)
         assert probe.returncode != 0, f"{ref} still exists: {probe.stdout}"
     assert_version_guard_fired(scratch.push(tip, first))
 
