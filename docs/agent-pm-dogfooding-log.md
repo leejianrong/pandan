@@ -2283,3 +2283,42 @@ different property; a second mutation exists for that one.
 `mcp/README.md` — omits `get_board` (140 tokens) and `list_dependencies` (21). Both far below the bar, so
 no action, but the published list was never complete. Third M7 instance of a **count** being wrong after
 48-vs-49 tools and `BoardUpdate`'s six fields.
+
+#### KAN-529 (PR #246): the card was right about the count and wrong about the client
+
+**A card got its count right, which is worth recording precisely because the opposite has been the
+pattern.** `BoardUpdate` is `backend/app/schemas.py:436-443`, six fields, and the card's `437-438`
+citation for the autosync pair was still byte-accurate — the first card this stage whose line numbers
+had not moved.
+
+**What it got wrong was the cheap-looking half.** The card guessed "pandan-client may need nothing,
+since KAN-502 needed nothing". False: `update_board` (`pandan-client/pandan_client/client.py:162`)
+**enumerates** its four fields into `_clean(...)` rather than forwarding `**kwargs`. It whitelists, so
+KAN-502 needed no change only because its four fields were *already in that whitelist* — a fact about
+history, not about the client's design. Both new fields had to be threaded through all three layers.
+*Generalisable: "the last slice needed nothing here" is evidence about the last slice, not about the
+mechanism. Check what the code actually does with an unknown key.*
+
+**The identity-invariant test found something no other test in the suite could.** Two of the six
+mutations targeted the *shape* of the tool rather than its behaviour: making `name` required, and
+renaming `outbound_webhook_url`. The rename was caught by the new property-set assertion **and by
+nothing else in the 145-test MCP suite** — before this PR, silently renaming a public tool argument was
+entirely unguarded. That is the "assert identity invariants before intended effects" rule paying for
+itself in a slice that had no obvious reason to need it. The required-set assertion is the same idea
+pointed at the other silent break: a widened `required` invalidates every existing caller.
+
+**Two mutations were worth more for their output than their colour.** Setting the flag's `default` from
+`None` to `False` — the mutation the card itself specified — went red as predicted, *and* also reddened
+`test_board_update_with_no_fields_is_a_structured_error`, because with a `False` default a bare
+`pandan board update 5` stops being an error and becomes a PATCH that **disables auto-sync**. The card's
+named failure arriving by a second, worse route. *Generalisable, and now proven twice this stage: read
+the failure output of a mutation that is already red — the extra assertions that fell are telling you
+about failure modes you did not enumerate.*
+
+**The doc the card pointed at really did instruct a curl**, twice
+(`docs/guides/autosync-github-setup.md:109-133`), and it is now the `pandan board update` path with the
+curl kept as a collapsed fallback. Applied centrally by the PM, and **verified from source before being
+written down** — `uv run python -m pandan_cli board update --help` shows all four flags, and
+`pandan board __nope__` enumerates `list, get, create, update, delete`, which is how `board get` was
+confirmed rather than assumed. That is the invalid-choice trick from stage 7 used for its intended
+purpose: never document a command you have not watched the parser accept.
