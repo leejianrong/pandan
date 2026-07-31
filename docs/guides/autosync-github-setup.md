@@ -106,11 +106,35 @@ So the four combinations:
 | `true` | `false` | Attach PR links + post CI comments. Merges do **not** move the card. |
 | `true` | `true` | All of the above, **and** a merged PR moves the card to Done. |
 
-There's no UI toggle for these yet — set them through the API with `PATCH /api/v1/boards/{id}`,
-authenticating with your own PAT (see the [Agent onboarding guide](agent-onboarding.md) for minting
-one). Find your board id with `GET /api/v1/boards`.
+There's no UI toggle for these yet — set them with `pandan board update` (KAN-529; needs CLI
+**0.21.0+**), authenticating with your own PAT (see the [Agent onboarding guide](agent-onboarding.md)
+for minting one). Find your board id with `pandan board list`.
 
 Turn auto-sync on for board `1`, keeping merge→done off:
+
+```bash
+pandan board update 1 --autosync-enabled
+```
+
+Later, also let merges close cards out:
+
+```bash
+pandan board update 1 --autosync-advance-to-done
+```
+
+Both flags are **tri-state**: passing neither `--autosync-enabled` nor `--autosync-disabled` leaves
+the setting untouched, so an unrelated `pandan board update 1 --name …` cannot silently flip it. To
+opt back out, `pandan board update 1 --autosync-disabled` (or `--no-autosync-advance-to-done` for
+the merge→done switch alone).
+
+Confirm the current state with `pandan board get 1 --json` — both flags are returned. The same two
+fields are also arguments on the MCP `update_board` tool. Everything here is owner-gated like every
+`/api/v1` route: your PAT can only change boards you own.
+
+<details>
+<summary>The raw API, if you have no CLI to hand</summary>
+
+Both flags are plain fields on `PATCH /api/v1/boards/{id}`:
 
 ```bash
 curl -X PATCH https://simple-kanban-jian.fly.dev/api/v1/boards/1 \
@@ -118,19 +142,7 @@ curl -X PATCH https://simple-kanban-jian.fly.dev/api/v1/boards/1 \
   -H "Content-Type: application/json" \
   -d '{"autosync_enabled": true}'
 ```
-
-Later, also let merges close cards out:
-
-```bash
-curl -X PATCH https://simple-kanban-jian.fly.dev/api/v1/boards/1 \
-  -H "Authorization: Bearer $PANDAN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"autosync_advance_to_done": true}'
-```
-
-To opt back out, `PATCH` `{"autosync_enabled": false}`. Both flags are returned on
-`GET /api/v1/boards/{id}` so you can confirm the current state. The PATCH is owner-gated like every
-`/api/v1` route — your PAT can only change boards you own.
+</details>
 
 ## Verifying and troubleshooting
 
@@ -142,7 +154,8 @@ To opt back out, `PATCH` `{"autosync_enabled": false}`. Both flags are returned 
   content type isn't `application/json`. Re-set both to the same value.
 - **GitHub shows `503`.** `WEBHOOK_SECRET` isn't set on the server (step 1).
 - **Merges don't move the card.** `autosync_advance_to_done` is still `false` — that's the default and
-  is separate from the master switch.
+  is separate from the master switch. Turn it on with
+  `pandan board update <id> --autosync-advance-to-done`.
 - **CI comments don't appear.** Your CI may report as `status` while you only subscribed to
   `check_suite`, or vice versa — subscribe to both.
 

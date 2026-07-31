@@ -170,6 +170,19 @@ to actually parse against the real parser, which is how a long-standing invalid 
 > time, since under V46's order it ended on a hint rather than its own aggregate.
 > Hints are still per-verb rather than universal — `label list` / `view list` suggest
 > nothing a caller isn't about to type — so only `list` gained them.
+>
+> **A result that names no entity drops the hints that would have pointed at one**
+> (KAN-526). Letting `list` carry hints created a state that could not exist before:
+> `pandan list` on an empty board answered `(no cards)` and then offered
+> `pandan get <id>` / `pandan move <id> in_progress` — next steps on rows the same call
+> had just said do not exist. A template carrying the `<id>` slot takes its referent
+> *from the result*, so on an empty result it is dropped and everything else stays. The
+> answer therefore differs per verb without a per-verb rule: an empty `pandan list`
+> prints only its zero state and aggregate, an empty `pandan next` prints only
+> `(no card ready)`, and an empty `pandan overview` keeps `pandan list --column todo`
+> and `pandan next --claim` — the two hints an empty board most needs — dropping only
+> `pandan get <id>`. Ordering is unchanged: hints still print above the aggregate, so
+> `tail -1` is still the aggregate.
 
 Because a bare invocation makes a network call and this project's backend scales to zero,
 the overview runs on a tighter budget than other verbs (~40 s ceiling rather than the

@@ -104,8 +104,15 @@ What it saves, measured on a real capture of the Pandan Roadmap board (125 cards
 | `get_card` | 241 | 241 | 77 |
 | **all five** | **58,413** | **49,742** | **10,405 (−82%)** |
 
-Adding these arguments cost **+552 resident tokens** (7,388 → 7,940), which one
-narrowed `list_cards` repays about 74 times over. Re-run it yourself — the harness
+Adding these arguments cost **+552 resident tokens** (7,388 → 7,940), and KAN-517 a
+further +222 (→ 8,162), which one narrowed `list_cards` repays about 74 times over.
+
+> **The table above is a 2026-07-31 snapshot of a live board, not a constant.** Re-measured
+> on 2026-08-01 the `list_cards` "before" figure reads **53,508** rather than 48,291 —
+> the board grew from 125 to 131 cards. The **−82%** the table is about is the durable
+> part; the absolute numbers move with the data. Re-run rather than quoting these.
+
+Re-run it yourself — the harness
 captures a real payload once and then measures offline, asserting every read really
 was a non-empty page before counting it:
 
@@ -115,10 +122,22 @@ uv run --with tiktoken python scripts/measure_read_payload_tokens.py \
 uv run --with tiktoken python scripts/measure_read_payload_tokens.py --payload /tmp/roadmap.json
 ```
 
-> Not every read is shaped: `list_boards`, `get_epic`, `next`, `dispatch`,
-> `list_notifications`, `list_labels`, `list_views`, `list_templates` and
-> `list_cycles` still return the raw envelope. They are small (a label is three
-> keys), and KAN-501 deliberately stopped at the reads ADR 0019 measured.
+> Not every read is shaped, and since **KAN-517** that is measured rather than assumed.
+> `list_notifications` is now shaped: the inbox takes no `limit` and returns no cursor,
+> so it hands back your whole history and only grows — 127 rows cost **14,326** tokens,
+> `fields=["id","kind","body"]` costs 4,658. `list_boards` takes `fields`
+> (1,157 → 181; six of a board row's ten keys are autosync/webhook settings a discovery
+> call never reads) and `get_epic` takes `full`, so it truncates a long description
+> exactly as `list_epics` does — the listing and the targeted read now agree about the
+> same epic.
+>
+> `next`, `dispatch`, `list_labels`, `list_views`, `list_templates`, `list_cycles`,
+> `get_board` and `list_dependencies` deliberately stay raw: measured against the real
+> account they return **7–474** tokens, and ~+60 resident tokens each to bound a payload
+> that small is the *opposite* of the trade ADR 0019 endorsed. (`get_board` and
+> `list_dependencies` were missing from KAN-501's own list of unshaped reads — the
+> enumeration was never complete.) A test pins them that way; if you want to shape one,
+> measure it first.
 
 ## Why 49 tools, and why that is frozen
 
@@ -128,8 +147,13 @@ Recorded here because the resident-cost headline invites the wrong conclusion, a
 this decision should not be re-litigated from it.
 
 **What it costs.** Every one of these schemas loads into an agent's context before
-it does any work: **7,940 `o200k_base` tokens** as shipped (7,388 before KAN-501's
-`fields`/`full` arguments; 8,775 before the schema compaction below). Re-measure any
+it does any work: **8,162 `o200k_base` tokens** as shipped (7,940 before KAN-517's three
+extra shaped reads; 7,388 before KAN-501's `fields`/`full` arguments; 8,775 before the
+schema compaction below). That counts `{name, description, input_schema}` per tool — a
+`tools/list` entry also carries an **`outputSchema`**, a further **836** compact if your
+client forwards it into the model's context (many will not: the Anthropic Messages API
+tool definition has no field for it). ADR 0019 § *The fourth field* (KAN-518) has the
+bracket, and why it is measured but deliberately **not** compacted. Re-measure any
 time — the harness is committed:
 
 ```bash
@@ -152,7 +176,7 @@ the same FastMCP serializer:
 
 | option | tools | resident | verdict |
 |---|---:|---:|---|
-| today (frozen) | 49 | 7,940 | **chosen** |
+| today (frozen) | 49 | 8,162 | **chosen** |
 | (a) one tool per entity + an `action` arg | 11 | 4,338 | rejected |
 | (b) a single exec-`pandan` tool | 1 | 387 | rejected *for now* |
 

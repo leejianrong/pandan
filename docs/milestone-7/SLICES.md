@@ -596,6 +596,27 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
 
 ---
 
+## Post-milestone follow-ups (all landed 2026-08-01)
+
+M7's slices closed with seven agent-workable follow-up cards, every one filed by a verification step
+that contradicted something already written down. All seven landed in three batches, `v0.19.1` →
+`v0.22.0`. Recorded here because several changed a *decision*, not just code.
+
+| Card | PR | Outcome |
+|---|---|---|
+| KAN-523 | #243 | The pre-push hook **skips loudly** on a bare/no-work-tree context instead of aborting every push with a naked `git` fatal, and any degraded baseline announces itself. `base_ref` now tries `origin/main` → `refs/remotes/origin/HEAD` → local `main`. |
+| KAN-519 | #244 | The reported bug (`template apply`) had already been fixed by KAN-502 one card earlier. The **class audit** the card also demanded found the family's real live instance: `batch-update`'s `{"updated": […]}` envelope. Guarded by an AST scanner over the client's source, not a hand-written list. |
+| KAN-517 | #245 | Three of nine unshaped MCP reads shaped **on measurement** — `list_notifications` (14,326 tokens on an unpaginated inbox), `list_boards`, `get_epic` — and six deliberately left raw at 7–474 tokens. Resident 7,940 → **8,162**. |
+| KAN-529 | #246 | `autosync_enabled` / `autosync_advance_to_done` reachable from **both** adapters as tri-state flags; `pandan board update` now covers all six `BoardUpdate` fields. `docs/guides/autosync-github-setup.md` no longer instructs a raw `curl`. |
+| KAN-518 | #247 | `outputSchema` measured as its own bracketed row (**836** compact, flat ~17/tool), deliberately kept **out** of the headline, and deliberately **not compacted** — unlike `inputSchema`, the advertised object *is* the one the SDK validates every result against. |
+| KAN-513 | #248 | The app image's `uv` input is bounded to the `0.12` series; `node:22-slim` / `python:3.12-slim` deliberately stay floating; no OCI-label provenance, because `flyctl deploy` gives it nowhere to assert. Reasoning lives at the top of `./Dockerfile`. |
+| KAN-526 | #251 | **Fixed, not deferred.** The predicate lives in `_hint_lines` — a hint carrying `<id>` is dropped when the result names no entity — so `_emit` stays a printer. Also fixed `next`, a third case the card did not name. Hint ordering unchanged. |
+
+Two of these are worth reading before touching the same ground again. **KAN-518** establishes that
+V49's "provably cosmetic" argument for rewriting `inputSchema` does **not** transfer to `outputSchema`,
+and pins that as a test which goes red if a future SDK separates the two. **KAN-513** records that CI
+never builds the root `Dockerfile` at all — tracked separately as **KAN-584**.
+
 ## Out of scope for M7
 
 Recorded so it doesn't creep in:
