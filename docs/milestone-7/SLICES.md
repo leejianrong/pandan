@@ -33,7 +33,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 | **V44 · Aggregates** ✅ | summary on every list verb | A3 | 2 | KAN-427 | `pandan list` ends with `42 cards · 12 todo · 5 in_progress · 25 done`; no second call needed for a count |
 | **V45 · Truncation** ✅ | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
 | **V46 · Content-first + disclosure** ✅ | bare command, `help[]` | A5 | 2 | KAN-429 | Bare `pandan` prints live board state and exits 0; results carry `help[]` next-step templates |
-| **V47 · TOON** | `--format toon` for nested payloads | A6 | 2 | KAN-430 | `pandan get KAN-304 --format toon` returns the same data as `--json`, materially cheaper |
+| **V47 · TOON** ✅ | `--format toon` for nested payloads | A6 | 2 | KAN-430 | `pandan get KAN-304 --format toon` returns the same data as `--json`, materially cheaper |
 | **V48 · Ambient context** ✅ | session hook + packaged skill | A7 | 2 | KAN-431 | A fresh agent session already knows the open cards without calling anything |
 | **V49 · MCP right-sizing** *(tail)* | measure, decide, ADR, execute | A8 | 3 | KAN-432 | The MCP schema token cost is measured and published; the chosen surface is an ADR and is live |
 
@@ -47,14 +47,28 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 > prioritised **first** in Wave 2. Audit against `uv run python -m pandan_cli` from `pandan-cli/`,
 > never a `kan` on `PATH` — see the [shaping](SHAPING.md)'s methodology note.
 
-> **Status:** 🚧 **in progress (6/11 shipped, 1 deferred).** **V40 / KAN-423 is shipped** (two PRs —
-> structural then semantic; see its slice note), and Wave 2 has begun: **V50 / KAN-435** shipped as
-> **v0.5.0** (release provenance in `--version` + the version-bump guard), **V42 / KAN-425** as
-> **v0.6.0** (`--fields` + the identifier round-trip suite), **V43 / KAN-426** as **v0.7.0** (the
-> CLI's error contract: structured errors on stdout, the six-code exit scheme documented and pinned,
-> and ref-resolution failure repaired to exit `5`), **V47 / KAN-430** as **v0.8.0**
-> (`--format {human,json,toon}` over one shared serializer), and **V44 / KAN-427** as **v0.9.0**
-> (a pre-computed `summary` on all eleven list verbs, on V47's seams). **V41 / KAN-424 is ⏸️ deferred**, `blocked-by`
+> **Status:** 🚧 **in progress (9/11 shipped, 1 deferred, 1 in flight) — WAVE 2 IS COMPLETE.**
+> **V40 / KAN-423** shipped as two PRs (structural then semantic; see its slice note), and Wave 2 then
+> shipped in full across `v0.5.0`–`v0.12.0`: **V50 / KAN-435** (release provenance in `--version` +
+> the version-bump guard), **V42 / KAN-425** (`--fields` + the identifier round-trip suite),
+> **V43 / KAN-426** (the CLI's error contract: structured errors on stdout, the six-code exit scheme
+> documented and pinned, ref-resolution failure repaired to exit `5`), **V47 / KAN-430**
+> (`--format {human,json,toon}` over one shared serializer), **V44 / KAN-427** (a pre-computed
+> `summary` on all eleven list verbs, on V47's seams), **V48 / KAN-431** (`pandan context` —
+> a `SessionStart` hook making board state ambient, plus the skill packaged *in the repo*, which
+> closes the KAN-434 out-of-repo split by construction), **V45 / KAN-428** (content truncation with
+> true totals + `--full`), and **V46 / KAN-429** (content-first bare invocation + `help[]`).
+> **Only V49 / KAN-432 remains** — the *nice-to-have* MCP right-sizing tail, deliberately last because
+> judging what MCP can shed requires the CLI to already be AXI-conformant, which it now is.
+>
+> **V47 was built first within V44–V47, out of numeric order**, for the same reason V50 was: `_emit`
+> was the single output chokepoint and V47 changed its *signature* while V44–V46 only add behaviour
+> *inside* it. Building it first meant each later slice hooked a finished serializer once instead of
+> three retrofits — and V47 left named extension points citing the cards that would use them. The
+> pattern generalises: **when several queued slices modify one function, build the signature-changing
+> one first.**
+>
+> **V41 / KAN-424 is ⏸️ deferred**, `blocked-by`
 > **KAN-439** (k8s homelab migration), with **KAN-437** carved out for the in-place renames.
 > Board cards **KAN-423…KAN-432** + **KAN-435** under the three `M7:` epics
 > **EPIC-66** (Pandan Rebrand), **EPIC-67** (Agent-Ergonomic CLI), **EPIC-68** (MCP Right-Sizing).
@@ -341,8 +355,12 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
     structured auth error, not a stack trace. `--help` still prints usage.
   - **Contextual disclosure:** results carry `help[]` lines suggesting the logical next command as a
     **template** — fixed flags carried forward, runtime values left parameterised (`pandan move <id>
-    in_progress`, `pandan comment add <id> "…"`). Per-verb, small, and suppressed under
+    in_progress`, `pandan comment add <id> --body "…"`). Per-verb, small, and suppressed under
     `--json`/`--format toon`.
+    > **This line originally read `pandan comment add <id> "…"`, which is not a valid command** — the
+    > body is `--body`. Corrected here because the slice's "every hint must parse" guard caught it, and
+    > an unfixed spec keeps teaching the wrong form to anyone who copies it (the card text on KAN-429
+    > carries the same error, noted in its comments).
 - **Tests:** CLI unit + integration — bare invocation exits 0 and prints rows, not usage; with no board
   configured it lists boards; hints are **parameterised** (assert the literal `<id>` placeholder is
   present and no concrete id was interpolated); hints absent under `--json`; `--help` unchanged
