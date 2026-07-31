@@ -2031,7 +2031,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help=(
             "print long free-text fields (a card/epic description, a comment or "
-            f"notification body, an attention note) in full. Default: cut at "
+            "notification body, an attention note) in full. Default: cut at "
             f"{DEFAULT_MAX_TEXT_CHARS} characters with a '(truncated, N chars total …)' "
             "hint, so one `get` can't blow an agent's context. Applies to the human "
             "rows AND to --format json/toon. Set PANDAN_MAX_TEXT_CHARS (or "
