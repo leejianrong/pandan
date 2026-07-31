@@ -78,7 +78,7 @@ from typing import Any
 import httpx
 from pandan_client import PandanApiError, PandanClient
 
-from . import build_info, toon
+from . import build_info, context, toon
 from .config import (
     DEFAULT_API_URL,
     DEFAULT_MAX_TEXT_CHARS,
@@ -182,6 +182,10 @@ def _as_cli_error(exc: BaseException) -> CliError:
         return CliError(str(exc), code=code, status=exc.status_code)
     if isinstance(exc, ConfigError):
         return CliError(str(exc), code="config")
+    if isinstance(exc, context.ContextError):
+        # `pandan context …` raises its own exception so it needn't import `cli`
+        # (which imports it). It already carries a code from ERROR_CODES.
+        return CliError(exc.message, code=exc.code, arg=exc.arg)
     if isinstance(exc, httpx.HTTPError):
         # No answer from the API: connect/read timeout, DNS, refused connection.
         return CliError(f"{type(exc).__name__}: {exc}", code="transport")
@@ -2568,6 +2572,14 @@ def build_parser() -> argparse.ArgumentParser:
         "path", parents=[common], help="print the config file path"
     )
     p_config_path.set_defaults(local_func=_cmd_config_path)
+
+    # --- context (V48, KAN-431): ambient board state for an agent session ----
+    # Also local (`local_func`): install/uninstall/status touch only files, and
+    # `show --hook` deliberately owns its own client + soft-fail behaviour instead
+    # of the shared error contract, because a structured error on stdout would be
+    # injected into the model's context as if it were board state. All four verbs
+    # print the tab-separated human form; `--format` doesn't apply to them.
+    context.add_parser(sub, common)
 
     # --- dependency subcommands (KAN-270): card-to-card blocking edges -------
     # Card-scoped (addressed by card id), so no --board targeting here. `blocked_by`
