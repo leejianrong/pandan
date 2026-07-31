@@ -2056,3 +2056,70 @@ demand one — a plausible mistake, now confirmed absent.
 edit under `pandan-cli/pandan_cli/` — the V50 guard firing exactly as designed, and the documented honest
 outcome. Still **no tag** above `v0.12.0`: six unreleased bumps, deliberately batched, and worth noting
 that KAN-505's fix only reaches a user on a build that contains it.
+
+### M7 follow-ups, stage 8 — the seven cards stage 7 filed (in progress)
+
+Stage 7's own closing count recorded **eight new cards filed from findings the work turned up**. Seven
+of them are agent-workable and are this stage's whole scope: KAN-513, 517, 518, 519, 523, 526, 529. The
+common property is worth stating once, because it changes how they should be read: **every one was filed
+by a verification step that contradicted something already written down.** None came from a user report,
+a failing test, or a feature request. They are the residue of the milestone checking its own claims.
+
+Written mid-stage on purpose — this project has twice lost detail by deferring the log to the end.
+
+#### Two claims falsified before a single agent was spawned
+
+The stage-7 rule was *a spec written from a read of the code is a hypothesis*. It applies to the PM's
+batching brief as much as to a card, and both falsifications here came from reading two files the brief
+took on trust.
+
+**1. KAN-513's mcp/ pattern does not port over directly.** The framing inherited from KAN-475 was that
+the shipped MCP approach — resolve base images to digests once per release, pass them as build-args,
+record them as OCI labels, gate the release on the labels being digest-pinned — "ports over directly" to
+the app image. It does not, and the reason is structural rather than incidental: the MCP image is built
+by `docker buildx` inside `publish-mcp-image.yml`, where there is a build step to attach `--build-arg`
+to, a registry the repo controls, and an `imagetools inspect` step to assert against. The app image is
+built by **`flyctl deploy --remote-only`** (`.github/workflows/deploy.yml:75`) on a Fly remote builder.
+`flyctl deploy` does accept `--build-arg`, so the *resolution* half is portable; the **label-assertion
+half has no home** — there is no gate step and no repo-controlled registry read. Half a pattern is
+exactly the shape KAN-475 rejected: labels that look maintained and aren't.
+
+**2. KAN-513's own recommendation was already answered, in the negative, in the file it names.** The card
+says "add the docker dependabot ecosystem for whichever directories get pinned". `.github/dependabot.yml`
+already carries a seventeen-line comment headed **"THERE IS DELIBERATELY NO `docker` ECOSYSTEM
+(KAN-475)"**, which cites dependabot-core#5103 and **names KAN-513 itself** as the tracking card for this
+Dockerfile. The card predates the comment; the comment is the answer to the card.
+
+*Generalisable: when a card recommends an action, grep for whether a previous card already ruled on it —
+this repo writes its refusals down as comments in the file being refused, which means the answer is
+sitting in the diff the next agent is about to open.* That is the same shape as stage 6's *the refutation
+is in the same file*, arrived at from the opposite direction: there the doc contradicted itself, here the
+code had already settled a question the board still had open. Running total of falsified M7 spec claims:
+**eight**.
+
+#### Batching: the fence that moved, and why
+
+The suggested batches were 517‖523‖519, then 529‖526‖518, then 513 alone. Reading the code moved one card.
+
+**KAN-526 came out of batch 2.** It owns the CLI's hint plumbing, whose registration sites are
+`set_defaults(hints=…)` calls spread through the parser — and one of them, `hints=_HINTS["board create"]`
+at `pandan-cli/pandan_cli/cli.py:2836`, sits **three lines above** `p_board_update` at `:2839`, which is
+precisely where KAN-529 adds its two flags. Stage 7's "fence by function inside one file" worked because
+the two agents were ~1,800 lines apart; three lines is inside git's merge-conflict window, not outside
+it. So KAN-526 got its own batch.
+
+**KAN-513 moved into batch 2 in its place**, because `./Dockerfile` + `.github/**` is disjoint from both
+`cli.py` and `mcp/`. It still lands **alone and last**, with the Fly deploy and prod-verification getting
+undivided attention. *Generalisable: parallel work and serialized landing are separate guarantees, and a
+card that must land alone does not have to be built alone.*
+
+**KAN-518 stayed in batch 2 rather than going last**, on a checked property rather than a hope: its
+subject is `outputSchema`, which FastMCP generates as
+`{"additionalProperties": true, "title": "<tool>DictOutput", "type": "object"}` — three keys per tool,
+driven by tool *count*, not by argument count. So KAN-529 adding two arguments to `update_board` beside it
+cannot move its number. The one interaction that would have mattered — KAN-517 shaping read tools — is
+handled by ordering, since 517 lands a whole batch earlier.
+
+Adjacency was verified by reading in every case, including the negative ones: `mcp/tests/test_prepush_hook.py`
+imports only `os`, `subprocess`, `pathlib` and `pytest`, with **zero coupling to `pandan_mcp`**, which is
+what makes KAN-523 and KAN-517 safe to run together despite both living under `mcp/`.
