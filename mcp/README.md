@@ -125,8 +125,10 @@ docker pull ghcr.io/leejianrong/pandan-mcp:latest
 ```
 
 Tags follow the release: `latest` on the newest, plus the semver `0.2.2`, `0.2`, and
-`0` (pin `:0.2.2` for a reproducible run). Run it with `-i` (the stdio transport
-needs stdin open) and pass config via `-e`:
+`0`. **`:latest` is the try-it-out tag; pin a semver tag or a digest for anything
+long-lived** — see [Which build am I running?](#which-build-am-i-running-kan-452)
+below. Run it with `-i` (the stdio transport needs stdin open) and pass config
+via `-e`:
 
 ```bash
 docker run -i --rm \
@@ -146,6 +148,55 @@ from inside `mcp/` can't see `../pandan-client` and will fail:
 ```bash
 docker build -f mcp/Dockerfile -t pandan-mcp .   # run from the REPO ROOT
 ```
+
+### Which build am I running? (KAN-452)
+
+`:latest` is a *moving* tag — it tells you nothing about which commit is inside.
+The CLI answers that question with `pandan --version` printing
+`pandan 0.5.0 (5da9ace)`; a container's native answer is **OCI labels + the
+digest**. Every published image carries them
+(`docker/metadata-action` emits them and the release workflow **fails** if the
+built image doesn't name the release commit — see
+[`mcp/scripts/assert-image-provenance.sh`](scripts/assert-image-provenance.sh)),
+so a stale pull is always *detectable*:
+
+```bash
+# What commit / version / build time is this image?
+docker inspect --format '{{json .Config.Labels}}' \
+  ghcr.io/leejianrong/pandan-mcp:latest | jq .
+# → "org.opencontainers.image.revision": "5da9ace…"   the exact commit
+#   "org.opencontainers.image.version":  "0.2.2"      the release
+#   "org.opencontainers.image.created":  "2026-…"     when it was built
+```
+
+`docker inspect` reads the **local** copy, so it answers *"which build did I
+pull?"* — which is the staleness question. To see what the registry holds right
+now without pulling (and to get the digest to pin), ask the registry directly:
+
+```bash
+docker buildx imagetools inspect ghcr.io/leejianrong/pandan-mcp:latest
+```
+
+**Pin by digest for a reproducible run.** A semver tag (`:0.2.2`) is immutable by
+convention; a digest is immutable by construction — the same bytes forever, even
+if a tag is re-pushed:
+
+```bash
+docker pull ghcr.io/leejianrong/pandan-mcp@sha256:<digest>
+```
+
+The publishing run prints the digest and a ready-to-paste `docker pull` line in
+its job summary, so you never have to hunt for it. If a `docker inspect` shows a
+`revision` you don't recognise, `git log -1 <revision>` tells you exactly how far
+behind you are — that is the whole point of the labels.
+
+> **Why keep `:latest` at all?** It was worth asking (KAN-452): the lesson from
+> the CLI was that a build must be able to **identify itself**, not that floating
+> tags are forbidden. With the labels and the release gate, `:latest` *is*
+> self-identifying, and it is what makes the "no checkout, no Python, just
+> `docker pull`" onboarding path work. So it stays — but as the try-it-out tag.
+> Anything long-lived (a committed `.mcp.json`, a CI job) should pin a semver tag
+> or a digest.
 
 ## Wire it into Claude Code
 
@@ -223,8 +274,11 @@ every case set `PANDAN_TOKEN` to a `pandan_pat_…` you created in the SPA Token
 ```
 
 The `-e NAME` flags (no `=value`) forward the values from the `env` block into the
-container, keeping the token out of the argument list. Pin `:0.2.2` instead of
-`:latest` for a reproducible pull.
+container, keeping the token out of the argument list. **A committed `.mcp.json`
+is long-lived, so pin it** — `:0.2.2`, or `@sha256:…` for a byte-exact pull — and
+keep `:latest` for trying the server out. See
+[Which build am I running?](#which-build-am-i-running-kan-452) for how to check
+what a given image actually contains.
 
 `PANDAN_BOARD_ID` pins the default board for calls that omit `board_id`; the
 snippets above (and [`.mcp.json.example`](../.mcp.json.example)) preset it to `1`,
