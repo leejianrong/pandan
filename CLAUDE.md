@@ -21,12 +21,15 @@ and newly minted PATs carry **`pandan_pat_`**. The rebrand changed no API, schem
 [AXI](https://axi.md/) conformance for the CLI is well underway — V50 (release provenance), V42
 (`--fields`), V43 (the error contract) and V47 (`--format {human,json,toon}`) have all landed, through
 `v0.8.0`. What remains is V44–V46 plus V48, and then a right-sizing of the **49-tool** MCP surface
-(V49) — measured at **8,775 `o200k_base` tokens** of resident schema per session (compact
-serialization; 12,825 pretty-printed), of which 1,429 is pure Pydantic serializer artefact. The
-measurement is re-runnable via `mcp/scripts/measure_tool_schema_tokens.py`, and the decision is
+(V49) — **now done**. It was measured at 8,775 `o200k_base` tokens of resident schema per session and
+ships at **7,388** (compact; 10,307 pretty-printed) after `mcp/pandan_mcp/schema.py` stripped 1,387
+tokens of pure Pydantic serializer artefact. The measurement is re-runnable via
+`mcp/scripts/measure_tool_schema_tokens.py`, and the decision is
 [ADR 0019](docs/adr/0019-mcp-surface-right-sizing.md) — **keep the breadth, freeze its growth**, because
 the resident cost turned out to be the *small* half of the problem: one `list_cards` against the real
-board returns ~45k tokens, 5× the whole schema surface. **Per-slice status goes stale here
+board returns ~45k tokens, 5× the whole schema surface, and per task the CLI is ~11× cheaper. **The
+49-tool surface is now pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a
+fixture edit.** **Per-slice status goes stale here
 faster than anywhere else in this file; read [docs/milestone-7/SLICES.md](docs/milestone-7/SLICES.md)
 and the board, not this paragraph.**
 
@@ -497,7 +500,7 @@ spec for intended behavior:
 `SHAPING.md` (selects Shape A) → `BREADBOARD.md` (UI places & wiring) → build in slices.
 
 - **[docs/CONTEXT.md](docs/CONTEXT.md)** — canonical glossary and domain model. Use these terms exactly.
-- **[docs/adr/](docs/adr/)** (0001–0019; all Accepted except 0010 (superseded) and 0019 (proposed)) — the *why* behind each decision: monorepo &
+- **[docs/adr/](docs/adr/)** (0001–0019; all Accepted except 0010, superseded) — the *why* behind each decision: monorepo &
   stack (0001), Postgres+Alembic from day one (0002), single-artifact serving (0003), Fly.io+Neon
   CI/CD (0004), API-first/MCP-ready (0005), data model (0006), no-auth/LWW/no-realtime (0007),
   sync-SQLAlchemy + psycopg v3 + varchar-CHECK column + Vite dev-proxy (0008), epic as a first-class
@@ -519,6 +522,6 @@ spec for intended behavior:
   `KANBAN_*` fallback, PAT mint prefix) and what deliberately does **not** (the immutable `KAN-`/
   `EPIC-` ticket prefixes, the deployed Fly/OAuth identity — deferred, and session/wire/storage
   identifiers) (0018), and **MCP surface right-sizing** — the 49-tool surface is measured (8,775
-  `o200k_base` tokens resident) against a consolidated verb set and a single exec-`pandan` tool, and
-  **kept, frozen against growth**, because the CLI is not at parity in that direction and the real cost
-  is per-call payload, not resident schema (0019, *proposed*).
+  `o200k_base` tokens resident, 7,388 after compaction) against a consolidated verb set and a single
+  exec-`pandan` tool, and **kept, frozen against growth**, because the CLI is not at parity in that
+  direction and the real cost is per-call payload, not resident schema (0019).

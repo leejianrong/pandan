@@ -7,65 +7,16 @@ import json
 import httpx
 from pandan_client import PandanClient
 
+# The expected tool-name set is the V49 freeze, and it lives in exactly one place:
+# ``tests/test_schema.py``. Bare tool names are the Python function names, which the
+# rebrand does NOT touch — the agent-visible identifier is ``mcp__<server>__<tool>``
+# and the ``<server>`` part comes from the client's ``mcpServers`` key in
+# ``.mcp.json`` (V40 changed it ``kanban`` → ``pandan``), which is not visible from
+# inside the server.
+from test_schema import FROZEN_TOOLS as EXPECTED_TOOLS
+
 from pandan_mcp import server
 from pandan_mcp.server import mcp
-
-# Bare tool names — the Python function names, which the rebrand does NOT touch.
-# The agent-visible identifier is ``mcp__<server>__<tool>``, and the ``<server>``
-# part comes from the client's ``mcpServers`` key in ``.mcp.json`` (V40 changed it
-# ``kanban`` → ``pandan``, so tools are now ``mcp__pandan__*``). None of that is
-# visible from inside the server, so this set is unaffected by the rename.
-EXPECTED_TOOLS = {
-    "list_boards",
-    "create_board",
-    "list_cards",
-    "list_epics",
-    "get_card",
-    "get_epic",
-    "get_board",
-    "create_card",
-    "create_epic",
-    "update_card",
-    "move_card",
-    "delete_card",
-    "update_epic",
-    "delete_epic",
-    "update_board",
-    "delete_board",
-    "warmup",
-    "claim_card",
-    "create_cards",
-    "add_dependency",
-    "remove_dependency",
-    "list_dependencies",
-    "add_link",
-    "remove_link",
-    "add_comment",
-    "list_comments",
-    "list_labels",
-    "create_label",
-    "delete_label",
-    "dispatch",
-    "next",
-    "needs_human",
-    "resolve",
-    "metrics",
-    "activity",
-    "list_notifications",
-    "mark_read",
-    "list_views",
-    "create_view",
-    "delete_view",
-    "update_cards",
-    "list_templates",
-    "create_template",
-    "delete_template",
-    "apply_template",
-    "list_cycles",
-    "create_cycle",
-    "delete_cycle",
-    "cycle_metrics",
-}
 
 
 def _tools():

@@ -531,7 +531,9 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
 - **Notes:** deliberately last. Deciding what MCP can shed requires the CLI to *already* be
   AXI-conformant, or the comparison is against a worse baseline.
 
-> **Phase 1 landed (measure + decide + ADR); Phase 2 (execute) is the freeze.**
+> **✅ Shipped, both phases.** Phase 1 = measure + decide + ADR; Phase 2 = the freeze, the schema
+> compaction (8,775 → **7,388** tokens, −16%, no rename and no removal) and `mcp/README.md`
+> § *Why 49 tools, and why that is frozen*.
 > [ADR 0019](../adr/0019-mcp-surface-right-sizing.md) records it; the harness is
 > [`mcp/scripts/measure_tool_schema_tokens.py`](../../mcp/scripts/measure_tool_schema_tokens.py).
 > Confirmed **49 tools**, resident cost **8,775 `o200k_base`** tokens compact (12,825 pretty-printed —
@@ -549,10 +551,17 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
 > CLI is 11.4× cheaper on real reads — the card's conclusion, for a different reason than the card gives.
 >
 > **Decision: (c)** — keep the breadth as the documented fallback, freeze its growth, and take the free
-> 16% (1,429 tokens of Pydantic `title`/`anyOf` serializer artefact) with no rename or removal.
+> 16% (1,387 tokens of Pydantic `title`/`anyOf` serializer artefact) with no rename or removal.
 > Filed as follow-ups because that is where the tokens are: a `fields` argument on the MCP read tools
 > (~−84% on a real read) and closing the four CLI gaps (which is also what would make option (b)
 > available later).
+>
+> **Two traps the "cosmetic" compaction turned up**, both now pinned by tests: a nullable **enum** must
+> not be collapsed (`{enum: [...], type: [string, null]}` *rejects* null, since `enum` constrains the
+> whole value) — so the collapse is allow-listed to keys provably inert for null; and **`title` is both
+> a JSON Schema annotation and a real argument name** on `create_card`/`update_card`, so the first,
+> blindly-recursive draft deleted those arguments outright. Three invariant tests caught it. Cosmetic is
+> a claim that needs proof, not a category that exempts you from it.
 
 ---
 
