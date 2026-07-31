@@ -15,8 +15,13 @@ abuse hardening + projects + cycles + design system + notifications.
 **in progress**. Its first slice, **V40 — the `simple-kanban` → `pandan` rebrand**
 ([ADR 0018](docs/adr/0018-pandan-rebrand.md), which also names the `kaya` notes sibling), has landed:
 the product is **pandan**, the CLI is **`pandan`** (with a `pdn` alias), env config is **`PANDAN_*`**,
-and newly minted PATs carry **`pandan_pat_`**. Next up is [AXI](https://axi.md/) conformance for the
-CLI and a right-sizing of the 48-tool MCP surface. The rebrand changed no API, schema or migration.
+and newly minted PATs carry **`pandan_pat_`**. The rebrand changed no API, schema or migration.
+[AXI](https://axi.md/) conformance for the CLI is well underway — V50 (release provenance), V42
+(`--fields`), V43 (the error contract) and V47 (`--format {human,json,toon}`) have all landed, through
+`v0.8.0`. What remains is V44–V46 plus V48, and then a right-sizing of the **49-tool** MCP surface
+(V49) — measured at ~10,076 tokens of resident schema per session. **Per-slice status goes stale here
+faster than anywhere else in this file; read [docs/milestone-7/SLICES.md](docs/milestone-7/SLICES.md)
+and the board, not this paragraph.**
 
 Three things the rebrand deliberately did **not** rename, so don't "finish" it:
 - **The `KAN-` / `EPIC-` ticket prefixes** — immutable per-table Postgres sequences (ADR 0006/0009);
@@ -24,10 +29,14 @@ Three things the rebrand deliberately did **not** rename, so don't "finish" it:
 - **The deployed identity.** The app still lives at
   [simple-kanban-jian.fly.dev](https://simple-kanban-jian.fly.dev) under the Fly app
   `simple-kanban-jian`, with the same GitHub OAuth App and `AUTH_SECRET`. The Fly→Fly cutover was
-  **deferred** (KAN-424, blocked on the k8s migration KAN-439) rather than paid twice; the in-place
-  renames that *will* happen — GitHub repo, OAuth App display name, ghcr image path — are KAN-437.
-  The repo URL, the ghcr path (`…/simple-kanban-mcp`) and the docs-site URL therefore still read
-  `simple-kanban`, on purpose.
+  **deferred** (KAN-424, blocked on the k8s migration KAN-439) rather than paid twice.
+  The in-place renames — which are a *different* thing, because they need no create-migrate-destroy
+  cutover — are **KAN-437, and two of the three have now happened**: the **GitHub repo is
+  `leejianrong/pandan`** and the **ghcr path is `ghcr.io/<owner>/pandan-mcp`**. Only the OAuth App
+  *display name* is outstanding (cosmetic, a consent-screen field), plus a ghcr package-visibility
+  flip that cannot happen until the next `v*` tag actually creates the renamed package — both are
+  GitHub web-UI steps for the human owner. **The one thing still reading `simple-kanban` on purpose
+  is the deployed origin**, `simple-kanban-jian.fly.dev`.
 - **Session/wire/storage identifiers** — the `kanbanauth` cookie, the `X-Kanban-Event` outbound
   webhook header, the `kanban.*` logger names, the `kanban.theme` / `kanban.activeBoardId`
   localStorage keys, and the `kanban:kanban@…/kanban` local Postgres credentials. Each would log
