@@ -218,6 +218,58 @@ def test_build_inputs_are_checked_even_without_an_expected_version(run_gate):
     assert f"carries no {PYTHON_LABEL} label" in result.stdout
 
 
+# --- the Dockerfile side of the contract (KAN-475) ---------------------------
+#
+# The gate asserts the LABELS are digest-pinned; it cannot check that the build
+# actually USED those digests. That link is the Dockerfile consuming the two
+# build-args, and it fails SILENTLY: hardcode the refs back into the FROM lines
+# and `--build-arg` becomes a no-op that docker merely warns about, leaving the
+# workflow to stamp labels that no longer describe the image. Nothing downstream
+# would notice, so pin the contract here.
+
+DOCKERFILE = Path(__file__).resolve().parent.parent / "Dockerfile"
+
+
+@pytest.mark.parametrize("arg", ["PYTHON_BASE", "UV_SOURCE"])
+def test_dockerfile_declares_the_build_input_arg(arg):
+    text = DOCKERFILE.read_text()
+    assert f"ARG {arg}=" in text, (
+        f"mcp/Dockerfile must declare `ARG {arg}=<floating default>` — "
+        "publish-mcp-image.yml passes it as a build-arg, and an undeclared "
+        "build-arg is silently ignored, so the recorded label would lie."
+    )
+
+
+@pytest.mark.parametrize("arg", ["PYTHON_BASE", "UV_SOURCE"])
+def test_dockerfile_resolves_each_build_input_through_a_from(arg):
+    """Each ARG must reach a FROM, which is the only place it can take effect."""
+    froms = [
+        line.strip()
+        for line in DOCKERFILE.read_text().splitlines()
+        if line.strip().upper().startswith("FROM ")
+    ]
+    assert any(f"${{{arg}}}" in line for line in froms), (
+        f"no FROM in mcp/Dockerfile expands ${{{arg}}} — the build-arg would be "
+        f"inert and the recorded build-input label would not describe the image. "
+        f"FROM lines found: {froms}"
+    )
+
+
+def test_dockerfile_copies_uv_from_a_stage_not_an_expanded_ref():
+    """`COPY --from=${VAR}` is rejected by BuildKit ("variable expansion is not
+    supported for --from"), so uv must arrive via a named stage. Verified by
+    building it both ways; without this the release fails at build time.
+    """
+    text = DOCKERFILE.read_text()
+    assert "COPY --from=uvsource" in text, (
+        "uv must be copied from the `uvsource` stage. A direct "
+        "`COPY --from=${UV_SOURCE}` does not build at all."
+    )
+    assert "FROM ${UV_SOURCE} AS uvsource" in text, (
+        "the `uvsource` stage must be what expands ${UV_SOURCE}."
+    )
+
+
 def test_fails_when_the_image_is_not_present(run_gate):
     result = run_gate("pandan-mcp:missing", SHA, ref="pandan-mcp:gate")
     assert result.returncode == 1
