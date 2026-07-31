@@ -7,4 +7,7 @@ epic subcommands are KAN-23; packaging polish + README + CI are KAN-24.
 """
 from __future__ import annotations
 
-__version__ = "0.4.0"
+# Bumped on every user-visible CLI change, in the SAME PR as the change (V50,
+# KAN-435 — enforced by the CI `CLI version bump` guard + the pre-push hook).
+# Must stay equal to `version` in pyproject.toml; a unit test asserts it.
+__version__ = "0.5.0"

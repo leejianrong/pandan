@@ -99,6 +99,16 @@ jobs:
       - name: Install deps (incl. build group)
         run: uv sync --frozen --group build --python 3.12
 
+      # Stamp the commit into the package BEFORE freezing (V50, KAN-435) so the
+      # shipped binary's `--version` prints `pandan <ver> (<sha>)` instead of a
+      # bare version that a stale install shares with current source. Writes the
+      # git-ignored `pandan_cli/_build_stamp.py`, which `--collect-submodules
+      # pandan_cli` below sweeps into the onefile; it reads $GITHUB_SHA, so no git
+      # is needed inside the manylinux container. An unstamped build still works —
+      # it just reports itself as a source run.
+      - name: Stamp build provenance
+        run: uv run --frozen python packaging/stamp_build.py
+
       - name: Build --onefile binary
         run: >-
           uv run --frozen --group build pyinstaller --onefile
@@ -152,7 +162,17 @@ jobs:
       # loads under glibc 2.28 — the KAN-81 regression signal.
       - name: Smoke-test the binary
         run: |
+          set -euo pipefail
           ./dist/${{ matrix.asset }} --help
+          # Prove the stamp survived the freeze (V50, KAN-435): the shipped asset
+          # must report this commit, never "source checkout". If this ever fails the
+          # release is unshippable — a binary that can't identify itself is the bug.
+          version_line=$(./dist/${{ matrix.asset }} --version)
+          echo "$version_line"
+          case "$version_line" in
+            *"(${GITHUB_SHA:0:7})"*) echo "build provenance OK" ;;
+            *) echo "::error::--version does not carry this commit (${GITHUB_SHA:0:7}): $version_line"; exit 1 ;;
+          esac
           PANDAN_API_URL=https://simple-kanban-jian.fly.dev ./dist/${{ matrix.asset }} warmup
 
       - name: Attach binary to the Release

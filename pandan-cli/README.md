@@ -159,6 +159,9 @@ the CLI can only touch boards you own. A `board_id` you don't own returns exit `
 The CLI installs two ways: **from source with `uv`**, or as a **prebuilt standalone
 binary** (no Python needed). Both work today — pick whichever fits.
 
+Whichever you pick, `pandan --version` tells you **which build you are running**, not
+just a number — see [Is my `pandan` stale?](#is-my-pandan-stale) before reporting a bug.
+
 ### From source (uv)
 
 The CLI depends on the sibling `pandan-client` package by **path**
@@ -234,6 +237,46 @@ glibc-2.28 environment (`manylinux_2_28`), so it needs **glibc ≥ 2.28** — it
 on **Ubuntu 20.04+, Debian 11+, RHEL/Rocky/Alma 8+** and anything newer. On an
 older distro you'll see `GLIBC_2.xx not found` when it loads; install **from
 source (uv)** above instead (KAN-81).
+
+#### Is my `pandan` stale?
+
+Start every bug report with `pandan --version`. It prints the version **and the
+provenance of the build**, which a version number alone can't give you (V50, KAN-435):
+
+```bash
+$ pandan --version
+pandan 0.5.0 (a10eaee)                                # a released binary, frozen at commit a10eaee
+pandan 0.5.0 (source checkout, not a released build)  # running from a checkout / `uv tool install`
+```
+
+- **`(<7-hex-sha>)`** — a release asset. The sha is the exact commit it was built
+  from, stamped in at build time (`packaging/stamp_build.py`, wired into
+  `.github/workflows/release-cli.yml`); the release job refuses to ship an asset
+  whose `--version` doesn't carry its commit.
+- **`(source checkout, not a released build)`** — no build stamp, so this is source
+  (or a local unstamped build). Its behaviour is whatever your working tree says;
+  don't compare it against release notes.
+- **`-dirty` suffix** (e.g. `(a10eaee-dirty)`) — built from an uncommitted tree. The
+  sha is only a hint; the code is unpublished.
+
+**How to tell a release binary is stale.** Compare the printed version with the
+[latest release](https://github.com/leejianrong/simple-kanban/releases/latest): if
+yours is lower, you're behind and a fix you're missing may already be shipped. If the
+version matches but you suspect otherwise, compare the sha against that release's tag
+commit. This exists because it once wasn't detectable: `0.3.0` was released, two
+user-visible fixes landed the same day without a bump, and `--version` reported
+`pandan 0.3.0` for both the old binary and the fixed source — which produced two false
+bug reports. Every user-visible CLI change now bumps the version in the same PR (CI's
+`CLI version bump` check enforces it), so **the version moving is a reliable signal**.
+
+**Upgrading.** Re-run the `curl … releases/latest/download/…` command above (it always
+resolves to the newest release) and overwrite the old file, then re-check
+`pandan --version`. From source: `git pull` in the checkout and
+`uv tool install --force ./pandan-cli`. If you have an old `kan`/`pdn` on your `PATH`
+from an earlier install, replace it with a symlink to the new binary rather than
+leaving a second, older copy around (`ln -sf ~/.local/bin/pandan ~/.local/bin/kan`) —
+two binaries with the same name in different `PATH` entries is the classic way to
+"fix" a bug and still see it (check with `which -a pandan`).
 
 ## Usage examples
 

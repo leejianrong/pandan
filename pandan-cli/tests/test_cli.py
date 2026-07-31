@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import io
 import json
+import pathlib
+import re
+import subprocess
 
 import httpx
 import pytest
 from pandan_client import PandanApiError
 
-from pandan_cli import cli, config
+from pandan_cli import build_info, cli, config
 
 # The real find_mcp_json, captured before the autouse fixture patches it out — so
 # the test that exercises the upward walk itself can reach the genuine impl.
@@ -254,7 +257,62 @@ def test_version_flag_prints_version_and_exits_zero(flag, capsys):
     # version bump doesn't need a test edit (it did for 0.3.0 → 0.4.0 at the rebrand).
     from pandan_cli import __version__
 
-    assert capsys.readouterr().out.strip() == f"pandan {__version__}"
+    out = capsys.readouterr().out.strip()
+    assert out.startswith(f"pandan {__version__} (")
+    # The test suite runs from a source checkout, so there is no build stamp and the
+    # line must say so rather than look like a release (V50, KAN-435).
+    assert out == f"pandan {__version__} ({build_info.SOURCE_LABEL})"
+
+
+# --- build provenance in --version (V50, KAN-435) ---------------------------
+
+
+def test_version_string_released_build_shows_commit():
+    # Metadata is injected, not built: a unit test must not depend on PyInstaller.
+    assert build_info.version_string("0.5.0", "a10eaee") == "pandan 0.5.0 (a10eaee)"
+    # A build off an uncommitted tree is flagged as such by stamp_build.py.
+    assert build_info.version_string("0.5.0", "a10eaee-dirty") == "pandan 0.5.0 (a10eaee-dirty)"
+
+
+@pytest.mark.parametrize("sha", [None, "", "   "])
+def test_version_string_source_run_is_honest_and_never_claims_a_release(sha):
+    # No stamp (or a blank one) must not crash and must not read as a release.
+    out = build_info.version_string("0.5.0", sha)
+    assert out == "pandan 0.5.0 (source checkout, not a released build)"
+    assert "source" in out
+
+
+def test_version_string_is_ascii_single_line():
+    # --version is machine-readable stdout on every platform: no em dashes, one line.
+    for sha in ("a10eaee", None):
+        out = build_info.version_string("0.5.0", sha)
+        out.encode("ascii")  # raises if a non-ASCII char sneaks in
+        assert "\n" not in out
+
+
+def test_declared_version_matches_pyproject():
+    # The bump-on-fix guard only checks that the version FILES moved; this catches
+    # the half-bump (pyproject bumped, __init__ not — the KAN-46-era drift).
+    from pandan_cli import __version__
+
+    pyproject = (pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
+    declared = re.search(r'^version = "([^"]+)"', pyproject, re.MULTILINE)
+    assert declared is not None
+    assert declared.group(1) == __version__
+
+
+def test_build_stamp_is_not_committed():
+    # `_build_stamp.py` is generated + git-ignored. If it is ever committed, every
+    # source checkout starts reporting itself as a release — the exact confusion
+    # V50 exists to remove. (After a local stamped build, delete it.)
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    tracked = subprocess.run(
+        ["git", "ls-files", "pandan-cli/pandan_cli/_build_stamp.py"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    assert tracked.stdout.strip() == ""
 
 
 # --- each command calls the right client method with the right args ---------
