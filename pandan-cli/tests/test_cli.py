@@ -248,12 +248,25 @@ def patch_client(monkeypatch, fake: FakeClient) -> FakeClient:
 def data_out(capsys) -> str:
     """stdout with V46's ``help:`` next-step lines removed (KAN-429).
 
-    ``_emit`` appends those to the decision-point verbs (``get``/``create``/``move``/
-    ``next``/…) after the result. The assertions that use this helper are about the
-    row itself, so they read the data lines only rather than restating V46's contract,
-    which is pinned in ``tests/test_content_first.py``."""
+    ``_emit`` prints those for the hinted verbs (``get``/``create``/``move``/``next``/
+    ``list``/…) after the result and — since KAN-492 — *before* V44's aggregate. The
+    assertions that use this helper are about the row itself, so they read the data
+    lines only rather than restating V46's contract, which is pinned in
+    ``tests/test_content_first.py``."""
     out = capsys.readouterr().out
     return "\n".join(line for line in out.splitlines() if not line.startswith(cli.HINT_PREFIX))
+
+
+# ``list``'s own hints (KAN-492), printed between the rows and V44's aggregate. The
+# byte-exact ``list`` assertions below splice this in rather than filtering it out with
+# ``data_out``, so they keep proving that nothing *else* reached stdout — and that the
+# aggregate is still the final line.
+LIST_HINTS = "help: pandan get <id>\nhelp: pandan move <id> in_progress\n"
+
+
+def data_out_lines(out: str) -> list[str]:
+    """``out``'s lines minus the ``help:`` hints — for counting *data* lines."""
+    return [line for line in out.splitlines() if not line.startswith(cli.HINT_PREFIX)]
 
 
 class Err(NamedTuple):
@@ -951,18 +964,23 @@ def test_json_flag_before_subcommand(monkeypatch, env, capsys):
 
 def test_human_output_is_concise_line(monkeypatch, env, capsys):
     # CARD has no story_points → rendered pts=- (never the literal "None").
-    # The row is followed by V44's aggregate line (KAN-427).
+    # The row is followed by `list`'s hints (KAN-492) and then V44's aggregate
+    # line (KAN-427) — in that order, so `tail -1` is still the aggregate.
     patch_client(monkeypatch, FakeClient(result={"cards": [CARD]}))
     cli.run(["list"])
     out = capsys.readouterr().out.strip()
-    assert out == "KAN-1\ttodo\tShip it\tpts=-\n1 card · 1 todo · 0 in_progress · 0 done"
+    assert out == (
+        "KAN-1\ttodo\tShip it\tpts=-\n"
+        + LIST_HINTS
+        + "1 card · 1 todo · 0 in_progress · 0 done"
+    )
 
 
 def test_human_output_empty_list(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"cards": []}))
     cli.run(["list"])
     assert capsys.readouterr().out.strip() == (
-        "(no cards)\n0 cards · 0 todo · 0 in_progress · 0 done"
+        "(no cards)\n" + LIST_HINTS + "0 cards · 0 todo · 0 in_progress · 0 done"
     )
 
 
@@ -2167,6 +2185,7 @@ def test_default_row_is_byte_identical_without_fields(monkeypatch, env, capsys):
     assert capsys.readouterr().out == (
         "KAN-7\ttodo\tShip it\tpts=3\n"
         "KAN-8\tdone\tNext\tpts=-\n"
+        + LIST_HINTS
         + FCARD_SUMMARY_LINE
     )
 
@@ -2177,6 +2196,7 @@ def test_fields_projects_exactly_the_named_columns(monkeypatch, env, capsys):
     assert capsys.readouterr().out == (
         "KAN-7\tShip it\tagent:v42\thigh\n"
         "KAN-8\tNext\t-\tnone\n"          # a null assignee renders `-`, never "None"
+        + LIST_HINTS
         + FCARD_SUMMARY_LINE
     )
 
@@ -2184,7 +2204,7 @@ def test_fields_projects_exactly_the_named_columns(monkeypatch, env, capsys):
 def test_fields_accepts_the_raw_api_key_and_its_alias(monkeypatch, env, capsys):
     """`ticket`/`pts` are aliases of `ticket_number`/`story_points`; both spellings
     work and both print the BARE value (the `pts=` label belongs to the default row)."""
-    one_card = "1 card · 1 todo · 0 in_progress · 0 done\n"
+    one_card = LIST_HINTS + "1 card · 1 todo · 0 in_progress · 0 done\n"
     patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
     assert cli.run(["list", "--fields", "ticket_number,pts"]) == cli.EXIT_OK
     assert capsys.readouterr().out == "KAN-7\t3\n" + one_card
@@ -2197,7 +2217,7 @@ def test_fields_are_case_insensitive_and_tolerate_spaces(monkeypatch, env, capsy
     patch_client(monkeypatch, FakeClient(result={"cards": [FCARD_A]}))
     assert cli.run(["list", "--fields", " Ticket , TITLE "]) == cli.EXIT_OK
     assert capsys.readouterr().out == (
-        "KAN-7\tShip it\n1 card · 1 todo · 0 in_progress · 0 done\n"
+        "KAN-7\tShip it\n" + LIST_HINTS + "1 card · 1 todo · 0 in_progress · 0 done\n"
     )
 
 
@@ -2211,6 +2231,7 @@ def test_fields_renders_scalars_lists_and_nulls_compactly(monkeypatch, env, caps
     assert capsys.readouterr().out == (
         "false\tbug\t3,9\t-\n"
         "true\t-\t-\t-\n"
+        + LIST_HINTS
         + FCARD_SUMMARY_LINE
     )
 
@@ -2222,8 +2243,9 @@ def test_fields_keeps_a_projected_row_on_one_line(monkeypatch, env, capsys):
     assert cli.run(["list", "--fields", "ticket,description"]) == cli.EXIT_OK
     out = capsys.readouterr().out
     assert out.splitlines()[0] == "KAN-7\tline one line two with tab"
-    # One row + V44's aggregate — the embedded newline did not split the row.
-    assert len(out.splitlines()) == 2
+    # One row + `list`'s two hints + V44's aggregate — the embedded newline did not
+    # split the row. Counted on the hint-free output so the number stays about the row.
+    assert len(data_out_lines(out)) == 2
 
 
 def test_fields_unknown_name_is_a_clean_error_naming_the_field(monkeypatch, env, capsys):
@@ -2255,7 +2277,7 @@ def test_fields_preserves_the_definitive_empty_state(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"cards": []}))
     assert cli.run(["list", "--fields", "ticket,title"]) == cli.EXIT_OK
     assert capsys.readouterr().out == (
-        "(no cards)\n0 cards · 0 todo · 0 in_progress · 0 done\n"
+        "(no cards)\n" + LIST_HINTS + "0 cards · 0 todo · 0 in_progress · 0 done\n"
     )
 
 
@@ -2266,7 +2288,8 @@ def test_fields_preserves_the_next_cursor_hint(monkeypatch, env, capsys):
     assert cli.run(["list", "--fields", "ticket"]) == cli.EXIT_OK
     assert capsys.readouterr().out == (
         "KAN-7\n(more — next cursor: abc123)\n"
-        "1 card · 1 todo · 0 in_progress · 0 done\n"
+        + LIST_HINTS
+        + "1 card · 1 todo · 0 in_progress · 0 done\n"
     )
 
 

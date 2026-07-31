@@ -245,8 +245,9 @@ def run_capture(monkeypatch, capsys, argv, result) -> str:
     assert cli.run(argv) == cli.EXIT_OK
     return capsys.readouterr().out
 def without_hints(out: str) -> str:
-    """``out`` minus V46's ``help:`` next-step lines (KAN-429), which ``_emit`` appends
-    after the result on the decision-point verbs (``get``/``create``/``move``/…).
+    """``out`` minus V46's ``help:`` next-step lines (KAN-429), which ``_emit`` prints
+    for the hinted verbs (``get``/``create``/``move``/``list``/…) after the result and,
+    since KAN-492, above the V44 aggregate line rather than below it.
 
     Applied at the assertion site and deliberately **not** inside ``run_capture``:
     every "stdout still parses as JSON/TOON" check in this suite must stay able to
@@ -332,9 +333,13 @@ def test_no_flag_and_format_human_are_byte_identical(monkeypatch, capsys, argv, 
 
 def test_the_default_list_row_is_still_tab_separated_with_no_keys(monkeypatch, capsys):
     out = run_capture(monkeypatch, capsys, ["list", "--board", "5"], CARDS_PAGE)
+    # `list` carries hints since KAN-492, printed between the rows and the aggregate;
+    # they are listed here rather than filtered so this stays a whole-stdout pin.
     assert out.splitlines() == [
         "KAN-1\tin_progress\tone\tpts=3",
         "KAN-2\tin_progress\ttwo\tpts=3",
+        "help: pandan get <id>",
+        "help: pandan move <id> in_progress",
         "2 cards · 0 todo · 2 in_progress · 0 done",
     ]
 

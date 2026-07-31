@@ -51,17 +51,21 @@ all it prints its own identity (version + build provenance + the exact executabl
 re-invoke), a one-sentence description, and then the **default board's open cards**
 with V44's aggregate — exit **0**. No default board configured → the board list (the
 content you need to pick one). No token → V43's structured config error, same as any
-other verb. ``--help`` still prints the usage text, byte-for-byte unchanged (AXI 10),
-because the bare branch is an argv **allow-list** (``_is_bare_invocation``): anything
+other verb. ``--help`` still prints the usage text, and the bare branch cannot have
+disturbed it, because it is an argv **allow-list** (``_is_bare_invocation``): anything
 that isn't "no verb, at most the global output flags" reaches argparse untouched.
+``overview`` is a **listed** verb in ``--help`` (KAN-492); it shipped unlisted in V46
+only to keep that slice's byte-freeze green, which was a one-slice regression guard,
+not a permanent contract.
 
 **Results carry ``help[]`` next-step hints** (V46, KAN-429 — AXI 9): a ``help: pandan
 move <id> in_progress`` line per plausible next step, printed after the result.
 They are **templates** — a fixed flag is carried forward (``--board 7``), every
 runtime value stays parameterised (``<id>``, ``"…"``, ``N``) — and they are
-suppressed under ``--format json``/``toon``. Hints attach to the *decision-point*
-verbs only, never to a list verb, whose last stdout line is V44's aggregate and a
-published ``tail -1`` contract (see ``_HINTS``).
+suppressed under ``--format json``/``toon``. Hints are printed **before** V44's
+aggregate (KAN-492), so a hinted list verb still ends with its aggregate: the
+``tail -1`` contract is preserved by *ordering* rather than by withholding the hint
+(see ``_HINTS``).
 
 Failures are **structured and on stdout** (V43, KAN-426 — AXI 6): one tab-separated
 row ``error<TAB><code><TAB><message><TAB><arg>`` (``-`` when no single argument is at
@@ -458,15 +462,21 @@ def _emit(
 
     ``hints`` are V46's ``help[]`` next-step templates (KAN-429), printed here and
     **only** on the human branch — after the ``_humanize`` line and *inside* the
-    ``else``, which is what "suppressed under ``--json``/``--format toon``" means
-    mechanically — and after the V44 summary line, so the aggregate stays the last
-    *data* line. They are built by ``_hint_lines`` from the parsed namespace, so this
-    function stays a printer and never has to know which verb ran.
+    ``fmt``-guard's fall-through, which is what "suppressed under ``--json``/``--format
+    toon``" means mechanically. They print **before** the V44 summary line (KAN-492):
+    the aggregate is a published ``tail -1`` contract, so putting the hints above it
+    lets any verb carry hints — including a list verb — without breaking it. V46 got
+    this order the other way round and paid for it by withholding hints from every
+    list verb; ordering is the cheaper of the two prices. They are built by
+    ``_hint_lines`` from the parsed namespace, so this function stays a printer and
+    never has to know which verb ran.
     """
     if fmt in STRUCTURED_FORMATS:
         print(_render_structured(_structured_payload(result, full=full, limit=limit), fmt))
         return
     print(_humanize(result, noun=noun, fields=fields, limit=_text_limit(full=full, limit=limit)))
+    for line in hints or ():
+        print(line)
     # V44 (KAN-427): a list verb's pre-computed aggregate, always its last line, so
     # an agent reads counts off `tail -1` instead of paying a second round trip.
     # Non-list results get none (nothing to total); the structured formats carry the
@@ -474,8 +484,6 @@ def _emit(
     found = _summary_for(result)
     if found is not None:
         print(_summary_line(*found))
-    for line in hints or ():
-        print(line)
 
 
 def _humanize(
@@ -1326,14 +1334,18 @@ def _summary_line(kind: str, summary: dict[str, Any]) -> str:
 #   command resolves it the same way, so spelling it out would be noise. Only
 #   templates carrying the `{board}` slot are board-scoped, so a hint can never
 #   grow a flag its verb doesn't accept.
-# * **Decision-point verbs only — never a list verb.** A list verb's last stdout
-#   line is V44's aggregate, and the parser epilog promises exactly that ("Every
-#   list verb ends with a pre-computed aggregate"), i.e. `tail -1`. Appending hints
-#   there would break a published contract for the verbs whose next step is already
-#   obvious from the rows. Hints go where the next step is genuinely ambiguous: a
-#   single entity, a mutation's receipt, and the bare overview — which is the one
-#   aggregate-bearing verb with hints, and can afford them because it ships in this
-#   same slice with no prior `tail -1` contract to break.
+# * **A list verb may carry hints, because the hints print ABOVE the aggregate.**
+#   V46 excluded list verbs outright: the parser epilog promises "Every list verb ends
+#   with a pre-computed aggregate", i.e. `tail -1`, and V46 printed hints *after* the
+#   summary line, so a hinted list verb would have broken that contract. KAN-492
+#   reversed the ordering in ``_emit`` instead (hints, then aggregate), which preserves
+#   the contract literally and word-for-word while letting `list` carry what is
+#   arguably the most useful hint in the tool — `pandan move <id> in_progress`, the
+#   next step after looking at the board. What is left of the old rule is the part that
+#   was really about usefulness, not ordering: hints go where the next step is
+#   genuinely ambiguous (a single entity, a mutation's receipt, the overview, a card
+#   list), not on every list verb by reflex — `label list` / `view list` and friends
+#   suggest nothing a caller isn't already about to type.
 HINT_PREFIX = "help:"
 
 # The slot an explicit ``--board`` is substituted into. Plain ``str.replace``, not
@@ -1347,6 +1359,11 @@ _HINTS: dict[str, tuple[str, ...]] = {
         "pandan next --claim{board}",
         "pandan get <id>",
     ),
+    # The card list is the one list verb with hints (KAN-492) — `get` to read one,
+    # `move` to start one. Neither template carries the `{board}` slot because neither
+    # verb accepts `--board`, which is the rule that stops a hint growing a flag its
+    # verb would reject.
+    "list": ("pandan get <id>", "pandan move <id> in_progress"),
     "get": ("pandan move <id> in_progress", 'pandan comment add <id> --body "…"'),
     "create": ("pandan move <id> in_progress", "pandan update <id> --points N"),
     "update": ("pandan get <id>",),
@@ -2361,13 +2378,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
 
     # The content-first bare invocation (V46, KAN-429 — AXI 8): `pandan` with no verb
-    # is rewritten to `pandan overview` in ``run()``. Registered **without** a
-    # ``help=`` kwarg on purpose — argparse only lists a subcommand in ``--help``
-    # when one is given (it builds the pseudo-action from `if 'help' in kwargs`), and
-    # AXI 10 asks for that text to stay byte-identical, so the verb is unlisted. It
-    # is still a real command: `pandan overview` is the same code path, which is what
-    # makes the front door testable by name and scriptable without a naked `pandan`.
-    p_overview = sub.add_parser(OVERVIEW_COMMAND, parents=[common])
+    # is rewritten to `pandan overview` in ``run()``.
+    #
+    # V46 registered this parser with **no** ``help=`` kwarg, which is precisely what
+    # kept it out of ``--help``: argparse builds the choices pseudo-action only
+    # ``if 'help' in kwargs`` (``argparse._SubParsersAction.add_parser``), so a
+    # help-less subparser is a working but invisible verb. That was done to keep V46's
+    # AXI 10 golden green, and it inverted the principle the golden exists to serve —
+    # AXI's disclosure rules ask a tool to say what it can do, and an undiscoverable
+    # verb is the opposite. KAN-492 settles it: the freeze was a one-slice *regression*
+    # guard ("V46 did not damage the usage text"), not a permanent contract, so the
+    # verb gets its ``help=`` and the golden was regenerated in the same diff. The
+    # guard now detects change instead of forbidding it, and a companion test asserts
+    # no top-level verb is hidden at all, so this cannot silently recur.
+    p_overview = sub.add_parser(
+        OVERVIEW_COMMAND,
+        parents=[common],
+        help="live board state (what bare pandan prints)",
+    )
     p_overview.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_overview.add_argument(
         "--limit", type=int, default=OVERVIEW_FETCH_LIMIT, help="max cards to fetch"
@@ -2434,7 +2462,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_list.add_argument("--limit", type=int, help="max cards to return")
     _add_fields_arg(p_list, "ticket,title,assignee,priority")
-    p_list.set_defaults(func=_cmd_list)
+    p_list.set_defaults(func=_cmd_list, hints=_HINTS["list"])
 
     p_get = sub.add_parser("get", parents=[common], help="get a single card by id")
     p_get.add_argument(

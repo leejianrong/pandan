@@ -24,6 +24,18 @@ what makes it a regression guard (AXI 10) rather than a restatement of the curre
 code. The comparison is **word-for-word**, with the usage line additionally pinned to
 the byte; ``help_words`` explains why byte-exactness for the whole text would pin the
 interpreter's argparse rather than this CLI.
+
+**KAN-492 amended two of V46's decisions**, both of which existed only to keep that
+golden green, and neither of which was ever the point of the guard:
+
+* ``overview`` is now **listed** in ``--help`` (it has a ``help=`` kwarg), and the
+  golden was regenerated mechanically from the new parser in the same diff. The guard
+  is a *change-detector*, not a freeze: it still fails on any drift nobody intended,
+  and ``test_no_top_level_verb_is_hidden_from_help`` now additionally makes hiding a
+  verb — the thing V46 did to stay green — a test failure in its own right.
+* **List verbs carry hints**, because ``_emit`` prints hints *above* V44's aggregate
+  instead of below it. V46 withheld them to protect the epilog's ``tail -1`` promise;
+  reordering protects the same promise word-for-word and gets the hint back.
 """
 from __future__ import annotations
 
@@ -214,7 +226,8 @@ def test_bare_invocation_shows_open_cards_only_and_counts_what_it_printed(
     out = run_ok(monkeypatch, capsys, [], result=page)
     assert "KAN-3\t" not in out
     lines = out.splitlines()
-    assert lines[-4] == "2 cards · 1 todo · 1 in_progress · 0 done"
+    # Since KAN-492 the aggregate is the LAST line here too — hints print above it.
+    assert lines[-1] == "2 cards · 1 todo · 1 in_progress · 0 done"
     assert cli.OPEN_COLUMNS == ("todo", "in_progress")
 
 
@@ -242,7 +255,7 @@ def test_no_board_configured_lists_boards(monkeypatch, capsys, token):
     assert [name for name, _ in built[0].calls] == ["list_boards"]
     assert "no default board configured · your boards:" in out
     assert "5\tRoadmap" in out or "Roadmap" in out
-    assert out.splitlines()[-4] == "1 board"
+    assert out.splitlines()[-1] == "1 board"
 
 
 def test_no_token_is_the_structured_config_error_not_a_traceback(monkeypatch, capsys):
@@ -264,8 +277,9 @@ def test_no_token_is_the_structured_config_error_not_a_traceback(monkeypatch, ca
 
 
 def test_pandan_overview_names_the_same_code_path(monkeypatch, capsys, board):
-    """The bare rewrite targets a real (if unlisted) verb, so the front door is
-    reachable by name — which is also how a script asks for it explicitly."""
+    """The bare rewrite targets a real, and since KAN-492 a *listed*, verb, so the
+    front door is reachable by name — which is also how a script asks for it
+    explicitly."""
     bare = run_ok(monkeypatch, capsys, [], result=PAGE)
     named = run_ok(monkeypatch, capsys, [cli.OVERVIEW_COMMAND], result=PAGE)
     assert bare == named
@@ -406,6 +420,7 @@ def test_the_wait_notice_never_lands_on_stdout(monkeypatch, capsys, board):
 # assert that no identifier from the result reached a hint.
 HINTED: dict[str, tuple[list[str], dict]] = {
     "overview": ([], PAGE),
+    "list": (["list"], PAGE),
     "get": (["get", str(CARD_ID)], _card()),
     "create": (["create", "a card", "--board", "5"], _card()),
     "update": (["update", str(CARD_ID), "--points", "3"], _card()),
@@ -541,47 +556,70 @@ def test_a_board_from_the_environment_is_not_carried_forward(monkeypatch, capsys
 
 
 @pytest.mark.parametrize(
-    "argv,result,expected",
+    "argv,result,expected,hinted",
     [
-        (["list"], PAGE, "2 cards · 1 todo · 1 in_progress · 0 done"),
-        (["board", "list"], {"boards": [BOARD]}, "1 board"),
-        (["epic", "list"], {"epics": []}, "0 epics · 0/0 stories done (0%)"),
-        (["comment", "list", str(CARD_ID)], {"comments": []}, "0 comments"),
+        (["list"], PAGE, "2 cards · 1 todo · 1 in_progress · 0 done", True),
+        (["board", "list"], {"boards": [BOARD]}, "1 board", False),
+        (["epic", "list"], {"epics": []}, "0 epics · 0/0 stories done (0%)", False),
+        (["comment", "list", str(CARD_ID)], {"comments": []}, "0 comments", False),
     ],
 )
 def test_a_list_verb_still_ends_with_its_aggregate(
-    monkeypatch, capsys, argv, result, expected, board
+    monkeypatch, capsys, argv, result, expected, hinted, board
 ):
     """V44's promise — restated in the parser epilog as "Every list verb ends with a
-    pre-computed aggregate" — is a ``tail -1`` contract. Hints deliberately do **not**
-    attach to list verbs, so it still holds literally."""
+    pre-computed aggregate" — is a ``tail -1`` contract, and it is the reason V46
+    withheld hints from every list verb.
+
+    KAN-492 keeps the promise a different way: ``_emit`` prints hints **above** the
+    aggregate, so ``list`` can carry the tool's most useful hint
+    (``pandan move <id> in_progress``) while ``tail -1`` still returns the counts. The
+    ``hinted`` column is what makes this a real assertion rather than a filter — for
+    ``list`` the hints must be *present* and the aggregate must *still* be last; for
+    the others the exclusion is asserted as before."""
     out = run_ok(monkeypatch, capsys, argv, result=result, results={"get_card": _card()})
     assert out.splitlines()[-1] == expected
-    assert cli.HINT_PREFIX not in out
+    assert bool(hints_in(out)) is hinted
+    if hinted:
+        # The hints really are above it — not merely absent from the final line.
+        assert out.splitlines()[-2].startswith(cli.HINT_PREFIX)
 
 
-def test_on_the_overview_the_aggregate_still_precedes_the_hints(monkeypatch, capsys, board):
-    """The one aggregate-bearing verb that does carry hints — it ships in this slice,
-    so no ``tail -1`` contract predates it — keeps the data last among the data."""
-    out = run_ok(monkeypatch, capsys, [], result=PAGE)
+@pytest.mark.parametrize("argv", [[], ["list"]])
+def test_the_hints_print_above_the_aggregate_not_after_it(monkeypatch, capsys, argv, board):
+    """The ordering KAN-492 reversed, pinned for both aggregate-bearing hinted verbs.
+
+    V46 printed the aggregate first and the hints after it, which is why a hinted list
+    verb would have broken the ``tail -1`` contract. Asserted as a *relation* between
+    the two line positions, plus "nothing but the aggregate after the last hint", so
+    the guard fails whichever way the order drifts."""
+    out = run_ok(monkeypatch, capsys, argv, result=PAGE)
     lines = out.splitlines()
     aggregate = next(i for i, line in enumerate(lines) if line.startswith("2 cards · "))
-    first_hint = next(i for i, line in enumerate(lines) if line.startswith(cli.HINT_PREFIX))
-    assert aggregate < first_hint
-    assert lines[first_hint:] == hints_in(out)  # nothing but hints after the first
+    last_hint = max(i for i, line in enumerate(lines) if line.startswith(cli.HINT_PREFIX))
+    assert last_hint < aggregate
+    assert aggregate == len(lines) - 1  # the aggregate is the final line, i.e. `tail -1`
 
 
 # --- 3. `--help` is unchanged (AXI 10 regression guard) ----------------------
 
 
-def test_help_text_is_word_for_word_unchanged_from_the_pre_slice_golden(monkeypatch, capsys):
+def test_help_text_is_word_for_word_unchanged_from_the_golden(monkeypatch, capsys):
     """Content-first must not cost the usage text. The golden was captured from
-    ``origin/main`` before this slice existed, so any drift in the help *surface* — a
-    newly visible subcommand, a reworded epilog, a dropped line — fails here. Update
-    the golden only alongside a deliberate help change in the same diff.
+    ``origin/main`` before V46 existed, so any drift in the help *surface* — a newly
+    visible subcommand, a reworded epilog, a dropped line — fails here.
+
+    **It is a change-detector, not a freeze** (KAN-492). V46 read it as the latter and
+    shipped ``overview`` unlisted to keep it green, which inverted the disclosure
+    principle the AXI 10 guard exists to serve. A deliberate help change may therefore
+    regenerate the golden — mechanically, from the parser, in the *same* diff, with the
+    resulting one-line delta shown in the PR — and the guard keeps its teeth because
+    every *other* verb's line, the whole epilog and the usage text are still pinned,
+    and because the companion test below forbids the specific dodge V46 took.
 
     Compared word-for-word rather than byte-for-byte; see ``help_words`` for why
-    (argparse's column layout tracks the interpreter, not this CLI)."""
+    (argparse's column layout tracks the interpreter, not this CLI). KAN-492 did not
+    re-tighten that: the usage line stays the only byte-pinned part."""
     monkeypatch.setenv("COLUMNS", GOLDEN_WIDTH)
     with pytest.raises(SystemExit) as exc:
         cli.run(["--help"])
@@ -621,6 +659,36 @@ def test_help_still_prints_usage_and_makes_no_network_call(monkeypatch, capsys):
     assert exc.value.code == 0
     out = capsys.readouterr().out
     assert out.startswith("usage: pandan [-h] [-v] <command> ...")
-    # Usage, not board state — and the unlisted overview verb stays unlisted.
+    # Usage, not board state.
     assert "open cards" not in out
-    assert cli.OVERVIEW_COMMAND not in out
+
+
+def test_no_top_level_verb_is_hidden_from_help(monkeypatch, capsys):
+    """**The guard KAN-492 adds, and the reason the golden can be regenerated safely.**
+
+    V46's ``overview`` worked but was invisible: ``add_parser`` builds the choices
+    pseudo-action only ``if 'help' in kwargs``, so omitting ``help=`` registers a
+    working verb that ``--help`` never mentions. That is the opposite of what AXI's
+    disclosure principles ask for, and it happened as a side effect of protecting the
+    golden. This asserts the property directly — every verb argparse will *accept* is
+    a verb ``--help`` *lists* — so the trade can't be made again silently, and so
+    "regenerate the golden" can never mean "hide the thing that changed".
+
+    Checked two ways, because either alone passes for the wrong reason: the name must
+    appear in the subcommand block, and argparse must have built a help entry for it
+    (a verb merely mentioned in the epilog would satisfy the first)."""
+    monkeypatch.setenv("COLUMNS", GOLDEN_WIDTH)
+    with pytest.raises(SystemExit):
+        cli.run(["--help"])
+    out = capsys.readouterr().out
+    listed = {line.split()[0] for line in out.splitlines() if line.startswith("    ")}
+
+    parser = cli.build_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    assert sub.choices, "no subcommands found — the walk itself broke"
+    for name in sub.choices:
+        assert name in listed, f"{name!r} is a working verb that --help does not list"
+    # The pseudo-actions argparse renders from `help=` — one per verb, none missing.
+    assert {action.dest for action in sub._choices_actions} == set(sub.choices)
+    # And the verb this test was written for is one of them.
+    assert cli.OVERVIEW_COMMAND in listed
