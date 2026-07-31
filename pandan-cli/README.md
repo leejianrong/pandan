@@ -180,9 +180,9 @@ pandan epic list --fields ticket,name,lead,target_date
   An empty `--fields ""` is argparse's business, so it's a usage error, exit `2`.
 - **`--fields` shapes the human row only — it never changes the structured formats**
   (matching the flag's own help text: *"Affects human output only, never --format
-  json/toon"*). Both are a verbatim passthrough of the full payload (see below), so
-  there is nothing to project; combining the flags is allowed and the `json`/`toon`
-  output is byte-identical either way.
+  json/toon"*). Their **rows** are a verbatim passthrough of the full payload (see
+  below), so there is nothing to project; combining the flags is allowed and the
+  `json`/`toon` output is identical either way.
 - The **empty state** (`(no cards)`) and the pagination hint
   (`(more — next cursor: …)`) print unchanged under a projection.
 - Not to be confused with `--sort`'s **sort keys**, which order the rows rather than
@@ -224,21 +224,66 @@ Worked `jq` one-liners (`jq` wants JSON, so these use `--json`, not `toon`):
 
 ```bash
 pandan list --json | jq -r '.cards[] | "\(.ticket_number)\t\(.title)"'   # one line per card
-pandan list --json | jq '.cards | length'                                # count them
+pandan list --json | jq '.summary.count'                                 # count them — no second call
+pandan list --json | jq '.summary'                                       # the whole pre-computed aggregate
 pandan next --json | jq -r '.card.ticket_number // "none ready"'         # the envelope is "card"
 pandan get KAN-430 --json | jq -r .title                                 # single reads are BARE
 ```
 
-**Why the envelope, and why it won't be flattened.** Both structured formats are a
-deliberate verbatim passthrough of the client result — the CLI applies no reshaping of
-its own (see `_structured_payload` in `pandan_cli/cli.py`). The **list** envelopes are
-added by the shared
-[`pandan-client`](../pandan-client/): a raw `GET /api/v1/cards` returns a *bare array*
-and the client wraps it as `{"cards": [...]}` so out-of-band metadata has somewhere to
-live — `next_cursor` (the `X-Next-Cursor` keyset pagination header) already rides there,
-and slice **V44 (KAN-427)** adds a `summary` field beside `cards`. So the envelope is
+**Why the envelope, and why it won't be flattened.** The **rows** in a structured result
+are a verbatim passthrough of the client result — the CLI reshapes none of them (see
+`_structured_payload` in `pandan_cli/cli.py`). The **list** envelopes are added by the
+shared [`pandan-client`](../pandan-client/): a raw `GET /api/v1/cards` returns a *bare
+array* and the client wraps it as `{"cards": [...]}` so out-of-band metadata has
+somewhere to live — `next_cursor` (the `X-Next-Cursor` keyset pagination header) rides
+there, and since **V44 (KAN-427)** so does `summary` (below). So the envelope is
 load-bearing: **don't "fix" it into a bare array** — that would break pagination and
 V44, and silently change a working contract for every existing consumer.
+
+> **One qualification, added by V44.** A structured *list* result is no longer a
+> byte-verbatim passthrough: `summary` is a key the CLI adds. The **rows are still
+> untouched**, and single-entity reads (`get`, `next`, `metrics`, delete receipts) carry
+> no `summary` at all — so anything reading `.cards[]`, `.card` or a bare object is
+> unaffected. This was planned, not incidental: the envelope exists precisely so a key
+> like `summary` has somewhere to go.
+
+### Aggregates on every list verb (V44, KAN-427)
+
+Every list verb ends with a **pre-computed aggregate**, so counting never costs a second
+round trip. In human output it is a trailing line; under `--json` / `--format toon` it is
+a `summary` object beside the rows.
+
+```
+$ pandan list
+KAN-431	in_progress	V48 · Ambient context…	pts=3
+…
+117 cards · 9 todo · 2 in_progress · 106 done · 1 needs-human
+```
+
+**It describes the rows you got back, not the whole board.** Under `--limit` or any
+filter the aggregate is scoped to the returned set — `pandan list --limit 3` on the board
+above reports `3 cards · 0 todo · 0 in_progress · 3 done`. This is deliberate and pinned
+by a test: an aggregate that silently described the board would be worse than none, since
+you could not tell which question it answered.
+
+An **empty** result still prints a definitive zero state (`(no cards)` followed by
+`0 cards · 0 todo · 0 in_progress · 0 done`) rather than nothing at all, so "no matches"
+is never ambiguous with "the command failed".
+
+The `summary` shape per verb:
+
+| Verb(s) | `summary` keys |
+|---|---|
+| `list` | `count`, `todo`, `in_progress`, `done`, `needs_human` |
+| `epic list` | `count`, `stories_total`, `stories_done`, `percent`, `on_track`, `at_risk`, `overdue` |
+| `notify list` | `count`, `unread`, `read` |
+| `dep list` | `blocked_by`, `blocks` |
+| `activity`, `board list`, `label list`, `view list`, `cycle list`, `template list`, `comment list` | `count` |
+| `get`, `next`, `metrics`, delete receipts | *absent — nothing to total* |
+
+`· N needs-human` appears on card lists only when non-zero. The card-list buckets are
+derived from the board's column vocabulary, so a row with an unrecognised column still
+counts in `count` while landing in no bucket — the buckets need not sum to `count`.
 
 ### When to reach for `--format toon` (V47, KAN-430)
 
