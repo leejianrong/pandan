@@ -534,7 +534,9 @@ def _humanize(
     # because it keys off the entity's own ``id``/``ticket_number`` rather than
     # naming the offenders. Each falls through to its single-entity branch below.
     envelope, rows = _list_envelope(result) or (None, [])
-    if envelope in _CARD_ENVELOPES:  # list_cards, and create_cards' `created` (KAN-502)
+    # list_cards; create_cards'/apply_template's `created` (KAN-502); update_cards'
+    # `updated` (KAN-519 — the audit finding, see ``_CARD_ENVELOPES``).
+    if envelope in _CARD_ENVELOPES:
         if not rows:
             return f"(no {envelope})"
         lines = [_card_line(c) for c in rows]
@@ -1011,6 +1013,7 @@ FIELD_ALIASES = {
 _LIST_ENVELOPES = (
     "cards",
     "created",
+    "updated",
     "boards",
     "epics",
     "labels",
@@ -1025,13 +1028,20 @@ _LIST_ENVELOPES = (
 # The envelopes whose rows are **cards**, so they share one renderer and one
 # aggregate shape (KAN-502). ``created`` is ``create_cards``' own key — ``batch-create``
 # returns ``{"created": [<card>, …]}`` verbatim rather than re-labelling it ``cards``,
-# because ``--format json`` is documented as the client's raw dict.
-_CARD_ENVELOPES = ("cards", "created")
+# because ``--format json`` is documented as the client's raw dict. ``apply_template``
+# returns the same ``created`` key (``response_model=list[CardRead]``), so ``template
+# apply`` has rendered rows since KAN-502 — KAN-519 filed it as still broken and the
+# audit that card asked for found the claim stale by one slice. ``updated`` is
+# ``update_cards``' key (``batch-update``, ``PATCH /cards/batch``, also
+# ``list[CardRead]``) and was the family's real live instance: unrecognised here, it
+# fell through ``_humanize`` to raw ``json.dumps`` with no aggregate.
+_CARD_ENVELOPES = ("cards", "created", "updated")
 
 # Envelope key → the singular noun used in the unknown-field error message.
 _ROW_NOUN = {
     "cards": "card",
     "created": "card",
+    "updated": "card",
     "boards": "board",
     "epics": "epic",
     "labels": "label",
@@ -1174,8 +1184,10 @@ def _project_rows(
 # so a new list verb cannot ship a summary line reading "1 cycles".
 _SUMMARY_NOUN: dict[str, tuple[str, str]] = {
     "cards": ("card", "cards"),
-    # ``batch-create``'s envelope holds cards, so it totals like a card list.
+    # ``batch-create``/``template apply`` and ``batch-update`` both hold cards, so they
+    # total like a card list.
     "created": ("card", "cards"),
+    "updated": ("card", "cards"),
     "boards": ("board", "boards"),
     "epics": ("epic", "epics"),
     "labels": ("label", "labels"),
