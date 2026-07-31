@@ -452,18 +452,30 @@ def test_config_show_honours_the_format(capsys):
 
 
 def test_the_structured_payload_seam_feeds_both_formats(monkeypatch, capsys):
-    """V44 reshaped ``_structured_payload`` and V45 still will; assert ``_emit`` really
+    """V44 reshaped ``_structured_payload`` and V45 did too; assert ``_emit`` really
     routes **both** structured formats through it, so neither slice can change one and
     miss the other — and that the human branch does *not* go through it (V44's summary
-    reaches a human as a trailing line, not as a payload key)."""
-    marker = {"cards": [{"id": 1}], "summary": {"total": 1}}
-    monkeypatch.setattr(cli, "_structured_payload", lambda result: marker)
+    reaches a human as a trailing line, not as a payload key).
 
-    cli._emit({"cards": []}, fmt=cli.FORMAT_JSON)
+    The stub also records the kwargs, pinning that V45's ``full``/``limit`` reach the
+    seam for *both* formats: truncating json but not toon (or vice versa) is exactly
+    the drift this one shared serializer exists to prevent."""
+    marker = {"cards": [{"id": 1}], "summary": {"total": 1}}
+    seen: list[dict] = []
+
+    def stub(result, **kwargs):
+        seen.append(kwargs)
+        return marker
+
+    monkeypatch.setattr(cli, "_structured_payload", stub)
+
+    cli._emit({"cards": []}, fmt=cli.FORMAT_JSON, full=True, limit=7)
     assert json.loads(capsys.readouterr().out) == marker
 
-    cli._emit({"cards": []}, fmt=cli.FORMAT_TOON)
+    cli._emit({"cards": []}, fmt=cli.FORMAT_TOON, full=True, limit=7)
     assert decode(capsys.readouterr().out) == marker
+
+    assert seen == [{"full": True, "limit": 7}, {"full": True, "limit": 7}]
 
     # The human branch bypassed the (patched) payload seam entirely: it printed the
     # real empty state and V44's own summary line, not the marker's `{"total": 1}`.

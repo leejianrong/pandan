@@ -31,7 +31,7 @@ MCP returns structured payloads to a model already, which is why `A8` exists).
 | **V42 · `--fields` + round-trip tests** ✅ | projection flag; pin the shipped ref handling | A1 | 2 | KAN-425 | `--fields` widens the row; a per-verb test feeds each printed identifier back |
 | **V43 · Error contract** ✅ | structured errors, exit codes | A2 | 2 | KAN-426 | A bad flag, a bad value and a missing token each print a parseable error on **stdout** with the documented exit code |
 | **V44 · Aggregates** ✅ | summary on every list verb | A3 | 2 | KAN-427 | `pandan list` ends with `42 cards · 12 todo · 5 in_progress · 25 done`; no second call needed for a count |
-| **V45 · Truncation** | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
+| **V45 · Truncation** ✅ | size hints + `--full` | A4 | 2 | KAN-428 | A long description prints truncated with `(truncated, 2847 chars total — use --full …)`; `--full` shows it all |
 | **V46 · Content-first + disclosure** | bare command, `help[]` | A5 | 2 | KAN-429 | Bare `pandan` prints live board state and exits 0; results carry `help[]` next-step templates |
 | **V47 · TOON** | `--format toon` for nested payloads | A6 | 2 | KAN-430 | `pandan get KAN-304 --format toon` returns the same data as `--json`, materially cheaper |
 | **V48 · Ambient context** ✅ | session hook + packaged skill | A7 | 2 | KAN-431 | A fresh agent session already knows the open cards without calling anything |
@@ -311,6 +311,27 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   **true** total in the hint; `--full` restores the whole body everywhere it applies; multi-byte
   characters don't split mid-character; a card with no description renders unchanged.
 - **Acceptance:** the truncation demo; suite green. CLI-only — no deploy.
+- **Shipped** as **v0.11.0**, and the audit correction above was **verified from source before
+  building**, both halves: `get KAN-478` printed exactly one line
+  (`KAN-478 todo <title> pts=1`) with no description, while `get --json` and `comment list` emitted
+  3431- and 5692-character bodies in full.
+- **Both halves landed on V47's seams unmoved.** `_structured_payload` truncates (so `json` and
+  `toon` cut identically for free) and `_emit`'s human branch passes an already-resolved character
+  limit down to `_humanize` — `--full` collapses to `limit=0`, so no line helper knows the flag
+  exists. **V44's `summary` is attached *after* truncation**, which puts its counts structurally out
+  of the truncator's reach even though an activity row's own `summary` *string* is a truncated field.
+- **Truncation is an allow-list, not "any long string"** (`_TEXT_FIELDS` = `description`, `body`,
+  `attention_note`, `summary` — exactly the API's unbounded `Text` columns that hold prose). A
+  blanket rule would eventually cut a keyset `next_cursor` and silently break pagination, or a link
+  `url`. A truncated value stays a **string**: no key is added, removed or retyped, so a consumer's
+  `.description` only gets shorter. Live: `get --json` 4070 → 1154 bytes (−72%), `comment list
+  --json` 6053 → 796 (−87%).
+- **Limit:** `PANDAN_MAX_TEXT_CHARS` / `max_text_chars` in the config file, default **500**, `0`
+  disables. `config show` reports the effective value (otherwise "why is my description cut off?" is
+  unanswerable from outside), and the config-file merge preserves the key even though `config set`
+  has no flag for it — else a `config set --board-id` would delete a hand-written limit.
+- **Only 2 pre-existing assertions needed updating**, not V44's 40: the test fixtures' text is short,
+  so under-limit output is byte-identical by construction. That is the slice's first promise working.
 
 ### V46 · Content-first bare invocation + `help[]` next-step hints (A5) — KAN-429
 - **Build:** AXI 8 + 9.
