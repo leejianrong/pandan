@@ -14,9 +14,9 @@ on:
       - 'v*'
 
 env:
-  # ghcr.io/<owner>/simple-kanban-mcp — owner comes from the repo so a fork
+  # ghcr.io/<owner>/pandan-mcp — owner comes from the repo so a fork
   # publishes under its own namespace without edits.
-  IMAGE: ghcr.io/${{ github.repository_owner }}/simple-kanban-mcp
+  IMAGE: ghcr.io/${{ github.repository_owner }}/pandan-mcp
 
 jobs:
   publish:

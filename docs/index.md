@@ -54,4 +54,4 @@ flowchart LR
 
     These docs describe intent. Where a documented detail and the source disagree, the source wins —
     check the repository at
-    [github.com/leejianrong/simple-kanban](https://github.com/leejianrong/simple-kanban).
+    [github.com/leejianrong/pandan](https://github.com/leejianrong/pandan).
