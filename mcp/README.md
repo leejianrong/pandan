@@ -26,9 +26,9 @@ source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 | `get_board(board_id)` | `GET /boards/{id}` | — (by id) |
 | `update_board(board_id, name?)` | `PATCH /boards/{id}` | via the entity's own board |
 | `delete_board(board_id)` | `DELETE /boards/{id}` | via the entity's own board |
-| `list_cards(board_id?, column?, epic_id?, updated_since?, limit?, cursor?)` | `GET /cards` (V3 query API) | `board_id` |
-| `list_epics(board_id?)` | `GET /epics` | `board_id` |
-| `get_card(card_id)` | `GET /cards/{id}` | — (by card id) |
+| `list_cards(board_id?, column?, epic_id?, updated_since?, limit?, cursor?, fields?, full?)` | `GET /cards` (V3 query API) | `board_id` |
+| `list_epics(board_id?, fields?, full?)` | `GET /epics` | `board_id` |
+| `get_card(card_id, fields?, full?)` | `GET /cards/{id}` | — (by card id) |
 | `get_epic(epic_id)` | `GET /epics/{id}` | — (by id) |
 | `create_card(title, board_id?, description?, column?, story_points?, assignee?, epic_id?)` | `POST /cards` | `board_id` |
 | `create_cards(cards)` | `POST /cards` × N (client-side loop) | per-card `board_id` |
@@ -45,7 +45,7 @@ source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 | `add_link(card_id, label, url)` | `POST /cards/{id}/links` | — (by card id) |
 | `remove_link(card_id, link_id)` | `DELETE /cards/{id}/links/{link_id}` | — (by card id) |
 | `add_comment(card_id, body)` | `POST /cards/{id}/comments` | — (by card id) |
-| `list_comments(card_id)` | `GET /cards/{id}/comments` (wraps in `comments`) | — (by card id) |
+| `list_comments(card_id, fields?, full?)` | `GET /cards/{id}/comments` (wraps in `comments`) | — (by card id) |
 
 > Work-links (KAN-32) are also inlined on every card read — `list_cards`/`get_card`
 > already return each card's `links` array — so `add_link`/`remove_link` are just the
@@ -72,6 +72,54 @@ shared-`API_TOKENS` bypass. Create a **PAT** in the SPA (top-bar **Tokens** →
 agent can only touch boards you own. A tokenless (or bad-token) server rejects the
 MCP with `401`.
 
+## Cheap reads: `fields` and `full` (KAN-501)
+
+A board read is the most expensive thing this server does — far more expensive than
+its whole tool surface (see the next section). So **every read tool narrows**:
+
+| argument | what it does |
+|---|---|
+| `fields` | The keys to keep. `["ticket_number","title","column"]` on a list narrows every row; on a single object (`get_card`) or a report (`metrics`, `cycle_metrics`) it picks top-level keys/sections. `ticket`/`pts`/`points` are accepted as aliases but the returned key is always the API's own name. An unknown name errors and lists the valid ones. |
+| `full` | Turns **off** the truncation of long free text, which is on by default. |
+
+Long free text (`description`, `body`, `attention_note`, an activity row's
+`summary`) is cut to **500 characters** with a hint carrying the *true* total —
+`(truncated, 3431 chars total — pass full=true for the complete text)` — so you can
+decide whether a second call is worth it. `PANDAN_MAX_TEXT_CHARS` changes the limit
+(`0` disables it everywhere). A `next_cursor` or a work-link `url` is **never** cut,
+however long: the rule is an allow-list of prose fields, not "any long string".
+
+**Omit both and nothing changes** — you get exactly the payload the API returned,
+key for key. That invariant is the first thing `tests/test_shaping.py` asserts.
+
+What it saves, measured on a real capture of the Pandan Roadmap board (125 cards ×
+22 keys), rendered with the SDK's own serializer (`o200k_base` tokens):
+
+| read | before | default (truncated) | narrowed |
+|---|---:|---:|---:|
+| `list_cards` (whole board) | 48,291 | 39,635 | **7,430** |
+| `list_epics` | 4,796 | 4,781 | 1,460 |
+| `activity(limit=20)` | 2,633 | 2,633 | 1,373 |
+| `metrics` | 2,452 | 2,452 | 65 |
+| `get_card` | 241 | 241 | 77 |
+| **all five** | **58,413** | **49,742** | **10,405 (−82%)** |
+
+Adding these arguments cost **+552 resident tokens** (7,388 → 7,940), which one
+narrowed `list_cards` repays about 74 times over. Re-run it yourself — the harness
+captures a real payload once and then measures offline, asserting every read really
+was a non-empty page before counting it:
+
+```bash
+uv run --with tiktoken python scripts/measure_read_payload_tokens.py \
+    --capture /tmp/roadmap.json --board 5 --credentials ~/.config/pandan/config.toml
+uv run --with tiktoken python scripts/measure_read_payload_tokens.py --payload /tmp/roadmap.json
+```
+
+> Not every read is shaped: `list_boards`, `get_epic`, `next`, `dispatch`,
+> `list_notifications`, `list_labels`, `list_views`, `list_templates` and
+> `list_cycles` still return the raw envelope. They are small (a label is three
+> keys), and KAN-501 deliberately stopped at the reads ADR 0019 measured.
+
 ## Why 49 tools, and why that is frozen
 
 The surface is **frozen at 49 tools** by [ADR 0019](../docs/adr/0019-mcp-surface-right-sizing.md)
@@ -80,27 +128,31 @@ Recorded here because the resident-cost headline invites the wrong conclusion, a
 this decision should not be re-litigated from it.
 
 **What it costs.** Every one of these schemas loads into an agent's context before
-it does any work: **7,388 `o200k_base` tokens** as shipped (8,775 before the schema
-compaction below). Re-measure any time — the harness is committed:
+it does any work: **7,940 `o200k_base` tokens** as shipped (7,388 before KAN-501's
+`fields`/`full` arguments; 8,775 before the schema compaction below). Re-measure any
+time — the harness is committed:
 
 ```bash
 uv run --with tiktoken python scripts/measure_tool_schema_tokens.py [--per-tool]
 ```
 
-**The headline is a trap.** That resident number is the *small* half. A single
-`list_cards` against a real 121-card board returns **~45,000 tokens** — over 5× the
-entire schema surface, in one tool result — because these tools return the raw API
-envelope while the CLI has field selection, truncation and TSV/TOON output. Measured
-per task, the CLI is **~11× cheaper** on real reads. So the expensive thing about
-this server is its *payloads*, not its tool count, and shrinking the count would
-have optimised the wrong line item.
+**The headline is a trap.** That resident number is the *small* half. When V49
+measured it, a single `list_cards` against a real 121-card board returned
+**~45,000 tokens** — over 5× the entire schema surface, in one tool result — because
+these tools returned the raw API envelope while the CLI had field selection,
+truncation and TSV/TOON output; per task the CLI came out **~11× cheaper** on real
+reads. So the expensive thing about this server was its *payloads*, not its tool
+count, and shrinking the count would have optimised the wrong line item. **KAN-501
+has since closed most of that gap** — see [the section above](#cheap-reads-fields-and-full-kan-501),
+which takes the same page from 48,291 to 7,430 tokens for +552 resident. The CLI
+remains cheaper by default; the MCP reads are now within reach of it when narrowed.
 
 **Why not the alternatives.** Both were measured on the same yardstick, built through
 the same FastMCP serializer:
 
 | option | tools | resident | verdict |
 |---|---:|---:|---|
-| today (frozen) | 49 | 7,388 | **chosen** |
+| today (frozen) | 49 | 7,940 | **chosen** |
 | (a) one tool per entity + an `action` arg | 11 | 4,338 | rejected |
 | (b) a single exec-`pandan` tool | 1 | 387 | rejected *for now* |
 
@@ -136,6 +188,7 @@ rejects `null`), and `title` is both an annotation and a real argument name on
 | `PANDAN_API_URL` | `http://localhost:8000` | API origin (the `/api/v1` prefix is added for you) |
 | `PANDAN_TOKEN` | *(unset)* | **Required.** A per-user **PAT** (`pandan_pat_…`, created in the Tokens UI, V9/ADR 0014). Empty → `401` |
 | `PANDAN_BOARD_ID` | *(unset)* | Optional default board id for board-scoped tools when a call omits `board_id`. Unset → the API's fallback (list = all your boards; create = earliest) |
+| `PANDAN_MAX_TEXT_CHARS` | `500` | Character cap for a long free-text field on a read (KAN-501). `0` disables truncation everywhere — the deployment-wide form of `full=true`. Same name and default as the CLI's |
 
 > **Deprecated fallback (V40, [ADR 0018](../docs/adr/0018-pandan-rebrand.md)).** The pre-rebrand
 > `KANBAN_API_URL` / `KANBAN_TOKEN` / `KANBAN_BOARD_ID` still work: each key is read under its

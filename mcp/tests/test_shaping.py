@@ -193,18 +193,34 @@ def test_a_single_card_read_narrows_its_own_keys(monkeypatch):
     }
 
 
-def test_a_card_carrying_labels_is_not_mistaken_for_a_label_envelope(monkeypatch):
-    """**The trap this slice's envelope detection exists for.** A card carries a
-    ``labels`` list and a ``links`` list. Detecting an envelope by name alone would
-    read ``get_card``'s result as a list of rows and narrow the wrong objects. The
-    rule checks the *shape* too: an envelope is one row list and nothing else.
+def test_a_single_object_is_never_mistaken_for_a_row_envelope(monkeypatch):
+    """**The trap this slice's envelope detection exists for**, and the reason the
+    detection checks the payload's *shape* and not only its keys' names.
+
+    A card already carries two inline arrays (``labels``, ``links``); the day one of
+    them is named like an envelope — a ``comments`` array inlined on a card is the
+    obvious candidate, and ``list_dependencies`` already reshapes card reads — a
+    name-only rule would read ``get_card``'s result as a page of rows and narrow the
+    wrong objects. An envelope is exactly one row list plus at most a
+    ``next_cursor``; anything with keys of its own is a single object.
+
+    **This test's first draft was blind.** It asserted only that a real card isn't an
+    envelope, which passes for the wrong reason — ``labels`` isn't in
+    ``_ROW_ENVELOPES`` at all, so the sibling-key check never ran. Deleting that
+    check left the suite green. The third assertion is the one that fails.
     """
     _client(monkeypatch, httpx.Response(200, json=CARD))
-    out = server.get_card(10, fields=["title", "labels"])
-    assert out == {"title": CARD["title"], "labels": []}
+    assert server.get_card(10, fields=["title", "labels"]) == {
+        "title": CARD["title"],
+        "labels": [],
+    }
     assert shaping._envelope(CARD) is None
+    # The sibling-key check itself: an envelope NAME plus keys of its own is a
+    # single object, not a page. Remove the check and this line goes red.
+    assert shaping._envelope({"id": 1, "title": "T", "comments": [{"id": 2}]}) is None
     assert shaping._envelope({"cards": [CARD]}) == "cards"
     assert shaping._envelope({"cards": [CARD], "next_cursor": "x"}) == "cards"
+    assert shaping._envelope({"cards": "not-a-list"}) is None
 
 
 def test_an_absent_field_projects_as_null_not_a_missing_key(monkeypatch):
