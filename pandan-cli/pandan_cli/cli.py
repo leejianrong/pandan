@@ -2290,10 +2290,18 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
 
-    # ``required=True`` is load-bearing for AXI 10: it is what keeps the usage line
-    # reading ``<command> ...`` rather than ``[<command> ...]``, so ``--help`` stays
-    # byte-identical. The bare invocation therefore cannot come from argparse — it is
-    # an argv rewrite in ``run()`` (``_is_bare_invocation``) instead.
+    # ``required=True`` stays exactly as it was, and the bare invocation is an argv
+    # rewrite in ``run()`` (``_is_bare_invocation``) rather than a relaxation of it.
+    #
+    # **Not** because `required=False` would change the usage line — it does not; a
+    # positional with ``nargs=PARSER`` is never bracketed, so ``<command> ...`` renders
+    # identically either way (an earlier comment here claimed otherwise and a mutation
+    # test caught it). The reason is that `required=False` + a top-level
+    # ``set_defaults(func=_cmd_overview)`` would make the overview the fallback for
+    # *any* argv that happens to parse without a subcommand, now or after some future
+    # flag is added — i.e. a network call reachable by accident. The allow-list makes
+    # the set of argvs that reach the front door explicit, enumerable and tested, which
+    # is what turns "no invocation that used to work changed" into a structural claim.
     sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
 
     # The content-first bare invocation (V46, KAN-429 — AXI 8): `pandan` with no verb

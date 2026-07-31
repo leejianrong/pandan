@@ -354,15 +354,28 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   `<api_url> · board <n> · open cards (todo, in_progress):`, the rows, V44's aggregate, and the hints.
   Live: 12 open cards on board 5, exit 0.
 - **The bare path is an argv rewrite, not an argparse change.** `pandan` with no verb is rewritten to a
-  real but **unlisted** `overview` subcommand. Both halves of that are AXI 10 mechanics: keeping
-  `add_subparsers(required=True)` is what holds the usage line at `<command> ...` (making it optional
-  renders `[<command> ...]`), and registering `overview` with **no `help=` kwarg** keeps it out of the
-  command list (argparse only builds the pseudo-action `if 'help' in kwargs`). `--help` is therefore
-  **byte-identical**, pinned against `pandan-cli/tests/help_golden.txt` — captured from unmodified
-  `main` in a **separate preceding commit**, so the guard cannot be a restatement of the new code.
-  The rewrite is gated by an **allow-list** (`_is_bare_invocation`): only "no verb, at most
+  real but **unlisted** `overview` subcommand (registered with **no `help=` kwarg**, which is what keeps
+  it out of `--help` — argparse only builds the choices pseudo-action `if 'help' in kwargs`). The
+  rewrite is gated by an **allow-list** (`_is_bare_invocation`): only "no verb, at most
   `--json`/`--full`/`--format`" is rewritten, so every argv that already worked reaches argparse
-  untouched, and `pandan --json`/`--format toon` get a machine-readable overview for free.
+  untouched, and `pandan --json`/`--format toon` get a machine-readable overview for free. The
+  alternative — `add_subparsers(required=False)` plus a top-level `set_defaults(func=…)` — was rejected
+  because it makes the overview the fallback for *any* argv that happens to parse without a subcommand,
+  now or after some future flag lands: a network call reachable by accident.
+  - **A claim that did not survive its own mutation test, recorded because the reasoning was wrong in
+    an instructive way.** The first draft asserted that `required=True` is *also* what holds the usage
+    line at `<command> ...`, and that relaxing it would render `[<command> ...]`. Flipping the flag left
+    the pin green: a positional with `nargs=PARSER` is **never** bracketed in usage, so `required`
+    changes only whether argparse errors on a missing subcommand. The design is unchanged; the
+    justification for it is now the accidental-fallback argument above, and both the code comment and
+    the test docstring say so.
+- **`--help` is pinned word-for-word** against `pandan-cli/tests/help_golden.txt`, captured from
+  unmodified `main` in a **separate preceding commit** so the guard cannot be a restatement of the new
+  code, with the usage line additionally pinned to the byte. Byte-exactness for the *whole* text was
+  tried first and failed **in CI only**: argparse derives its help column from `_action_max_length`,
+  and the runner's interpreter excludes subcommand invocations from that measure where the local ones
+  include them, so the column lands one space narrower and `batch-update`'s help wraps onto its own
+  line. Every word was identical. A byte pin there would have pinned the interpreter, not this CLI.
 - **The bare call is bounded** (a scale-to-zero deploy is the normal case, not an edge case). The
   shared client's defaults — 35 s read + one retry after a 1 s backoff
   ([client.py:36-39](../../pandan-client/pandan_client/client.py)) — are a ~71 s worst case, right for
@@ -383,7 +396,8 @@ still the right one, only the target changes from a new Fly app to the k8s ingre
   `pandan comment add <id> "…"` in the first draft (the body is `--body`), i.e. a hint that would have
   taught an agent an invalid command. And the table is walked against the parser tree in both
   directions, so a key matching no verb (dead hint) or a verb wired to an unlisted tuple fails.
-- **11 mutations, all red against the guard they targeted** — including the parameterised-hint guard,
+- **12 mutations; 11 red against the guard they targeted, and the 12th came back green** (see the
+  `required=True` note above — a false claim, corrected rather than papered over) — including the parameterised-hint guard,
   where the first mutation (interpolate from `args`) only reached the verbs that *have* a card-id
   argument, so it was extended to interpolate from the **result** to reach `create`/`overview` too.
   Notably, leaking hints into `--format json` reddens **29** tests across four suites, not just this

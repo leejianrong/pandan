@@ -18,9 +18,12 @@ hint that merely *mentions* ``<id>`` proves nothing — the same output could co
 pre-filled command too — so it asserts both that the literal placeholder survives
 **and** that no identifier from the result appears anywhere in a hint line.
 
-``--help`` is pinned byte-for-byte against ``tests/help_golden.txt``, generated from
-the **unmodified** ``origin/main`` parser before this slice was written; that is what
-makes it a regression guard (AXI 10) rather than a restatement of the current code.
+``--help`` is pinned against ``tests/help_golden.txt``, generated from the
+**unmodified** ``origin/main`` parser before this slice was written — that ordering is
+what makes it a regression guard (AXI 10) rather than a restatement of the current
+code. The comparison is **word-for-word**, with the usage line additionally pinned to
+the byte; ``help_words`` explains why byte-exactness for the whole text would pin the
+interpreter's argparse rather than this CLI.
 """
 from __future__ import annotations
 
@@ -41,6 +44,28 @@ HELP_GOLDEN = pathlib.Path(__file__).with_name("help_golden.txt")
 # `COLUMNS` before asking the tty — so the golden is only comparable at a pinned
 # width. 80 is the conventional default; CI has no tty at all.
 GOLDEN_WIDTH = "80"
+
+
+def help_words(text: str) -> list[str]:
+    """The help text as a word sequence, with all whitespace collapsed.
+
+    The comparison against the golden is **word-for-word**, not byte-for-byte, and
+    that was forced by evidence rather than chosen for convenience: argparse decides
+    its help column from ``_action_max_length`` and its width from
+    ``shutil.get_terminal_size()``, and both are stdlib internals that move between
+    interpreter builds. A byte-exact golden captured locally failed in CI purely on
+    layout — one space less padding, which pushed ``batch-update``'s help string onto
+    its own line — while every word was identical. Pinning bytes would therefore have
+    pinned the *interpreter*, not this CLI.
+
+    What survives the collapse is everything the AXI 10 guard is actually about: the
+    exact set and order of words, so a newly *visible* subcommand (its name **and**
+    its help sentence), a reworded epilog, a dropped line or a changed usage token
+    all fail. The usage line's own bytes are asserted separately — that is where
+    ``<command> ...`` vs ``[<command> ...]`` lives, i.e. the one layout detail this
+    slice could have broken by making the subparsers action optional.
+    """
+    return text.split()
 
 # A deliberately distinctive id/ticket pair: the hint guard asserts the string "412"
 # appears in NO hint line, which is only a real assertion if the number could not
@@ -549,18 +574,37 @@ def test_on_the_overview_the_aggregate_still_precedes_the_hints(monkeypatch, cap
 # --- 3. `--help` is unchanged (AXI 10 regression guard) ----------------------
 
 
-def test_help_output_is_byte_identical_to_the_pre_slice_golden(monkeypatch, capsys):
+def test_help_text_is_word_for_word_unchanged_from_the_pre_slice_golden(monkeypatch, capsys):
     """Content-first must not cost the usage text. The golden was captured from
-    ``origin/main`` before this slice existed, so any drift in the help surface — a
-    newly *visible* subcommand, a reworded epilog, a changed usage line (the
-    ``required=True`` subparsers action is what keeps it ``<command> ...`` rather than
-    ``[<command> ...]``) — fails here. Update the golden only alongside a deliberate
-    help change in the same diff."""
+    ``origin/main`` before this slice existed, so any drift in the help *surface* — a
+    newly visible subcommand, a reworded epilog, a dropped line — fails here. Update
+    the golden only alongside a deliberate help change in the same diff.
+
+    Compared word-for-word rather than byte-for-byte; see ``help_words`` for why
+    (argparse's column layout tracks the interpreter, not this CLI)."""
     monkeypatch.setenv("COLUMNS", GOLDEN_WIDTH)
     with pytest.raises(SystemExit) as exc:
         cli.run(["--help"])
     assert exc.value.code == 0
-    assert capsys.readouterr().out == HELP_GOLDEN.read_text(encoding="utf-8")
+    out = capsys.readouterr().out
+    assert help_words(out) == help_words(HELP_GOLDEN.read_text(encoding="utf-8"))
+
+
+def test_the_usage_line_is_byte_identical(monkeypatch, capsys):
+    """The usage line is the one part of the help text whose *bytes* are worth pinning:
+    it is a single line, it never wraps at 80 columns, and it is what a reader copies.
+
+    It is **not** a proxy for the subparsers action staying ``required=True``. An
+    earlier version of this test claimed it was, on the theory that `required=False`
+    renders ``[<command> ...]``; a mutation test flipped the flag and this stayed green,
+    because a positional with ``nargs=PARSER`` is never bracketed. The real reason the
+    flag stays put is in ``build_parser``'s comment, and it is not a help-text reason."""
+    monkeypatch.setenv("COLUMNS", GOLDEN_WIDTH)
+    with pytest.raises(SystemExit):
+        cli.run(["--help"])
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first == "usage: pandan [-h] [-v] <command> ..."
+    assert first == HELP_GOLDEN.read_text(encoding="utf-8").splitlines()[0]
 
 
 def test_help_still_prints_usage_and_makes_no_network_call(monkeypatch, capsys):
