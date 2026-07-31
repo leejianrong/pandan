@@ -120,8 +120,13 @@ def test_install_writes_a_valid_session_start_hook(tmp_path, capsys):
     assert isinstance(hook["timeout"], (int, float)) and hook["timeout"] > 0
     # `matcher` is deliberately absent so the hook fires for every session source
     # (startup / resume / clear / compact / fork) — a compacted session needs the
-    # board state as much as a fresh one.
-    assert "matcher" not in groups[0]
+    # board state as much as a fresh one. Both key sets are pinned exactly, because
+    # `matcher` belongs on the GROUP and a copy misplaced onto the hook object would
+    # be silently ignored by the harness while looking correct in review. (A
+    # group-level `"matcher": "startup"` mutation passed an earlier draft of this
+    # test that only checked `"matcher" not in groups[0]` for the hook dict.)
+    assert set(groups[0]) == {"hooks"}
+    assert set(hook) == {"type", "command", "timeout"}
     assert context.HOOK_SENTINEL in hook["command"]
 
     out = capsys.readouterr().out
