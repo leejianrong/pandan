@@ -311,29 +311,43 @@ def test_no_flag_and_format_human_are_byte_identical(monkeypatch, capsys, argv, 
     bare = run_capture(monkeypatch, capsys, argv, result)
     human = run_capture(monkeypatch, capsys, [*argv, "--format", "human"], result)
     assert bare == human
-    # …and it is still exactly what the pre-V47 humanizer produced.
-    assert bare == cli._humanize(result) + "\n"
+    # …and the ROWS are still exactly what the pre-V47 humanizer produced. V44 appends
+    # one aggregate line to a list result, so compare against humanize + that line —
+    # which is also the guard that V44 never rewrote a row.
+    expected = cli._humanize(result)
+    found = cli._summary_for(result)
+    if found is not None:
+        expected += "\n" + cli._summary_line(*found)
+    assert bare == expected + "\n"
 
 
 def test_the_default_list_row_is_still_tab_separated_with_no_keys(monkeypatch, capsys):
     out = run_capture(monkeypatch, capsys, ["list", "--board", "5"], CARDS_PAGE)
-    assert out.splitlines() == ["KAN-1\tin_progress\tone\tpts=3", "KAN-2\tin_progress\ttwo\tpts=3"]
+    assert out.splitlines() == [
+        "KAN-1\tin_progress\tone\tpts=3",
+        "KAN-2\tin_progress\ttwo\tpts=3",
+        "2 cards · 0 todo · 2 in_progress · 0 done",
+    ]
 
 
 def test_fields_projection_still_applies_only_to_human_output(monkeypatch, capsys):
     human = run_capture(
         monkeypatch, capsys, ["list", "--board", "5", "--fields", "ticket,title"], CARDS_PAGE
     )
-    assert human.splitlines() == ["KAN-1\tone", "KAN-2\ttwo"]
+    assert human.splitlines()[:2] == ["KAN-1\tone", "KAN-2\ttwo"]
     toon_out = run_capture(
         monkeypatch,
         capsys,
         ["list", "--board", "5", "--fields", "ticket,title", "--format", "toon"],
         CARDS_PAGE,
     )
-    # The structured formats stay a verbatim passthrough — the projection is a
-    # property of the human row, not of the payload.
-    assert decode(toon_out) == CARDS_PAGE
+    # The structured rows stay a verbatim passthrough — the projection is a property
+    # of the human row, not of the payload. Only V44's `summary` joins them.
+    decoded = decode(toon_out)
+    assert decoded.pop("summary") == {
+        "count": 2, "todo": 0, "in_progress": 2, "done": 0, "needs_human": 0
+    }
+    assert decoded == CARDS_PAGE
 
 
 # --- 3. an unknown --format is a V43-shaped exit-2 error --------------------
@@ -438,10 +452,10 @@ def test_config_show_honours_the_format(capsys):
 
 
 def test_the_structured_payload_seam_feeds_both_formats(monkeypatch, capsys):
-    """V44/V45 will reshape ``_structured_payload``; assert ``_emit`` really routes
-    **both** structured formats through it, so neither slice can change one and miss
-    the other — and that the human branch does *not* go through it (V44's human
-    summary is a trailing line, not a payload key)."""
+    """V44 reshaped ``_structured_payload`` and V45 still will; assert ``_emit`` really
+    routes **both** structured formats through it, so neither slice can change one and
+    miss the other — and that the human branch does *not* go through it (V44's summary
+    reaches a human as a trailing line, not as a payload key)."""
     marker = {"cards": [{"id": 1}], "summary": {"total": 1}}
     monkeypatch.setattr(cli, "_structured_payload", lambda result: marker)
 
@@ -451,8 +465,12 @@ def test_the_structured_payload_seam_feeds_both_formats(monkeypatch, capsys):
     cli._emit({"cards": []}, fmt=cli.FORMAT_TOON)
     assert decode(capsys.readouterr().out) == marker
 
+    # The human branch bypassed the (patched) payload seam entirely: it printed the
+    # real empty state and V44's own summary line, not the marker's `{"total": 1}`.
     cli._emit({"cards": []}, fmt=cli.FORMAT_HUMAN)
-    assert capsys.readouterr().out == "(no cards)\n"
+    out = capsys.readouterr().out
+    assert out == "(no cards)\n0 cards · 0 todo · 0 in_progress · 0 done\n"
+    assert "total" not in out
 
 
 def test_structured_formats_are_exactly_json_and_toon():
