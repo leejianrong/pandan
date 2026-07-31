@@ -1599,3 +1599,165 @@ reads, and the gate can't detect the difference because it only compares label v
 - The harness worktree guard rejected more shell shapes this stage — including **any command
   referencing a `/tmp` path**, and `sleep N && <cmd>` chains (use one plain command per call, or write
   the script inside the worktree). Fourth consecutive stage this has cost time; it is now in every brief.
+
+### M7 Wave 2, stage 6 — V44/V48/V45/V46 in sequence, then V49 both phases (PRs #216–#226, v0.9.0 → v0.14.0)
+
+The stage that finished Milestone 7's build-out: **ten of eleven slices shipped, one deliberately
+deferred** (V41/KAN-424, behind the k8s migration KAN-439).
+
+| Slice | Card | PR | Version |
+|---|---|---|---|
+| V44 · aggregates on every list verb | KAN-427 | #216 (+#217 README) | `v0.9.0` |
+| V48 · ambient context (`pandan context`) | KAN-431 | #218 | `v0.10.0` |
+| V45 · truncation + `--full` | KAN-428 | #219 (+#220 README) | `v0.11.0` |
+| V46 · content-first + `help[]` | KAN-429 | #221 (+#222 follow-up & spec fix) | `v0.12.0` |
+| — · withdraw the `pdn` alias | KAN-442 | #224 | `v0.13.0` |
+| V49 · measure + decide + ADR 0019 | KAN-432 | #223 | — |
+| V49 · freeze + schema compaction | KAN-432 | #225 | — |
+| — · correct the skill's parity claim | KAN-432 | #226 | `v0.14.0` |
+
+**The out-of-order build paid off a second time, and this stage is where it can be measured.** V47 was
+built first because it changed `_emit`'s signature (stage 5's note); V44, V45 and V46 then all landed
+**on its seams unmoved**. V44's `summary` attaches at `_structured_payload`, so `json` and `toon` cannot
+drift; V45 truncates at the same seam, so both structured formats cut identically **for free**; V45's
+`--full` collapses to `limit=0`, so no line helper knows the flag exists. The payoff has a number:
+**V45 needed only 2 pre-existing assertions updated, against V44's 40** — the fixtures' text is short,
+so under-limit output is byte-identical by construction. *Generalisable: when N queued slices all modify
+one function, build the one that changes its SIGNATURE first — and measure the payoff in assertions you
+did not have to touch.*
+
+**A green mutation has two possible causes, and the second is worth more than the first.** V44 ran 15
+mutations and 2 came back green — both genuinely blind guards, and the canonical example of the class:
+asserting `_humanize(result) in out` passes for a humanizer returning `""`, because `"" in out` is
+always True; and asserting only `unread + read == count` passes for `unread = 0`. But V46 ran 12
+mutations, 11 red, and **the 12th green one was not a blind test — it was a false belief in the design
+justification.** The draft claimed `required=True` is also what holds the usage line at
+`<command> ...`; flipping it left the pin green, because a positional with `nargs=PARSER` is **never**
+bracketed in usage. The design was right for a different reason (an `add_subparsers(required=False)`
+fallback would make the overview reachable by accident from any argv that happens to parse), and the
+code comment and test docstring now say so. *Generalisable: when a mutation comes back green, ask
+which of the two it is — a blind test, or a claim you believed. Correct the reasoning rather than
+papering over it.*
+
+**"Cosmetic" is a claim that needs proof, not a category that exempts you from it.** V49 phase 2's
+schema compaction was scoped as removing pure Pydantic serializer artefact — and contained **two real
+behaviour changes**. A nullable **enum** collapsed to `{enum: [...], type: [string, null]}` *rejects*
+null, since `enum` constrains the whole value, not just its type; and **`title` is both a JSON Schema
+annotation and a real argument name** on `create_card`/`update_card`, so the first blindly-recursive
+draft deleted those arguments outright. Both were caught by three boring invariant tests — *every
+property name and required set is preserved* — and not by anything clever. *Generalisable: assert
+IDENTITY INVARIANTS before intended effects. The boring test is what catches the cosmetic change that
+wasn't.*
+
+#### V49: both premises falsified, and they flipped the decision
+
+The slice was chartered to shrink the MCP surface. Its own measurement proved the surface was the wrong
+target, and **that is the slice succeeding, not failing** — worth stating plainly, because the instinct
+is to ship the chartered change anyway.
+
+- **Premise 1 — "the CLI now has full parity" — false.** Parity runs one-directionally: MCP ⊇ CLI.
+  `pandan board` has only `list`/`create`, so `update_board` and `delete_board` are simply unreachable
+  from the CLI, and `claim_card`/`create_cards` lose atomicity and batching. Removing tools would have
+  been a silent ADR-0005 parity regression.
+- **Premise 2 — the resident schema is the cost — false; it is the *small* half.** All 49 tool schemas
+  cost **8,775 `o200k_base`** tokens compact. **One `list_cards` against the real 121-card board returns
+  ~45k — 5.1× the entire schema surface, in a single tool result.** Field breadth is the cost, not
+  pretty-printing (which is only ~16% of it): 1,111 null/empty values serialize across that one page.
+  Per task the CLI is **11.4× cheaper** on real board reads.
+- **The best-scoring option was rejected on capability, not on tokens.** Option (b) — one exec-`pandan`
+  tool — measured **387 tokens (−96%)**, far ahead of option (a)'s 4,338 (−51%). It was rejected because
+  making the CLI the only surface *today* would delete capability. Decision: **(c)** keep the breadth as
+  the documented fallback, freeze its growth, and take the free 16% (1,387 tokens) with no rename and no
+  removal → **7,388** shipped.
+- **The denominator was wrong in the one slice whose entire Must half was measuring it** — 49 tools, not
+  the 48 both the plan and the card claimed. Now pinned by `FROZEN_TOOL_COUNT = 49` in
+  `mcp/tests/test_schema.py`, so adding a tool is an ADR amendment rather than a fixture edit.
+
+*Generalisable: measure the thing you are optimising AND the thing next to it, on the same yardstick.
+V49's real output is not the −16%; it is the ordering that says KAN-501 is worth roughly ten times any
+resident-schema change.*
+
+**A self-contradicting doc claim is what seeded the false premise — and the refutation was in the same
+file.** The packaged skill asserted full CLI/MCP parity **in bold** while also documenting the board
+update/delete gap and handing out a raw `curl` workaround, a few lines away. That contradiction
+propagated into KAN-432's charter. Fixed at source in PR #226. *Generalisable: when a doc makes a strong
+guarantee, grep THE SAME FILE for "known gap" / "not yet" / "until it lands" — the refutation is usually
+already there, written by the same author.* Fourth instance now of *read the artefacts that describe the
+thing, not only the thing*.
+
+#### The skill is dual-homed, and the live copy is not the source of truth
+
+V48 checked a real copy of the skill into `pandan-cli/pandan_cli/skills/pandan/SKILL.md`, which
+`pandan context install` lays down at `~/.claude/skills/pandan/SKILL.md`. This closes KAN-434's
+out-of-repo split **by construction** — the failure class where a card reads *done* while the
+user-facing path stays broken, which cost this project a live 404 on its documented install command.
+
+The direction matters and it bit immediately: **the PM edited the live copy first, and `--force-skill`
+silently reverted that fix.** Edit the repo copy; re-run `pandan context install --force-skill`.
+
+And the new workflow produced its own follow-up within minutes (**KAN-505**): `context status` compares
+the installed file against the skill packaged in *the build you invoked it with*, so the same untouched
+file reports `installed (locally modified)` from the v0.12.0 binary on `PATH` and
+`installed (matches this build)` from v0.14.0 source. Nothing was modified. **The false alarm points at
+the destructive fix** — `locally modified` is the state that makes `install` refuse without
+`--force-skill`, and `--force-skill` would then *downgrade* the skill to the older packaged copy. Same
+class as KAN-484: a check whose comparison baseline is the wrong reference produces confident, wrong
+output, and the natural response to it makes things worse.
+
+#### Smaller findings worth keeping
+
+- **A promise withdrawn is as much a deliverable as a promise kept** (KAN-442). ADR 0018 promised
+  `pandan` *plus a `pdn` alias*, and `pyproject.toml` did declare it — but `[project.scripts]` entries
+  only materialise on a pip/uv install, and the PyInstaller `--onefile` release produces exactly **one**
+  executable. So anyone following the documented primary install path never had `pdn`. Rather than fake
+  it, the alias was withdrawn and replaced with a symlink instruction. Found by verifying the release
+  **against the released artifact**, not the source tree. *Generalisable: a distribution promise must be
+  verified against the distributed thing.*
+- **AXI-10's byte-freeze shaped V46's design more than V46's card did.** To keep the `--help` golden
+  green, the `overview` verb shipped **unlisted** (registered with no `help=` kwarg — argparse only
+  builds the choices pseudo-action `if 'help' in kwargs`), the epilog sentence *"Every list verb ends
+  with a pre-computed aggregate"* had to stay word-for-word, and the slice lost its flagship example
+  (`pandan list` → `help: pandan move <id> in_progress`). The agent flagged it rather than silently
+  choosing, which was right; carded as **KAN-492**. *Generalisable: a regression guard that forbids a
+  deliberate change has outlived its purpose — recognise that instead of designing around it.*
+- **A byte pin on argparse help output pins the interpreter, not the CLI.** V46's first byte-exact pin
+  passed locally on 3.12/3.13/3.14 and **failed in CI only** — one space narrower, every word
+  identical. argparse derives its help column from `_action_max_length`, and whether subcommand
+  invocations count toward that measure differs by interpreter. Changed to a word-for-word comparison
+  with only the usage line pinned to the byte.
+- **Capture a golden in a separate preceding commit, from unmodified `main`** — otherwise the guard can
+  be a restatement of the new code rather than a check on it. Cheap, and worth copying anywhere a
+  golden file is introduced.
+- **Two features, one line of stdout.** V44 published a `tail -1` contract (every list verb ends with
+  its aggregate); V46's `help[]` hints would have broken it. Hints therefore attach to decision-point
+  verbs only — a single entity, a mutation receipt, and the bare overview — and **never** to a list
+  verb. The ordering had to be *decided*, not discovered, because V44 landed first.
+- **Guard the hint, not just the feature.** V46 added two guards beyond its spec and both found
+  something: checking that every `help[]` template *parses against the real parser* caught
+  `pandan comment add <id> "…"` in the first draft (the body is `--body`) — a hint that would have taught
+  agents an invalid command, and the same error was sitting in the card text. Walking the hint table
+  against the parser tree in both directions catches dead hints and unlisted wiring. Also worth the
+  note: leaking hints into `--format json` reddens **29 tests across four suites**, and those
+  pre-existing assertions were updated by stripping `help:` lines **at the assertion site, never inside
+  a capture helper**, so every "stdout still parses as JSON/TOON" check kept its power.
+- **Truncation is an allow-list, not "any long string."** `_TEXT_FIELDS` is exactly the API's unbounded
+  prose columns (`description`, `body`, `attention_note`, `summary`). A blanket rule would eventually
+  cut a keyset `next_cursor` and silently break pagination, or a link `url`. A truncated value stays a
+  **string** — no key added, removed or retyped — so a consumer's `.description` only gets shorter.
+  Live: `get --json` 4070 → 1154 bytes (−72%), `comment list --json` 6053 → 796 (−87%).
+- **V45 also made its own limit answerable from outside.** `config show` reports the effective
+  `max_text_chars`, because otherwise "why is my description cut off?" cannot be diagnosed; and the
+  config-file merge preserves the key even though `config set` has no flag for it, so a
+  `config set --board-id` can't delete a hand-written limit.
+- **Two agents hit the KAN-484 pre-push false positive and both pushed with `--no-verify`.** Correct in
+  the moment — CI's version-bump check evaluates the whole branch against the PR base and passes — but
+  it is exactly the habit a guard cannot afford to teach. A guard that cries wolf gets routed around,
+  and then it is not a guard. Carded rather than tolerated.
+
+**Release cadence: six mandatory bumps, one tag.** `v0.9.0` → `v0.14.0` is six version bumps and a
+single release (`v0.12.0`). The bump keeps provenance honest per behavioural change; the tag is for when
+something user-facing warrants distribution. The consequence to keep visible: **`v0.13.0` and `v0.14.0`
+exist in no binary**, so the `pdn` withdrawal and the parity correction are not in any downloadable
+build, and `pandan --version` on `PATH` reports `0.12.0` while source reports `0.14.0`. That skew is
+real, is the intended behaviour of V50's provenance work — and is precisely what KAN-505 misreports as a
+local edit.
