@@ -10,17 +10,81 @@ name: Deploy
 # pandan-client/, scripts/, *.md, .github/) skip the redeploy instead of rebuilding
 # an identical image. Detection is fail-safe: if the diff can't be computed, deploy.
 # Auth via the FLY_API_TOKEN repo secret.
+#
+# ---------------------------------------------------------------------------
+# WHY THE TRIGGER IS STILL workflow_run, AND WHERE THE SECOND TRIGGER WENT
+# (KAN-586 — read this before "fixing" the trigger)
+# ---------------------------------------------------------------------------
+# On 2026-07-31 a dependabot backend bump (PR #250 -> ef607856) merged to main
+# and never deployed: prod sat on fastapi 0.140.9 while main had 0.140.13. The
+# auto-merge workflow arms GitHub's native auto-merge with the built-in
+# GITHUB_TOKEN, GitHub attributes the merge to github-actions[bot]
+# (`gh pr view 250 --json mergedBy` -> app/github-actions), and GitHub creates NO
+# workflow runs for events triggered by GITHUB_TOKEN. No CI run on main means no
+# `workflow_run` event, so Deploy never fired.
+#
+# The obvious repair is "give Deploy a push trigger on main too". IT DOES NOT
+# WORK, and the evidence is in this repository's own run history. The recursion
+# protection suppresses the PUSH EVENT ITSELF, not just CI's subscription to it:
+#
+#   gh api "repos/leejianrong/pandan/actions/runs?branch=main&event=push"
+#     -> every other merge to main has TWO push runs (CI + Docs)
+#   gh api ".../actions/runs?head_sha=ef607856bc19eecdecabf39ab0b024ab97ffd304"
+#     -> total_count 2, both `Deploy`, both `event: workflow_run`, both skipped
+#        (they were fired by CI runs on other refs and correctly gated out).
+#        ZERO push-event runs, from any workflow.
+#
+# ci.yml already has `push: branches: [main]` and did not run. A third
+# push-triggered workflow would not have run either. For the same reason the
+# "have the auto-merge workflow dispatch the deploy after merging" option is dead
+# twice over: that workflow is `on: pull_request` (opened/synchronize/reopened),
+# so it arms `--auto` and exits long before the merge happens and never observes
+# it — and the post-merge `pull_request: closed` event it would need is
+# suppressed by the very same rule.
+#
+# So the only mechanism that restores the chain is to stop merging with
+# GITHUB_TOKEN: see the AUTOMERGE_TOKEN block in dependabot-auto-merge.yml. This
+# file's trigger is therefore UNCHANGED on purpose. A push trigger here would add
+# a deploy path that fires before CI has validated the merge commit — and branch
+# protection on this repo has `strict: false`
+# (`gh api repos/leejianrong/pandan/branches/main/protection`), so a PR's green
+# checks are NOT evidence about the merge commit, which is precisely what CI on
+# main provides.
+#
+# What this file gains instead is a WATCHER (the `drift` job below), because the
+# failure class here is "deploy silently does not happen" and every structural
+# signal said fine. It is trigger-independent: it asks what production last
+# actually deployed and compares it to main, so it catches this route, the
+# cancelled-CI route ci.yml's concurrency key now closes, a genuinely red CI run
+# on main, and whatever the seventh route turns out to be.
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
+  # Watcher only — see the `drift` job. Every deploying job below is hard-gated
+  # on `github.event_name == 'workflow_run'`, so these triggers cannot ship code.
+  schedule:
+    - cron: '23 */3 * * *'
+  workflow_dispatch:
+
+# The set of paths baked into the Fly image, defined ONCE and consumed by both
+# the deploy gate and the drift watcher. Two copies would let the watcher go
+# blind in exactly the place the gate is blind. (Whether this list still matches
+# the Dockerfile's COPY set is a separate question and KAN-584's territory.)
+env:
+  IMAGE_PATHS: '^(backend/|frontend/|Dockerfile|fly\.toml|\.dockerignore)'
 
 jobs:
   changes:
     name: Detect deployable changes
     runs-on: ubuntu-latest
-    # Gate: CI passed AND it was the main branch that ran.
+    # Gate: this is a CI completion event AND CI passed AND it was main that ran.
+    # The event_name test is redundant today (`github.event.workflow_run` is null
+    # on schedule/dispatch, so the other two are already false) and is here as a
+    # belt-and-braces guard a reviewer can check by eye: the watcher triggers
+    # above must never be able to reach a `flyctl deploy`.
     if: >-
+      github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main'
     outputs:
@@ -48,7 +112,7 @@ jobs:
           echo "Changed files:"
           echo "$changed"
           # Paths that actually end up in the deployed image / affect the build.
-          if echo "$changed" | grep -qE '^(backend/|frontend/|Dockerfile|fly\.toml|\.dockerignore)'; then
+          if echo "$changed" | grep -qE "$IMAGE_PATHS"; then
             echo "Image-affecting paths changed → deploy."
             echo "app=true" >> "$GITHUB_OUTPUT"
           else
@@ -76,3 +140,86 @@ jobs:
         run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # The watcher (KAN-586). Answers the one question no structural signal answers:
+  # is production actually running main's app code?
+  #
+  # "Guard with no watcher" has hit this project seven times now. This job is the
+  # watcher for the deploy contract itself, so state plainly what runs IT: the
+  # `schedule:` cron above (and `workflow_dispatch` for on-demand). It does NOT
+  # run on `workflow_run`, so it never doubles a real deploy run. Two known ways
+  # it can rot: GitHub disables `schedule:` triggers after 60 days with no repo
+  # activity, and a scheduled-run failure notifies only the last person to touch
+  # the cron. Neither applies to a repo merging daily, but both are real.
+  #
+  # It deliberately does not ask Fly. `flyctl deploy --remote-only` tags the image
+  # `deployment-<id>` and the image carries no git revision, so Fly cannot say
+  # which commit it is running. The GitHub-side equivalent — the head SHA of the
+  # most recent Deploy run whose `Deploy to Fly.io` job actually SUCCEEDED (not
+  # skipped; a docs-only Deploy run reports workflow-level `success` with that job
+  # skipped, which is the trap) — is exact. Adding an
+  # `org.opencontainers.image.revision` label to the app image and reading it back
+  # over the API would be strictly better and is KAN-584's territory.
+  drift:
+    name: Deploy drift watcher
+    if: github.event_name != 'workflow_run'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0 # need history to test ancestry + diff against an old SHA
+
+      - name: Is production running main's app code?
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          main_sha=$(git rev-parse HEAD)
+
+          # Walk Deploy runs newest-first for the first one that really deployed.
+          deployed=""
+          for run_id in $(gh api "repos/$REPO/actions/workflows/deploy.yml/runs?per_page=40" \
+                            --jq '.workflow_runs[].id'); do
+            shipped=$(gh api "repos/$REPO/actions/runs/$run_id/jobs" \
+                        --jq '[.jobs[] | select(.name == "Deploy to Fly.io" and .conclusion == "success")] | length')
+            if [ "$shipped" != "0" ]; then
+              deployed=$(gh api "repos/$REPO/actions/runs/$run_id" --jq '.head_sha')
+              echo "Last successful deploy: run $run_id -> $deployed"
+              break
+            fi
+          done
+
+          # Inconclusive fails LOUD. A watcher that shrugs is the thing this card
+          # is about; a false alarm here costs one look at the Actions tab.
+          if [ -z "$deployed" ]; then
+            echo "::error title=Deploy drift watcher inconclusive::No Deploy run in the last 40 has a successful 'Deploy to Fly.io' job. Either nothing has deployed in a long time, or the job was renamed and this watcher is now blind (KAN-586)."
+            exit 1
+          fi
+
+          echo "main is at: $main_sha"
+          if [ "$deployed" = "$main_sha" ]; then
+            echo "Production is running main's tip. In step."
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor "$deployed" "$main_sha"; then
+            echo "::error title=Production is not on main::Deployed commit $deployed is not an ancestor of main ($main_sha) — production is running something main does not contain."
+            exit 1
+          fi
+
+          changed=$(git diff --name-only "$deployed" "$main_sha")
+          echo "Changed since the last deploy:"
+          echo "$changed"
+
+          if echo "$changed" | grep -qE "$IMAGE_PATHS"; then
+            echo "::error title=DEPLOY DRIFT::main contains image-affecting changes that production is NOT running. Deployed $deployed, main $main_sha. Something merged to main without deploying — check whether its CI run on main exists and succeeded (a GITHUB_TOKEN merge fires none at all; see KAN-586). This self-heals on the next app-code merge, which is what makes it invisible."
+            exit 1
+          fi
+
+          echo "Only non-image paths changed since the last deploy — production is current."

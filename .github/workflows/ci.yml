@@ -33,11 +33,37 @@ on:
 
 # Cancel a superseded in-progress run when a new commit is pushed to the same
 # ref (dev-playbook principle 6). Without this, pushing twice to a PR runs both
-# to completion and wastes runners on the stale commit. Keyed per workflow+ref
-# so main and each PR branch have independent groups. (Deploy has its own
+# to completion and wastes runners on the stale commit. (Deploy has its own
 # concurrency group in deploy.yml — don't add one there.)
+#
+# PUSHES TO MAIN ARE DELIBERATELY EXEMPT (KAN-586). `github.ref` is
+# `refs/heads/main` for EVERY merge, so a ref-only key put every merge to main in
+# one group and each merge cancelled the previous merge's CI. That is not a
+# saving. Cancelling a PR-branch run discards evidence about a commit nobody will
+# ever ship; cancelling a main run discards the only CI evidence that a MERGE
+# COMMIT is good — and because deploy.yml triggers on `workflow_run: [CI]
+# completed` and gates on `conclusion == 'success'`, it ALSO silently suppresses
+# that merge's deploy. Verified twice on 2026-07-31: runs 30656741056 (@9a1c825c,
+# the KAN-518 merge, killed 74s later by the KAN-513 merge) and 30631718051
+# (@1992dd76) both show `conclusion: cancelled`. Both happened to be docs/mcp, so
+# nothing that should have shipped didn't — which is exactly why nobody noticed.
+#
+# The fix appends `github.sha` on main, giving every merge commit its own group,
+# so main runs neither cancel nor queue behind one another. It is deliberately
+# NOT `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`: that only
+# QUEUES, and GitHub keeps at most one *pending* run per group and cancels the
+# older pending one when a third arrives — which reintroduces the identical bug
+# during exactly the situation that triggered it (six merges to main in 33
+# minutes on 2026-07-31).
+#
+# Accepted trade-off: two app-code merges can now have CI in flight at once, so
+# if the older finishes LAST its Deploy runs last and prod briefly lands on the
+# older SHA (deploy.yml checks out `workflow_run.head_sha`). Two app-code merges
+# both run the full suite, so durations are comparable and completion order
+# almost always matches merge order, and the next merge heals it regardless.
+# Losing the CI evidence — and the deploy — outright was the worse failure.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'branch' }}
   cancel-in-progress: true
 
 jobs:
@@ -82,6 +108,14 @@ jobs:
               # KAN-484 shipped those tests and reported this hole from outside
               # its fence.
               - 'scripts/git-hooks/**'
+              # And once more (KAN-586): mcp/tests/test_deploy_gates.py pins the
+              # CI/Deploy/auto-merge invariants that keep a merge to main actually
+              # reaching production — the concurrency key just above, deploy.yml's
+              # trigger gate, and the auto-merge token. Those files are under
+              # .github/workflows/, not mcp/, so without this line the one PR
+              # shape that can break them (a workflow-only PR) would be the one
+              # shape that never runs the tests guarding them.
+              - '.github/workflows/**'
             client:
               - 'pandan-client/**'
             cli:
