@@ -64,6 +64,13 @@ it: **compact** separators for the headline and `indent=2` as the ceiling. **Opt
 built with FastMCP too, not hand-written JSON**, so they pass through the identical
 Pydantic→JSON-Schema serializer and any per-tool framing overhead is counted the same on both sides.
 
+> **Amended 2026-08-01 (KAN-585): every figure here is also INTERPRETER-sensitive, which nothing said.**
+> Python **3.13+ dedents docstrings at compile time**, worth ~215 tokens across the 49 tool
+> descriptions. The published option (a)/(b) figures (4,338 / 387) reproduce on **3.13+ only**; on 3.12
+> they read slightly higher. The SDK version, by contrast, moves nothing — 1.28.1 and 2.0.0 print
+> byte-identical tables on both 3.12 and 3.14. So when a number here fails to reproduce, check your
+> interpreter before suspecting the surface.
+>
 > **Amended 2026-08-01 (KAN-518): this unit counts three of a `tools/list` entry's four fields, not
 > all of them.** A tool definition also carries an **`outputSchema`**, which every figure in this
 > section excludes. That is a defensible choice and it is now an explicit one — see
@@ -172,6 +179,27 @@ the difference is structural rather than a matter of care:
   `jsonschema.validate(instance=maybe_structured_content, schema=tool.outputSchema)` on **every** tool
   result, unconditionally, with no `validate_output` flag to disable it
   (`mcp/server/lowlevel/server.py:566-573`). The advertised copy *is* the live one.
+
+> **Amended 2026-08-01 (KAN-585): the second bullet's line numbers and its *mechanism* are SDK-1.x-only,
+> and the decision survives for a different reason.** The port to SDK **2.0.0** (which renamed
+> `mcp.server.fastmcp` → `mcp.server.mcpserver` and `FastMCP` → `MCPServer`, wire keys unchanged) moved
+> the validation:
+>
+> - **Server-side, the advertised dict is no longer used at all.** 2.0.0 validates a tool result with the
+>   Pydantic `output_model` (`mcp/server/mcpserver/utilities/func_metadata.py:127-143`); the
+>   `jsonschema.validate(schema=tool.outputSchema)` call at `lowlevel/server.py:566-573` **is gone**.
+> - **The identity still holds** — `Tool.output_schema` is still a `cached_property` returning
+>   `fn_metadata.output_schema` (`mcp/server/mcpserver/tools/base.py:53-55`).
+> - **The advertised dict is now compiled and enforced by the CLIENT** instead
+>   (`mcp/client/session.py`, `_tool_output_validators`).
+>
+> So "do not compact" **stands, and is firmer**: the blast radius of mutating that object moved from one
+> server to every client. But note what happened to the guard. The pinned test asserts the *identity*,
+> and its docstring says "if this goes red, the SDK has separated them — re-read the decision rather
+> than relaxing the test". **The identity never broke, so the test stayed green while the entire reason
+> it mattered was replaced underneath it.** *Generalisable: a test can outlive its rationale without
+> ever going red. Pin the fact you can check, but write down the claim it stands for, or a future reader
+> inherits a green tick attached to an obsolete argument.*
 
 `title` is a pure JSON Schema annotation and jsonschema ignores it, so the strip would in fact still be
 inert — but that is now a claim about a third-party validator's keyword handling plus an in-place

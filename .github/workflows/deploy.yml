@@ -70,8 +70,10 @@ on:
 
 # The set of paths baked into the Fly image, defined ONCE and consumed by both
 # the deploy gate and the drift watcher. Two copies would let the watcher go
-# blind in exactly the place the gate is blind. (Whether this list still matches
-# the Dockerfile's COPY set is a separate question and KAN-584's territory.)
+# blind in exactly the place the gate is blind. (KAN-584 checked this list against
+# the Dockerfile's COPY set — it matches, verified by building from a context
+# containing only those paths — and mcp/tests/test_image_build_inputs.py now reads
+# IMAGE_PATHS live out of this file and asserts it keeps matching.)
 env:
   IMAGE_PATHS: '^(backend/|frontend/|Dockerfile|fly\.toml|\.dockerignore)'
 

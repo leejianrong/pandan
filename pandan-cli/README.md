@@ -35,9 +35,11 @@ don't collide with the card verbs (parity with the `/api/v1` surface).
   (≡ `--format json`). Both parse *before or after* the subcommand, so
   `pandan --json list` and `pandan list --format toon` are equally valid — see
   [Output formats](#output-formats-human-default--json--toon).
-- **`--fields LIST` is on every *list* verb and nowhere else** — `list`, `activity`,
-  `notify list`, `board list`, `epic list`, `label list`, `view list`, `cycle list`,
-  `template list`, `comment list` (see [`--fields`](#widening-the-row---fields-v42-kan-425)).
+- **`--fields LIST` is on every verb that returns *rows*** — the list verbs `list`,
+  `activity`, `notify list`, `board list`, `epic list`, `label list`, `view list`,
+  `cycle list`, `template list`, `comment list`, plus the three card-bearing mutation
+  verbs `batch-create`, `batch-update` and `template apply` (KAN-583). Not the
+  single-entity verbs (see [`--fields`](#widening-the-row---fields-v42-kan-425)).
 
 Everything else each verb accepts is spelled out below. **The rows are in
 `pandan --help` order on purpose**: this table has drifted from the CLI three times
@@ -245,6 +247,14 @@ pandan epic list --fields ticket,name,lead,target_date
   `label list`, `view list`, `cycle list`, `template list`, `comment list`,
   `notify list`. (Not the single-entity verbs like `get` — their payload is the whole
   record already; `--fields` there is an unrecognised argument, not a no-op.)
+  Since **KAN-583**, also the three verbs that *return* card rows without being list
+  verbs: `batch-create`, `batch-update` and `template apply`. Their payloads have been
+  recognised card envelopes since KAN-502/KAN-519, so the renderer would already have
+  served a projection — the flag just wasn't declared, and a capability you cannot ask
+  for is not a capability. `pandan overview` is the one recognised-envelope verb that
+  still lacks it, deliberately and on the record (KAN-591): it returns *cards* or
+  *boards* depending on whether a board resolves, so one `--fields ticket,title` would
+  be valid against one branch and an error against the other.
 - **The vocabulary is the row's own structured keys** — whatever `pandan list --json`
   (or `--format toon`) shows for a card is a valid field name (`title`, `assignee`, `priority`, `column`,
   `story_points`, `labels`, `blocked`, `blocked_by`, `due_date`, `needs_human`,
