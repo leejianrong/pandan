@@ -26,6 +26,7 @@ name: CI
 # behind a single `CI Success` aggregator made the sole required check) would
 # require a branch-protection settings change by a maintainer and is left as a
 # documented follow-up, not done here.
+# THROWAWAY — KAN-586 variable-isolation probe. Never merge this branch.
 on:
   pull_request:
   push:
