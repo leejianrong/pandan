@@ -44,9 +44,22 @@ assignment-built shapes that a naive "``return`` a dict literal" walk would miss
 assertion over a set the test computed itself is worth nothing without that — the pattern
 ``tests/test_parity.py`` established when it cross-checked its tool regex against a raw
 decorator count.
+
+## Section 4 (KAN-583): the other half, and a different enumeration
+
+Recognising an envelope buys the rows, the aggregate and V45's truncation. It does **not**
+buy ``--fields``, which ``_add_fields_arg`` attaches per-subparser — so ``batch-create``,
+``batch-update`` and ``template apply`` reached KAN-583 with a projection the renderer
+would happily serve and a parser that rejected the ask. Sections 0-2 enumerate envelope
+*keys* out of ``client.py``; section 4 enumerates *flag declarations* out of the parser
+tree, and the two sets are not the same question — which is why the audit that closed one
+missed the other, and why the guard here is mechanical rather than a list of three names.
+It found a **fourth** verb (``overview``) that sections 0-2 could not see at all, because
+that payload is assembled in the CLI and never passes through a client method.
 """
 from __future__ import annotations
 
+import argparse
 import ast
 import json
 import pathlib
@@ -283,12 +296,12 @@ def test_a_card_bearing_envelope_supports_fields_and_truncation(key):
     The projection is checked against a *long* body, because a ``--fields description``
     cell that skipped truncation is exactly the regression V45 shipped to prevent.
 
-    **Honest limitation, at the level this test actually reaches:** this pins the
-    *renderer*. The ``--fields`` **flag** is per-subparser (``_add_fields_arg``), and
-    neither ``batch-create``, ``batch-update`` nor ``template apply`` declares it — so a
-    caller cannot yet ask for a projection on those three verbs even though the renderer
-    would serve it. KAN-519 assumed ``--fields`` came "for free" with the envelope; it
-    does not, and widening three parsers was left out of that card's diff on purpose."""
+    **This reaches the renderer only.** The ``--fields`` *flag* is declared
+    per-subparser by ``_add_fields_arg``, which is a separate question and was KAN-519's
+    one wrong assumption ("``--fields`` comes for free with the envelope" — it does
+    not). Section 4 below is the flag half, and it is a **different enumeration**: this
+    file's sections 0-2 enumerate envelope *keys* out of the client, section 4
+    enumerates *flag declarations* out of the parser tree."""
     rows = [dict(row, description="x" * 400) for row in ROWS]
     projected = cli._project_rows({key: rows}, ["ticket", "description"], limit=50)
     assert projected == cli._project_rows({"cards": rows}, ["ticket", "description"], limit=50)
@@ -396,3 +409,236 @@ def test_the_three_template_verbs_agree_on_output_shape(monkeypatch, capsys):
     template_line = "1\tSlice\t1 cards"
     assert outputs["list"].splitlines()[0] == template_line
     assert outputs["create"].splitlines()[0] == template_line
+
+
+# --- 4. the flag-declaration audit (KAN-583) ---------------------------------
+# Every verb whose payload `_list_envelope` recognises must also DECLARE `--fields`,
+# because the renderer serving a projection is worth nothing if the parser rejects
+# the ask. Enumerated from the parser tree + the handlers' own source, so a fifth
+# instance fails on the PR that introduces it rather than in a later audit.
+
+CLI_SOURCE = pathlib.Path(cli.__file__)
+
+
+def _cli_module_functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Every module-level function in ``cli.py``, by name — the handlers plus the
+    small reshaping helpers (``_dep_facet``, ``_link_facet``) they return through."""
+    tree = ast.parse(CLI_SOURCE.read_text(encoding="utf-8"))
+    return {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def _payload_keys(
+    name: str,
+    funcs: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    client_keys: dict[str, set[str]],
+    seen: frozenset[str] = frozenset(),
+) -> set[str]:
+    """Every top-level key the handler ``name`` can return, statically.
+
+    Three return shapes occur among the ``_cmd_*`` handlers and all three matter:
+
+    1. ``return client.list_cards(...)`` — the client's own envelope, looked up in
+       the section-0 scanner rather than re-derived.
+    2. ``return {"tool": …, "cards": cards, …}`` / ``{"tool": …, **client.list_boards()}``
+       — a dict the CLI assembles itself. This is ``overview``, and it is invisible to
+       a client-only scan, which is exactly how it survived KAN-519's audit.
+    3. ``return _dep_facet(client.add_dependency(...), card_id)`` — reshaped through a
+       module-level helper, so the walk recurses into it (``seen`` guards a cycle).
+
+    Anything else contributes nothing, which is the safe direction: an unrecognised
+    return shape reports "no envelope", and a verb wrongly reported as envelope-less
+    can only make the guard below *miss*, never false-positive."""
+    if name in seen or name not in funcs:
+        return set()
+    seen = seen | {name}
+
+    def from_expr(node: ast.AST) -> set[str]:
+        keys: set[str] = set()
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if key is None:  # `**expr` — expand whatever it returns
+                    keys |= from_expr(value)
+                elif isinstance(key, ast.Constant) and isinstance(key.value, str):
+                    keys.add(key.value)
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "client"
+            ):
+                keys |= client_keys.get(func.attr, set())
+            elif isinstance(func, ast.Name):
+                keys |= _payload_keys(func.id, funcs, client_keys, seen)
+        return keys
+
+    return {
+        key
+        for node in ast.walk(funcs[name])
+        if isinstance(node, ast.Return) and node.value is not None
+        for key in from_expr(node.value)
+    }
+
+
+def _leaf_verbs(
+    parser: argparse.ArgumentParser, path: tuple[str, ...] = ()
+) -> list[tuple[str, argparse.ArgumentParser]]:
+    """``[("template apply", <parser>), …]`` for every verb a caller can actually
+    invoke — the leaves of the subparser tree, at whatever depth. A subparsers action
+    is the one action whose ``choices`` is a ``dict`` (``--column``'s is a list), so
+    this needs no private argparse class."""
+    groups = [
+        action
+        for action in parser._actions
+        if isinstance(getattr(action, "choices", None), dict)
+    ]
+    if not groups:
+        return [(" ".join(path), parser)]
+    return [
+        leaf
+        for action in groups
+        for name, sub in action.choices.items()
+        for leaf in _leaf_verbs(sub, path + (name,))
+    ]
+
+
+def verb_audit() -> dict[str, tuple[set[str], bool]]:
+    """``{verb: (the list-envelope keys its payload can carry, declares --fields)}``.
+
+    A ``config``/``login``/``context`` verb dispatches via ``local_func`` and prints
+    for itself — no client, no payload — so it contributes an empty key set and is
+    simply never an envelope verb."""
+    funcs = _cli_module_functions()
+    client_keys = client_return_keys()
+    audit = {}
+    for verb, parser in _leaf_verbs(cli.build_parser()):
+        handler = getattr(parser.get_default("func"), "__name__", None)
+        keys = _payload_keys(handler, funcs, client_keys) if handler else set()
+        audit[verb] = (
+            {key for key in keys if key in cli._LIST_ENVELOPES},
+            "--fields" in parser._option_string_actions,
+        )
+    return audit
+
+
+# Verbs whose payload IS a recognised list envelope and which deliberately do **not**
+# declare ``--fields``. Each carries its reason; a stale entry fails below, so this
+# cannot quietly become the list-of-names the mechanical guard exists to replace.
+FIELDS_EXEMPT = {
+    "overview": (
+        "returns one of TWO envelopes depending on board resolution — `{tool, cards, "
+        "next_cursor}` with a board, `{tool, **list_boards()}` without — so a single "
+        "`--fields ticket,title` is a valid card projection against the first and an "
+        "unknown-field error against the second. Which vocabulary the flag advertises "
+        "is a behaviour question of its own; KAN-583 found it here and reported it "
+        "rather than answering it inside a card scoped to three other verbs."
+    ),
+}
+
+
+def test_the_verb_walk_and_payload_scanner_found_what_they_claim_to():
+    """The non-emptiness proof, as exact values rather than a count — the same stance
+    ``test_the_scanner_actually_found_the_shapes_it_claims_to`` takes one section up,
+    because a walk that quietly returned ``{}`` would make the guard below a tautology.
+
+    Both halves are pinned: the parser walk must reach the real verb tree (including
+    nested and local-only verbs), and the payload scanner must still see all three
+    return shapes it handles."""
+    audit = verb_audit()
+    # The walk reached the whole tree, at every depth, including the local verbs.
+    assert len(audit) > 50, f"only walked {len(audit)} verbs — the parser walk broke"
+    for verb in ("list", "overview", "batch-create", "template apply", "config show"):
+        assert verb in audit, f"{verb} missing — the walk is not enumerating the tree"
+    # Shape 1: straight through to a client method.
+    assert audit["list"][0] == {"cards"}
+    assert audit["batch-update"][0] == {"updated"}
+    # Shape 2: a dict the CLI assembles — both branches, incl. the `**` expansion.
+    # This is the one no client-only scan can see.
+    assert audit["overview"][0] == {"cards", "boards"}
+    # Shape 3: reshaped through a module-level helper. `dep add` carries no envelope,
+    # but the recursion is what establishes that — so assert the raw keys too.
+    assert _payload_keys("_cmd_dep_add", _cli_module_functions(), client_return_keys()) == {
+        "card_id", "blocked_by", "blocks",
+    }
+    assert audit["dep add"][0] == set()
+    # A single-entity passthrough is not an envelope (see the `get` finding below).
+    assert audit["get"][0] == set()
+
+
+def test_every_list_envelope_verb_declares_fields():
+    """The guard. Set **equality**, so it fails in both directions: a verb that renders
+    a list envelope and cannot be asked for a projection (KAN-583's three), and a verb
+    that declares a flag its payload can never use (a projection ``_project_rows``
+    would decline, leaving ``--fields`` a silent no-op)."""
+    audit = verb_audit()
+    should = {verb for verb, (envelopes, _) in audit.items() if envelopes}
+    declares = {verb for verb, (_, has_flag) in audit.items() if has_flag}
+    assert declares == should - set(FIELDS_EXEMPT), (
+        "`--fields` declarations and list-envelope payloads disagree.\n"
+        f"  envelope verbs missing the flag: {sorted(should - declares - set(FIELDS_EXEMPT))}\n"
+        f"  verbs declaring a flag they cannot use: {sorted(declares - should)}\n"
+        "Add `_add_fields_arg(<parser>, \"<example>\")` to the verb's subparser block, "
+        "or classify it in FIELDS_EXEMPT with the reason."
+    )
+
+
+def test_the_fields_exemptions_are_not_stale():
+    """An exemption that stopped being true is the artefact that lets the next instance
+    ship. Each one must still name a real verb, whose payload really is an envelope,
+    which really does lack the flag — so fixing ``overview`` deletes its entry here
+    instead of leaving a comment that has quietly become false."""
+    audit = verb_audit()
+    for verb, reason in FIELDS_EXEMPT.items():
+        assert verb in audit, f"FIELDS_EXEMPT names {verb!r}, which is not a verb"
+        envelopes, has_flag = audit[verb]
+        assert envelopes, f"{verb} carries no list envelope — the exemption is stale"
+        assert not has_flag, f"{verb} now declares --fields — drop its exemption"
+        assert reason.strip(), f"{verb} is exempted with no reason"
+
+
+@pytest.mark.parametrize(
+    ("argv", "result"),
+    [
+        (["batch-create", '[{"title": "a"}]'], {"created": ROWS}),
+        (["batch-update", '[{"id": 21, "assignee": "a"}]'], {"updated": ROWS}),
+        (["template", "apply", "1", "--board", "5"], {"created": ROWS}),
+    ],
+    ids=["batch-create", "batch-update", "template-apply"],
+)
+def test_the_three_widened_verbs_serve_a_projection_end_to_end(
+    monkeypatch, capsys, argv, result
+):
+    """KAN-583 at the surface an agent sees: the projection the renderer already
+    supported, now reachable. Asserted as exact lines, and with the V44 aggregate still
+    last — ``--fields`` chooses which columns print and changes nothing else, so the
+    published "read your counts off ``tail -1``" contract survives it."""
+    out = run_capture(monkeypatch, capsys, argv + ["--fields", "ticket,column"], result)
+    assert out.splitlines() == [
+        "KAN-21\tin_progress",
+        "KAN-22\tdone",
+        "2 cards · 0 todo · 1 in_progress · 1 done",
+    ]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["batch-create", '[{"title": "a"}]'],
+        ["batch-update", '[{"id": 21}]'],
+        ["template", "apply", "1", "--board", "5"],
+    ],
+    ids=["batch-create", "batch-update", "template-apply"],
+)
+def test_the_widened_verbs_name_card_rows_on_an_unknown_field(monkeypatch, capsys, argv):
+    """The error contract (V43) reaches the new flag too, and names the right noun.
+    ``template apply``'s parser sets ``noun="template"``, but its rows are cards —
+    the noun comes from ``_ROW_NOUN[envelope]``, not from the verb."""
+    monkeypatch.setattr(cli, "PandanClient", lambda *a, **k: FakeClient({"created": ROWS}))
+    assert cli.run(argv + ["--fields", "nope"]) == cli.EXIT_ERROR
+    out = capsys.readouterr().out
+    assert "unknown_field" in out
+    assert "for card rows" in out
