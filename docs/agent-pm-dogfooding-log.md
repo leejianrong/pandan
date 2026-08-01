@@ -2496,3 +2496,178 @@ matched assignment order, which is the first time that has happened while runnin
   not cut — but the consequence is the familiar one: KAN-519's `batch-update` fix, KAN-529's autosync
   flags and KAN-526's hint suppression reach a user only on a build that contains them, and
   `pandan --version` on a released binary will read `0.19.1` while source reads `0.22.0`.
+
+> **Closed the same day:** the owner approved a release, so **`v0.22.0` was tagged** — binaries and the
+> ghcr image both verified live. Source and the released binary agreed again for the first time since
+> stage 6.
+
+### Stage 9 — the deploy path turns out to be the least-guarded thing in the repo (PRs #257–#262)
+
+Stage 8 closed the seven follow-up cards. Stage 9 started as three unrelated cards and became a single
+finding: **the deploy is the one contract in this project that nothing was checking.** Four cards landed
+(`v0.23.0`), and three of them are about validation that was believed to exist and did not.
+
+| Card | PR | Outcome |
+|---|---|---|
+| KAN-585 | #257 | SDK 2.0 was a **rename, not a rewrite**; ported, bounded `mcp>=2.0,<3` |
+| KAN-583 | #258 | three verbs gained `--fields`; the `get` asymmetry confirmed **correct** |
+| KAN-586 | #259 | the dependabot/concurrency deploy gap, plus a **drift watcher** |
+| KAN-584 | #262 | CI now **builds the app image**, and asserts it is usable rather than merely built |
+
+#### The release, and a ghcr check done the right way
+
+`v0.22.0` was cut on the owner's approval. Worth recording the *method* on one verification: asked
+whether the renamed ghcr package was public, the answer came from an **anonymous** registry token —
+`curl "https://ghcr.io/token?scope=repository:leejianrong/pandan-mcp:pull"` then a manifest `GET`,
+**HTTP 200** — not from `gh api /user/packages/...`, which needs `read:packages` and would only have
+proven *the owner* can read it. *Generalisable: when the question is "can the public see this", the
+authenticated API is the wrong instrument no matter how convenient. Ask as the public.* KAN-437's ghcr
+half was already done; only the OAuth display name remains, and that genuinely has no API.
+
+#### KAN-585: the premise was true and the implication was false
+
+The card said SDK 2.0.0 "removes `mcp.server.fastmcp` — the module the whole server is built on", filed
+off a red CI log showing `ModuleNotFoundError`. Both halves of the observation were right. The
+conclusion — that this is a rewrite of the registration layer — was wrong: **FastMCP was renamed in
+place and kept first-party** (`mcp.server.mcpserver`, `FastMCP` → `MCPServer`). It did not move to the
+standalone `fastmcp` PyPI project and the decorator style was not dropped. Five files, mechanical; the
+ported suite passed unchanged in a scratch venv before anything in the repo was touched.
+
+**The safety property that mattered was the wire contract, and it holds:** the rename is attribute-level
+(`Tool.inputSchema` → `.input_schema`) while the **wire keys stay camelCase**. Verified independently by
+dumping a live tool — `['description', 'inputSchema', 'name', 'outputSchema']`, no `input_schema`. Had
+that flipped, every MCP client would have broken silently. *Generalisable: for a protocol adapter, "did
+the API rename" and "did the wire rename" are different questions and only the second is a breaking
+change.*
+
+**The best finding is about a guard, and it is uncomfortable.** KAN-518 had declined to compact
+`outputSchema` one day earlier because the advertised dict was what `lowlevel/server.py` ran
+`jsonschema.validate` against on every result — and pinned it with a test whose docstring says *"if this
+goes red, the SDK has separated them; re-read the decision rather than relax the test."* In 2.0.0 that
+`jsonschema.validate` call **is gone**: the server validates with the Pydantic `output_model`, and the
+advertised dict is compiled into a validator by the **client** instead. The decision survives and is
+firmer (blast radius moved from one server to every client) — but **the test never went red**, because
+it pins the *identity*, which still holds, while the reason the identity mattered was replaced
+underneath it. *Generalisable: a test can outlive its rationale without ever failing. Pin the fact you
+can check, and write down the claim it stands for — otherwise a future reader inherits a green tick
+attached to an obsolete argument.*
+
+**An eleventh blind guard, found by mutation and reported out-of-fence.** `test_parity.py`'s
+non-vacuity cross-check derives *both* its counts from the same variable name, so renaming `mcp` in
+`server.py` sends both to zero and `0 == 0` passes; the file is currently saved by a hardcoded `== 49`,
+not by its own design. The sharpest variant yet, because that cross-check was added (KAN-502) for
+exactly this purpose and three other files have since copied the pattern. Carded as **KAN-592**.
+*Generalisable: a non-emptiness proof must not share an input with the thing whose non-emptiness it
+proves. Two counts derived from the same target are one count.*
+
+#### KAN-583: a card that survived, and a suspicion correctly refused
+
+First card in a while whose reasoning *and* substance both held — only its line numbers were stale, by
+~110 lines, exactly as it predicted of itself. Three verbs gained `--fields`.
+
+**The PM's own addendum was the thing that got refuted, which is the right outcome.** Noticing that
+`pandan get --fields` errors while the MCP `get_card` tool accepts `fields`, the PM asked whether that
+was a gap — while explicitly warning it might be a correct asymmetry and that two cards had already been
+filed against correct behaviour. It is correct. Proved by **mutation, not argument**: declare `--fields`
+on `p_get` and `pandan get 5 --fields ticket,column` prints the *unchanged* default row and exits 0 — a
+**silent no-op**, strictly worse than today's exit-2. And MCP's `fields` is a different operation
+entirely: `shaping.project()` has a documented single-object branch narrowing top-level keys, with a
+header stating it "is not a port of the CLI's `--fields`". `pandan-cli/README.md:243-247` already said
+all of this, *including the reason*. Third near-miss avoided.
+
+**A fourth envelope instance, and it exposes the limit of yesterday's guard.** `pandan overview` builds
+`{"tool":…, "cards":[…]}` — or `{"tool":…, **list_boards()}` — **in the handler**, never through a
+client method. KAN-519's AST scanner reads envelope keys out of the *client source*, so it structurally
+**cannot see it**; the fourth instance was found by a different walk entirely (flag declarations across
+the parser). Left exempt with a recorded reason and a staleness test, because `overview` returns one of
+two envelopes depending on ambient config, so a single `--fields ticket,title` would be valid against
+one branch and an error against the other. Carded as **KAN-591**. *Generalisable: a scanner is only as
+complete as its input set, and the input set is a design decision that ages. The counterexample was
+already in the tree when the scanner was written.*
+
+#### KAN-586: three routes to a merge that never ships, and the PM took one of them
+
+The card was filed after checking what production was *actually running* rather than assuming a merge
+had deployed: prod on fastapi **0.140.9**, `main` on **0.140.13**.
+
+**Two of the card's three proposed fixes turned out to be mechanically impossible, not merely worse.**
+GitHub's recursion protection suppresses **the event itself**, not one workflow's subscription to it —
+at `ef607856` there are **zero push-event runs from any workflow**, and `ci.yml` already carries
+`push: branches: [main]`. So a push trigger on `deploy.yml` would be suppressed identically, and the
+"have auto-merge dispatch the deploy" option is dead twice over (that workflow is `on: pull_request`, so
+it arms `--auto` and exits minutes before the merge, and the `pull_request: closed` event it would need
+is suppressed by the same rule). Only the token fix survives. *Generalisable: when three options are
+offered, check whether the mechanism exists before comparing their trade-offs — two of these were not
+worse choices, they were not choices.*
+
+**The PM caused the third occurrence while fixing the first two.** The card had said "*had it been app
+code, Deploy would not have fired for it either*." It then was: the owner merged an Apache-2.0 PR
+touching `backend/pyproject.toml` + `frontend/package.json` at 10:24:14, its CI on `main` started at
+10:24:16, and **the PM merged the next card at 10:24:59 — 45 seconds later — cancelling it.** No
+successful CI on main, so no deploy. `main` briefly carried *two* undeployed image-affecting changes by
+*two* different routes, one of them caused by landing cadence hitting a shared `refs/heads/main`
+concurrency group. Fixed by keying that group per-commit on `main` while leaving PR branches ref-only —
+deliberately *not* `cancel-in-progress: false`, which only queues and still drops the older pending run
+during exactly the merge burst that causes the problem.
+
+**The fix's own failure mode is silence, so it ships a watcher.** The scheduled `Deploy drift watcher`
+asks the one question no structural signal answers — *is production running main's app code?* — and it
+was proved end-to-end the same day: **failure** on the real drift (`Last successful deploy: cefa9665`),
+then **success** after the deploy that closed it. It keys on the **`Deploy to Fly.io` job** conclusion,
+not the run's, because a docs-only Deploy run reports workflow-level `success` with that job `skipped`
+— the trap that made three runs look green while shipping nothing.
+
+**The agent found a blind test in its own mutation run.** Its guard substring-searched the workflow file
+and matched *its own header comment* quoting the expression it was checking; rewritten to parse the job
+block and read the `if:` value. *Generalisable: when a test asserts on the text of a file that also
+documents itself, the documentation is part of the haystack.*
+
+**Still outstanding and owner-only:** the `AUTOMERGE_TOKEN` secret. Until it exists the dependabot half
+is **detected, not fixed** — the fallback preserves today's behaviour and emits a `::warning::` naming
+the consequence, which is the honest state rather than a silent one.
+
+#### KAN-584: "it built" is a weaker claim than it sounds
+
+CI genuinely never referenced `Dockerfile` — re-verified by grep against post-KAN-586 `main`. But the
+card's framing (the `app` filter union "should have matched it") was itself wrong in a more interesting
+way: **that union is dead code.** `ci.yml:85` declares an `app` job output consumed by *nothing*; it
+could never have caught anything. A classifier with no consumer — config that reads as coverage and
+provides none. Carded as **KAN-596**.
+
+**The mutation that shaped the whole job:** a Dockerfile variant whose frontend stage emits an empty
+`static/` **builds successfully, exit 0**, and yields an image that 404s every page. So the job asserts
+the image is *usable* — a real bundle present, SPA fallback registered, `/api/health` mounted,
+`import app.main` succeeding **under `--no-dev`**, `alembic` and `uvicorn` on PATH. The `--no-dev` case
+is the sharpest: every other CI job installs the dev group, so a runtime dependency misfiled into it
+passes all of CI and fails only here. *Generalisable: "the build succeeded" is an assertion about the
+builder, not about the artifact.*
+
+**`IMAGE_PATHS` checked and found correct** — verified by building from a context containing *only*
+`backend/ frontend/ Dockerfile .dockerignore`, which succeeds, so nothing else is a build input. What
+was missing was the watcher, and there now is one that reads `IMAGE_PATHS` **live out of `deploy.yml`**
+rather than copying it. OCI labels declined again, in agreement with KAN-513 and with the mechanism
+spelled out: Fly's API reports the image ref, not its labels, and asserting a label in CI would be
+asserting it about a build that is not the one that ships. The workable shape — bake the revision in and
+surface it on `/api/health` so the watcher can curl production — is carded as **KAN-595**.
+
+Cost, measured rather than feared: **34 seconds** cold with no cache, cheaper than the existing security
+scan (51s) and e2e (19s… on a warm day). Both new filters were proved with **isolated-variable throwaway
+PRs** — one changing only `Dockerfile`, closed unmerged — reporting per-step conclusions, which is now
+the third stage running where that discipline caught or prevented an unfounded evidence claim.
+
+#### Stage 9 closing counts
+
+**Four cards, five PRs (one throwaway pair closed unmerged), `v0.22.0` → `v0.23.0`, one release cut and
+one real deploy** that closed a three-change drift.
+
+- **Falsified spec claims: 3 this stage, M7 total 18.** KAN-585's "rewrite" (a rename), KAN-586's options
+  (b) and (c) (impossible, not merely worse), and KAN-584's `app`-union framing (dead code). Two of the
+  three were errors in cards the **PM** wrote from a CI log — the same failure the project keeps finding
+  in agents' specs, now demonstrated at the PM level twice in one stage.
+- **Blind guards: 2 found, milestone total 12.** `test_parity.py`'s shared-input non-vacuity proof
+  (KAN-585, carded), and KAN-586's own self-matching workflow-text search (found and fixed by the agent
+  during its mutation run).
+- **Cards filed from findings: 4** — KAN-591, KAN-592, KAN-595, KAN-596.
+- **One recurring red is now expected and correct:** the drift watcher runs every three hours and fails
+  whenever `main` carries image-affecting commits production is not running. It has already gone red,
+  then green. That is the point — the drift it reports used to be invisible.

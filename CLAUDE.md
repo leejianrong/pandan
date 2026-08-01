@@ -122,9 +122,14 @@ uv run pytest tests/integration/test_x.py::test_name  # run a single test
 > pytest collection (before the `_database` fixture sets `DATABASE_URL`), binding the engines to the
 > wrong DB; it passes locally against your dev Postgres but fails CI (the PR #17 trap). A
 > `pytest_collection_finish` guard in conftest + a `pytest --collect-only` step in the pre-push hook
-> now catch this. CI runs lint, unit, integration, the
-> frontend build, and Playwright e2e as five independent jobs (see `.github/workflows/ci.yml`); the
+> now catch this. CI runs lint, unit, integration, the frontend build, Playwright e2e, the
+> client/MCP/CLI suites, a container `image` build of `./Dockerfile` + `mcp/Dockerfile` (KAN-584),
+> and a supply-chain security scan as independent path-filtered jobs (see
+> `.github/workflows/ci.yml`); the
 > e2e job uses a Postgres service container and caches the Chromium download by Playwright version.
+> **Not all of them are *required* checks** — required contexts are currently lint, unit, integration
+> and the frontend build, so the MCP and image jobs (which run the KAN-452/484/523/584/586 guards) can
+> be bypassed by an admin merge; tracked in KAN-596.
 > If `uv` is unavailable, a `python -m venv` + `pip install -e .` (or install from `pyproject.toml`)
 > works too — the package is intentionally not installable (`tool.uv package = false`), so always
 > run from `backend/` (`alembic.ini` sets `prepend_sys_path = .` so `import app` resolves).
@@ -200,6 +205,19 @@ blindly":
 - **App code deploys.** A merge to `main` that touches app code triggers the Fly deploy — after it,
   prod-verify (see the dogfooding log's patterns), and **land any PR carrying a DB migration alone**.
   Docs/CI/Makefile-only merges skip the deploy.
+- **A green PR does not guarantee the merge reached production** (KAN-586). `deploy.yml` triggers on
+  *CI completing successfully on `main`*, and three things can silently remove that: a merge attributed
+  to `github-actions[bot]` fires **no workflow runs at all** (GitHub creates none for `GITHUB_TOKEN`-
+  triggered events, which is how a dependabot `backend/` bump merged and never shipped); until KAN-586
+  a merge to `main` **cancelled the previous merge's CI** via a shared concurrency group (this bit two
+  merges 45 seconds apart); and a genuinely red CI run on `main` is a third. All are invisible —
+  nothing goes red, and the drift self-heals on the next app-code merge. The watcher is the scheduled
+  **`Deploy drift watcher`** job in `deploy.yml`, which fails loudly when `main` carries image-affecting
+  commits production isn't running (`workflow_dispatch` runs it on demand; the deploy jobs are hard-gated
+  on `workflow_run`, so a manual dispatch cannot ship anything). **To check by hand, compare `main`
+  against the head SHA of the newest Deploy run whose `Deploy to Fly.io` *job* succeeded** — not the
+  newest run whose *workflow-level* conclusion was `success`, which reads `success` with that job
+  `skipped` on every docs-only merge. That distinction is the trap.
 - **Worktree-checked-out branches:** `gh pr merge --delete-branch` prints a *local* branch-delete
   error when the branch is checked out in a worktree, **but the merge still succeeds** — confirm with
   `gh pr view <n> --json state` (`MERGED`), don't mistake the exit code for a failed merge.
