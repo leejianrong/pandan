@@ -96,6 +96,10 @@
 # "labels that look maintained and aren't" that KAN-475 rejected. The health-
 # endpoint version is worth a card.
 
+# THROWAWAY: isolated-variable proof for KAN-584. This branch changes ONLY this
+# file, so if ci.yml's `image` job runs its heavy steps here, nothing else in the
+# diff could have caused it. Never merged.
+
 # ---- Stage 1: build the Svelte SPA ----
 FROM node:22-slim AS frontend
 WORKDIR /frontend
