@@ -239,7 +239,7 @@ def _available(rows: list[Any]) -> list[str]:
 def _validate(names: list[str], rows: list[Any], noun: str) -> None:
     """Reject an unknown field name, naming the offender and listing what is valid.
 
-    Raised as a plain ``ValueError``, which FastMCP surfaces to the model as a tool
+    Raised as a plain ``ValueError``, which the SDK surfaces to the model as a tool
     error — so a wrong guess costs one cheap round trip and teaches the vocabulary,
     instead of silently returning rows full of nulls.
     """

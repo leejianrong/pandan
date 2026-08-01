@@ -16,7 +16,7 @@ Method
 * **What is counted.** For each tool, the JSON object a client sends to the model
   API: ``{"name": "mcp__pandan__<tool>", "description": <docstring>,
   "input_schema": <inputSchema>}``, from the server's real ``tools/list``
-  response (``FastMCP.list_tools()``, the same call the stdio transport answers
+  response (``MCPServer.list_tools()``, the same call the stdio transport answers
   with). Serialized **compact** (``separators=(",", ":")``) for the headline
   number, and at ``indent=2`` as an upper bracket, because the client's exact
   framing is not observable from here and pretty-printing costs ~46% more.
@@ -31,7 +31,7 @@ Method
   forward it. Rather than guess, :func:`measure_output_schemas` reports it as its
   own bracketed row: alone, and as the ceiling where a client forwards all four
   fields. Do **not** fold it into the headline — see ADR 0019, *The fourth field*.
-* **The alternatives are built with FastMCP too**, not hand-written JSON, so
+* **The alternatives are built with MCPServer too**, not hand-written JSON, so
   options (a) and (b) go through the identical Pydantic→JSON-Schema serializer
   as the live surface. Any per-tool framing overhead is therefore counted the
   same way on both sides of the comparison.
@@ -56,8 +56,8 @@ import copy
 import json
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.tools.base import Tool
+from mcp.server import MCPServer
+from mcp.server.mcpserver.tools.base import Tool
 
 from pandan_mcp.schema import compact_schema
 from pandan_mcp.server import mcp as live_mcp
@@ -77,13 +77,13 @@ def _encoder():
     return tiktoken.get_encoding("o200k_base")
 
 
-def tool_payloads(server: FastMCP) -> list[dict[str, Any]]:
+def tool_payloads(server: MCPServer) -> list[dict[str, Any]]:
     """The per-tool JSON objects a client puts in the model's context."""
     return [
         {
             "name": f"{NAMESPACE}{tool.name}",
             "description": tool.description,
-            "input_schema": tool.inputSchema,
+            "input_schema": tool.input_schema,
         }
         for tool in asyncio.run(server.list_tools())
     ]
@@ -105,21 +105,21 @@ def measure(payloads: list[dict[str, Any]], enc) -> dict[str, int]:
     }
 
 
-def output_schemas(server: FastMCP) -> list[dict[str, Any] | None]:
+def output_schemas(server: MCPServer) -> list[dict[str, Any] | None]:
     """Each tool's ``outputSchema`` — the fourth field of a ``tools/list`` entry.
 
-    FastMCP generates one from the return annotation; for every pandan tool
+    MCPServer generates one from the return annotation; for every pandan tool
     (``-> dict[str, Any]``) that is the same three-key object with a Pydantic
     class name in it: ``{"additionalProperties": true, "title":
     "<fn>DictOutput", "type": "object"}`` (the title comes from the *function*
-    name at ``mcp/server/fastmcp/utilities/func_metadata.py:501``, not the
+    name at ``mcp/server/mcpserver/utilities/func_metadata.py:537``, not the
     registered tool name — so the tool registered as ``next`` reads
     ``next_readyDictOutput``).
 
     ``None`` for a tool with no structured output, which is why the row below
     reports how many were actually present rather than assuming the tool count.
     """
-    return [tool.outputSchema for tool in asyncio.run(server.list_tools())]
+    return [tool.output_schema for tool in asyncio.run(server.list_tools())]
 
 
 def measure_output_schemas(
@@ -157,13 +157,13 @@ def measure_output_schemas(
     }
 
 
-def raw_tool_payloads(server: FastMCP) -> list[dict[str, Any]]:
-    """The payloads as FastMCP *would* advertise them without V49's compaction.
+def raw_tool_payloads(server: MCPServer) -> list[dict[str, Any]]:
+    """The payloads as MCPServer *would* advertise them without V49's compaction.
 
     ``server.py`` applies :func:`pandan_mcp.schema.compact_advertised_schemas` at
     import, so the live surface is already compacted and the pre-compaction number
     cannot simply be read back. ``Tool.from_function`` regenerates the schema from
-    the function signature (mcp/server/fastmcp/tools/base.py:77), which is exactly
+    the function signature (mcp/server/mcpserver/tools/base.py:58), which is exactly
     what registration did in the first place — so this recovers the "before" side
     of the comparison honestly rather than estimating it.
     """
@@ -195,7 +195,7 @@ def strip_pydantic_noise(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 # --- option (a): one tool per entity, with an `action` argument -------------
 
-option_a = FastMCP("pandan")
+option_a = MCPServer("pandan")
 
 
 @option_a.tool()
@@ -435,7 +435,7 @@ def notification(
 
 # --- option (b): a single exec tool, the CLI is the surface -----------------
 
-option_b = FastMCP("pandan")
+option_b = MCPServer("pandan")
 
 
 @option_b.tool()

@@ -2,9 +2,11 @@
 
 Each tool is a thin wrapper over one ``/api/v1`` endpoint via ``PandanClient``.
 Type hints + docstrings here become the tool schema + description the agent sees
-(FastMCP). Since M3 V8 (ADR 0013) ``/api/v1`` is auth-required, so ``PANDAN_TOKEN``
-must be a valid personal access token (V9/ADR 0014); it authenticates as its
-owning user and can only reach boards that user owns.
+(the SDK's high-level decorator layer — ``MCPServer``, which is what v1's
+``FastMCP`` was renamed to in **SDK 2.0.0**; see ``pyproject.toml`` for the bound
+and KAN-585). Since M3 V8 (ADR 0013) ``/api/v1`` is auth-required, so
+``PANDAN_TOKEN`` must be a valid personal access token (V9/ADR 0014); it
+authenticates as its owning user and can only reach boards that user owns.
 
 **Board scoping (V10, ADR 0015):** the agent works across multiple boards
 dynamically. ``list_boards``/``create_board`` discover and make boards; the
@@ -44,7 +46,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from pandan_client import PandanClient
 
 from .config import load_config
@@ -54,7 +56,10 @@ from .shaping import shape
 Column = Literal["todo", "in_progress", "done"]
 Priority = Literal["none", "low", "medium", "high", "urgent"]
 
-mcp = FastMCP("pandan")
+# The local name stays ``mcp`` on purpose: ``pandan-cli/tests/test_parity.py``
+# parses ``@mcp.tool(...)`` out of this file as TEXT (it must not import this
+# package — ADR 0005), so renaming the variable would silently empty its regex.
+mcp = MCPServer("pandan")
 
 _client: PandanClient | None = None
 _default_board_id: int | None = None

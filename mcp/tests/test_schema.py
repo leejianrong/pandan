@@ -10,15 +10,25 @@ Two jobs, and they are different:
 * **The compaction guards** — ``pandan_mcp.schema`` rewrites the schema clients
   are shown. Every test below that touches it is there to prove the rewrite
   cannot change behaviour, because "it only affects the advertised schema" is an
-  assertion about FastMCP internals and deserves to be pinned rather than
+  assertion about SDK internals and deserves to be pinned rather than
   trusted.
+
+**SDK 2.0.0 (KAN-585).** Every citation below is against the 2.x layout: the
+high-level layer moved ``mcp.server.fastmcp`` → ``mcp.server.mcpserver`` and
+``FastMCP`` → ``MCPServer``, and the ``Tool`` model's fields went camelCase →
+snake_case (``inputSchema`` → ``input_schema``, ``outputSchema`` →
+``output_schema``; the *wire* keys are still camelCase, via Pydantic aliases).
+Nothing these tests assert changed value: the whole file passed on 2.0.0 with only
+those renames, and ``scripts/measure_tool_schema_tokens.py`` printed byte-identical
+figures on 1.28.1 and 2.0.0. The one premise that *did* move is documented on
+``test_the_advertised_output_schema_is_the_object_the_server_validates_against``.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 
-from mcp.server.fastmcp.tools.base import Tool
+from mcp.server.mcpserver.tools.base import Tool
 
 from pandan_mcp.schema import COLLAPSIBLE_SIBLING_KEYS, compact_schema
 from pandan_mcp.server import mcp
@@ -110,9 +120,9 @@ def test_the_frozen_count_is_pinned_independently_of_the_name_set():
 
 
 def _raw_tool(tool):
-    """Rebuild a tool from its own function to recover the schema FastMCP would
+    """Rebuild a tool from its own function to recover the schema the SDK would
     have advertised *before* compaction (``Tool.from_function`` regenerates it
-    from the signature — see mcp/server/fastmcp/tools/base.py:77)."""
+    from the signature — see mcp/server/mcpserver/tools/base.py:58)."""
     return Tool.from_function(tool.fn, name=tool.name)
 
 
@@ -142,10 +152,10 @@ def test_compaction_preserves_every_property_name_and_required_set():
 
 
 def test_compaction_does_not_touch_the_validator():
-    """**The whole safety argument.** FastMCP validates an incoming call with
+    """**The whole safety argument.** The SDK validates an incoming call with
     ``fn_metadata.arg_model`` (``Tool.run`` → ``call_fn_with_arg_validation``,
-    mcp/server/fastmcp/tools/base.py:101), and advertises ``Tool.parameters``
-    (built separately at base.py:84). Compaction rewrites only the latter — so
+    mcp/server/mcpserver/tools/base.py:152), and advertises ``Tool.parameters``
+    (built separately at base.py:100). Compaction rewrites only the latter — so
     the validator must still carry the very ``title`` keys we stripped from the
     advertised copy. If this ever fails, compaction has reached the call path and
     is no longer cosmetic.
@@ -191,20 +201,20 @@ def test_no_generated_titles_remain_anywhere():
             walk_schema(node["items"], f"{path}.items")
 
     for tool in _tools():
-        walk_schema(tool.inputSchema, tool.name)
+        walk_schema(tool.input_schema, tool.name)
 
 
 def test_compaction_is_idempotent():
     """A second pass must be a no-op, so an accidental double-application (e.g. a
     re-import) cannot compound into something lossy."""
     for tool in _tools():
-        assert compact_schema(tool.inputSchema) == tool.inputSchema
+        assert compact_schema(tool.input_schema) == tool.input_schema
 
 
 def test_plain_nullables_are_collapsed():
     """The saving actually happened — `anyOf: [{integer}, {null}]` is now
     `type: [integer, null]`."""
-    board_id = _by_name()["list_cards"].inputSchema["properties"]["board_id"]
+    board_id = _by_name()["list_cards"].input_schema["properties"]["board_id"]
     assert board_id["type"] == ["integer", "null"]
     assert "anyOf" not in board_id
 
@@ -217,7 +227,7 @@ def test_a_nullable_enum_is_never_collapsed():
     advertised contract. The collapse is allow-listed to inert sibling keys
     precisely so this cannot happen.
     """
-    column = _by_name()["list_cards"].inputSchema["properties"]["column"]
+    column = _by_name()["list_cards"].input_schema["properties"]["column"]
     assert "anyOf" in column, "a nullable enum was collapsed — this narrows it"
     assert {"type": "null"} in column["anyOf"]
     enum_branch = next(o for o in column["anyOf"] if o != {"type": "null"})
@@ -242,7 +252,7 @@ def test_an_unrecognised_constraint_blocks_the_collapse():
 def test_inert_structural_keys_survive_the_collapse():
     """``items`` must be carried through, not dropped, when a nullable array is
     collapsed — otherwise the element type silently disappears."""
-    label_ids = _by_name()["create_card"].inputSchema["properties"]["label_ids"]
+    label_ids = _by_name()["create_card"].input_schema["properties"]["label_ids"]
     assert label_ids["type"] == ["array", "null"]
     assert label_ids["items"] == {"type": "integer"}
 
@@ -256,25 +266,25 @@ def test_an_argument_literally_named_title_survives():
     the specific case so the naive implementation can never come back.
     """
     for name in ("create_card", "update_card"):
-        properties = _by_name()[name].inputSchema["properties"]
+        properties = _by_name()[name].input_schema["properties"]
         assert "title" in properties, (
             f"{name} lost its `title` argument — compact_schema is treating a "
             "property NAME as a schema annotation"
         )
-    assert _by_name()["create_card"].inputSchema["required"] == ["title"]
+    assert _by_name()["create_card"].input_schema["required"] == ["title"]
 
 
 def test_required_arguments_are_untouched_by_compaction():
     """A required, non-nullable argument has no ``anyOf`` to collapse and no
     default; only its annotation should have gone."""
-    create_card = _by_name()["create_card"].inputSchema
+    create_card = _by_name()["create_card"].input_schema
     assert create_card["required"] == ["title"]
     assert create_card["properties"]["title"] == {"type": "string"}
 
 
 def test_the_compacted_schema_is_still_valid_json():
     for tool in _tools():
-        json.dumps(tool.inputSchema)
+        json.dumps(tool.input_schema)
 
 
 # --- outputSchema: measured, and deliberately NOT compacted (KAN-518) -------
@@ -289,7 +299,7 @@ def test_the_compacted_schema_is_still_valid_json():
 # tests exist to keep that decision from quietly eroding — in either direction.
 
 #: The suffix Pydantic stamps on the generated per-tool output model, built from
-#: the *function* name at mcp/server/fastmcp/utilities/func_metadata.py:501
+#: the *function* name at mcp/server/mcpserver/utilities/func_metadata.py:537
 #: (``DictModel.__name__ = f"{func_name}DictOutput"``). Note: the *function* name,
 #: not the registered tool name — the tool registered as ``next`` wraps
 #: ``next_ready``, so its title reads ``next_readyDictOutput``. Asserting
@@ -307,7 +317,7 @@ def test_every_frozen_tool_carries_a_generated_output_schema():
     independent freeze constant. (Same non-vacuity discipline as
     ``pandan-cli/tests/test_parity.py``.)
     """
-    with_output = {t.name for t in _tools() if t.outputSchema is not None}
+    with_output = {t.name for t in _tools() if t.output_schema is not None}
     assert with_output == FROZEN_TOOLS, (
         "the set of tools carrying an outputSchema drifted from the frozen surface; "
         f"missing an outputSchema: {sorted(FROZEN_TOOLS - with_output) or 'none'}"
@@ -321,7 +331,7 @@ def test_the_generated_output_schema_is_the_shape_the_measurement_assumes():
     red, and the ~17-tokens-per-tool figure in ADR 0019 needs re-deriving."""
     titles = []
     for tool in _tools():
-        schema = tool.outputSchema
+        schema = tool.output_schema
         assert set(schema) == {"additionalProperties", "title", "type"}, (
             f"{tool.name}: unexpected outputSchema keys {sorted(schema)}"
         )
@@ -342,20 +352,39 @@ def test_the_advertised_output_schema_is_the_object_the_server_validates_against
 
     V49's entire safety argument for rewriting ``inputSchema`` was a *separation*:
     ``Tool.parameters`` (advertised) is a distinct dict from
-    ``fn_metadata.arg_model`` (validating), and FastMCP registers its call handler
-    with ``validate_input=False`` (mcp/server/fastmcp/server.py:308) so the
-    lowlevel jsonschema input check at
-    mcp/server/lowlevel/server.py:534-538 never fires against the advertised copy.
+    ``fn_metadata.arg_model`` (validating), and nothing on this server's call path
+    jsonschema-validates a call against the advertised copy. Under SDK 1.x that
+    held because FastMCP registered its handler with ``validate_input=False``
+    (mcp/server/fastmcp/server.py:308), short-circuiting the lowlevel check at
+    mcp/server/lowlevel/server.py:534-538. **Under 2.0.0 it holds more simply: that
+    lowlevel input check no longer exists.** ``ToolManager.call_tool`` goes through
+    ``fn_metadata`` and never reads ``Tool.parameters``. (The one 2.x reader of the
+    advertised *input* schema is mcp/server/_streamable_http_modern.py:300-303,
+    which maps ``x-mcp-*`` request headers onto arguments — a **streamable-HTTP-only**
+    path. This server runs stdio, so it never fires; anyone moving it to HTTP must
+    re-check that.)
 
     **Neither half of that holds for outputSchema.** ``Tool.output_schema`` is a
     ``cached_property`` that returns ``self.fn_metadata.output_schema`` — the same
-    object, not a copy (mcp/server/fastmcp/tools/base.py:41-43) — and the lowlevel
-    server runs ``jsonschema.validate(instance=..., schema=tool.outputSchema)`` on
-    **every** tool result, unconditionally, with no ``validate_output`` opt-out to
-    turn off (mcp/server/lowlevel/server.py:566-573). So the advertised
-    outputSchema is live on the call path.
+    object, not a copy (mcp/server/mcpserver/tools/base.py:53-55) — and the
+    advertised copy is still live on a call path. That is exactly what the assertion
+    below pins, and it is the half that survived the major bump untouched.
 
-    If this test goes red, the SDK has separated the two — at which point the
+    **KAN-585: the OTHER half of KAN-518's premise moved, and this is where that is
+    recorded.** Under 1.x the *server* ran ``jsonschema.validate(instance=...,
+    schema=tool.outputSchema)`` on every result (mcp/server/lowlevel/server.py:566-573).
+    Under 2.0.0 the server validates with the generated Pydantic ``output_model``
+    instead (mcp/server/mcpserver/utilities/func_metadata.py:127-143), and the
+    *advertised dict* is consumed by the **client**, which compiles it with
+    ``jsonschema.validators.validator_for`` and revalidates every structured result
+    against it (mcp/client/session.py:1080-1110, ``ClientSession.validate_tool_result``).
+    So the teeth moved from the server side to the client side. KAN-518's conclusion
+    — do not compact outputSchema — is unchanged and arguably firmer, since the
+    client *compiles* the schema (``check_schema``) rather than ignoring a bad one.
+    But ADR 0019 § *The fourth field* still says "the lowlevel server validates
+    against it", which now describes 1.x only. That sentence needs the PM's edit.
+
+    If this test goes red, the SDK has separated the two objects — at which point the
     KAN-518 decision should be re-read rather than the test relaxed, because its
     central premise would have changed.
     """
@@ -378,7 +407,7 @@ def test_compaction_leaves_output_schemas_untouched():
     reversing that call, amend the ADR and delete this test in the same PR.
     """
     for tool in _tools():
-        assert "title" in tool.outputSchema, (
+        assert "title" in tool.output_schema, (
             f"{tool.name}: its outputSchema title was stripped. ADR 0019 § The "
             "fourth field (KAN-518) decided NOT to compact outputSchema — reversing "
             "that is an ADR amendment, not a cleanup."
@@ -388,7 +417,7 @@ def test_compaction_leaves_output_schemas_untouched():
         # only thing holding it back, which is exactly what makes it a decision
         # guard. If compact_schema stops being title-stripping, this half goes red
         # and the guard above stops meaning anything.
-        assert compact_schema(tool.outputSchema) != tool.outputSchema, (
+        assert compact_schema(tool.output_schema) != tool.output_schema, (
             f"{tool.name}: compact_schema no longer changes this outputSchema, so "
             "the guard above passes vacuously — the compaction rule itself moved"
         )

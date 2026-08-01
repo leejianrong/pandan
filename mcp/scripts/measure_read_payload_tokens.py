@@ -16,9 +16,9 @@ Method
   used, so every number in this project's token measurements is comparable. Not
   Claude's tokenizer; a consistent proxy, not a billing figure.
 * **What is counted.** The tool-result *text a client shows the model*. That is not
-  our JSON: FastMCP serializes a tool's return value with
+  our JSON: the SDK serializes a tool’s return value with
   ``pydantic_core.to_json(result, fallback=str, indent=2)``
-  (``mcp/server/fastmcp/utilities/func_metadata.py:539`` in the pinned SDK — verified,
+  (``mcp/server/mcpserver/utilities/func_metadata.py:572`` in SDK 2.0.0 — verified,
   not assumed), so the baseline row is produced by calling **that exact function**
   rather than ``json.dumps``.
 * **The shaping is the production code.** Every post-KAN-501 row is produced by
@@ -96,7 +96,7 @@ def _encoder():
 
 
 def _sdk_render(payload: Any) -> str:
-    """Exactly what FastMCP puts in the model's context for a dict-returning tool."""
+    """Exactly what the SDK puts in the model’s context for a dict-returning tool."""
     return pydantic_core.to_json(payload, fallback=str, indent=2).decode()
 
 

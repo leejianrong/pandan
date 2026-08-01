@@ -524,7 +524,7 @@ def _schema(name):
     import asyncio
 
     tools = {tool.name: tool for tool in asyncio.run(server.mcp.list_tools())}
-    return tools[name].inputSchema
+    return tools[name].input_schema
 
 
 def test_the_shaped_tools_advertise_fields_and_full():
