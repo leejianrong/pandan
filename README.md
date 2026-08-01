@@ -196,3 +196,11 @@ The early non-goals that have since shipped — authentication, multiple boards,
 MCP/CLI agent clients — are now built. What remains deliberately out of scope: billing, custom
 columns, WIP limits, labels, attachments, due dates, history/audit, real-time collaboration, and
 **board sharing** (boards are single-owner today; multi-user collaboration is a future milestone).
+
+## Licence
+
+Apache License 2.0 — see [LICENSE](LICENSE). Copyright 2026 Jian Lee. Apache 2.0 over MIT for its
+explicit patent grant, which matters for a project that ships release binaries and a published
+container image. The same terms cover every package in this repo (`backend/`, `frontend/`,
+`pandan-cli/`, `pandan-client/`, `mcp/`), each of which also declares `Apache-2.0` in its own
+package metadata.

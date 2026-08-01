@@ -3,6 +3,7 @@ name = "pandan-cli"
 version = "0.22.0"
 description = "The `pandan` CLI over the Pandan API (/api/v1)"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28",
