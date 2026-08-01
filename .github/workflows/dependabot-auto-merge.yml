@@ -81,9 +81,58 @@ jobs:
           echo "automerge=$automerge" >> "$GITHUB_OUTPUT"
           echo "Decision: $detail => automerge=$automerge"
 
+      # --- Which token arms the merge, and why it is not GITHUB_TOKEN ----------
+      # KAN-586. `gh pr merge --auto` arms GitHub's NATIVE auto-merge, and GitHub
+      # attributes the eventual merge to whoever armed it. Armed with the built-in
+      # GITHUB_TOKEN, the merge lands as github-actions[bot] — and GitHub creates
+      # no workflow runs for events triggered by GITHUB_TOKEN (documented
+      # recursion protection). The merge push to main therefore fires NO CI run,
+      # deploy.yml triggers on `workflow_run: [CI] completed`, and the deploy
+      # silently never happens.
+      #
+      # Verified end to end on PR #250 (fastapi 0.140.9 -> 0.140.13, merged
+      # ef607856 at 18:55:06 on 2026-07-31): `mergedBy` was app/github-actions,
+      # the API reports ZERO push-event runs at that SHA while every other merge
+      # to main has two (CI + Docs), and production was still serving fastapi
+      # 0.140.9 the next day. So the one category of dependabot PR that MUST
+      # deploy — backend/ and frontend/ bumps, i.e. the security patches this
+      # automation exists to deliver — was precisely the category that did not.
+      # It self-heals on the next app-code merge, leaves nothing red, and notifies
+      # nobody.
+      #
+      # The alternatives, and why they lose (deploy.yml's header has the full
+      # evidence): a push trigger on Deploy cannot work, because the recursion
+      # protection suppresses the push EVENT, not one workflow's subscription to
+      # it; and having this workflow dispatch the deploy cannot work, because it
+      # runs `on: pull_request` (opened/synchronize/reopened), arms `--auto` and
+      # exits minutes before the merge, never observing it — and the
+      # `pull_request: closed` event it would need is suppressed by the same rule.
+      # Only not-using-GITHUB_TOKEN restores the normal chain.
+      #
+      # AUTOMERGE_TOKEN should be a FINE-GRAINED PAT scoped to this repository
+      # with Contents: read/write + Pull requests: read/write (a GitHub App
+      # installation token via actions/create-github-app-token is the upgrade —
+      # short-lived, no expiry cliff). It does NOT weaken the gate: `--auto` still
+      # waits for branch protection's required checks, the bot only arms it.
+      #
+      # The fallback to GITHUB_TOKEN is deliberate: an unset secret leaves
+      # behaviour exactly as it is today rather than breaking auto-merge outright,
+      # and the warning below plus deploy.yml's `drift` watcher make the degraded
+      # state visible instead of silent. An EXPIRED token does not fall back (it
+      # is non-empty), so it fails the step red — which is the loud failure you
+      # want. Do not "simplify" this back to a bare GITHUB_TOKEN; it is pinned by
+      # mcp/tests/test_deploy_gates.py.
       - name: Arm auto-merge
         if: ${{ steps.decide.outputs.automerge == 'true' }}
-        run: gh pr merge --auto --merge "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTOMERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTOMERGE_TOKEN}" ]; then
+            echo "::warning title=This merge will not trigger CI or Deploy::AUTOMERGE_TOKEN is unset, so the merge falls back to GITHUB_TOKEN and lands as github-actions[bot]. GitHub creates no workflow runs for GITHUB_TOKEN-triggered events, so no CI run on main and therefore no Deploy. A backend/ or frontend/ bump merged this way is NOT in production until some later app-code merge carries it forward (KAN-586). Add a fine-grained PAT as the AUTOMERGE_TOKEN repository secret."
+          else
+            echo "Arming auto-merge with AUTOMERGE_TOKEN — the merge will trigger CI on main, and Deploy after it."
+          fi
+          gh pr merge --auto --merge "$PR_URL"
