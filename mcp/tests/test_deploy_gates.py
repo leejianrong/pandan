@@ -96,12 +96,22 @@ def test_ci_concurrency_group_is_per_commit_on_main(ci_text: str) -> None:
     )
 
 
-def test_ci_does_not_merely_queue_main_runs(ci_text: str) -> None:
-    """`cancel-in-progress: false` on main only queues, and GitHub keeps at most
-    one pending run per group -- cancelling the older pending one. That
-    reintroduces KAN-586 during a merge burst, which is when it bites."""
-    group = _top_level_concurrency_group(ci_text)
-    assert "github.sha" in group, "see test_ci_concurrency_group_is_per_commit_on_main"
+def test_ci_still_cancels_superseded_pr_branch_runs(ci_text: str) -> None:
+    """The exemption must be surgical. Cancelling a superseded PUSH TO A PR is
+    the intended saving (dev-playbook principle 6); only main is exempt, and it
+    is exempt by group key, not by turning cancellation off. `cancel-in-progress:
+    false` would merely QUEUE, and GitHub keeps at most one *pending* run per
+    group -- cancelling the older pending one when a third arrives, which
+    reintroduces KAN-586 during exactly the merge burst that surfaced it."""
+    lines = ci_text.splitlines()
+    block = lines[lines.index("concurrency:") + 1 :]
+    settings = [ln for ln in block if ln.startswith((" ", "\t"))]
+    cancel = [ln for ln in settings if "cancel-in-progress:" in ln]
+    assert cancel, "ci.yml lost `cancel-in-progress` -- PR branches now run stale commits"
+    assert cancel[0].split(":", 1)[1].strip() == "true", (
+        "keep `cancel-in-progress: true`; exempt main via the group KEY instead, "
+        f"or main runs queue and the middle one is dropped. Got: {cancel[0].strip()}"
+    )
 
 
 # --- 2. the tests above must actually run on a workflow-only PR -------------
@@ -122,18 +132,50 @@ def test_mcp_paths_filter_watches_the_workflows(ci_text: str) -> None:
 # --- 3. the watcher triggers must never be able to ship code ----------------
 
 
+def _job_block(text: str, job: str) -> str:
+    """The YAML block of one job, comments and all, up to the next job header.
+
+    Scoping matters: deploy.yml's header comment quotes these very expressions to
+    explain them, so a whole-file substring search passes even after the real
+    `if:` is deleted. That is not a hypothetical -- the first version of
+    test_deploy_gate_requires_a_workflow_run_event was written that way and
+    stayed GREEN when the gate was removed.
+    """
+    m = re.search(
+        rf"^  {re.escape(job)}:$(.*?)(?=^  [a-z_]+:$|\Z)", text, re.MULTILINE | re.DOTALL
+    )
+    assert m, f"deploy.yml has no `{job}:` job"
+    return m.group(1)
+
+
 def test_deploy_gate_requires_a_workflow_run_event(deploy_text: str) -> None:
-    assert "github.event_name == 'workflow_run'" in deploy_text, (
+    changes = _job_block(deploy_text, "changes")
+    gate = re.search(r"^    if: >-\n((?:^      .*\n)+)", changes, re.MULTILINE)
+    assert gate, "the `changes` job lost its `if:` gate entirely"
+    gate_text = gate.group(1)
+    assert "github.event_name == 'workflow_run'" in gate_text, (
         "deploy.yml's `changes` gate must require a workflow_run event. The "
         "`schedule:`/`workflow_dispatch:` triggers exist only for the drift "
         "watcher and must not be able to reach `flyctl deploy` (KAN-586)."
     )
-    assert "github.event.workflow_run.conclusion == 'success'" in deploy_text, (
+    assert "github.event.workflow_run.conclusion == 'success'" in gate_text, (
         "deploy.yml must still gate on CI having SUCCEEDED -- a red build never "
         "ships (ADR 0004)."
     )
-    assert "github.event.workflow_run.head_branch == 'main'" in deploy_text, (
+    assert "github.event.workflow_run.head_branch == 'main'" in gate_text, (
         "deploy.yml must still gate on the CI run being main's."
+    )
+
+
+def test_the_deploy_job_only_runs_behind_that_gate(deploy_text: str) -> None:
+    """`flyctl deploy` must stay reachable only via `needs: changes`, whose gate
+    the test above pins. If the deploy job ever grows its own trigger-independent
+    condition, the schedule/dispatch triggers become a shipping path."""
+    deploy_job = _job_block(deploy_text, "deploy")
+    assert "needs: changes" in deploy_job
+    conditions = re.findall(r"^    if: (.+)$", deploy_job, re.MULTILINE)
+    assert conditions == ["needs.changes.outputs.app == 'true'"], (
+        f"the deploy job's condition changed unexpectedly: {conditions}"
     )
 
 
@@ -180,7 +222,7 @@ def test_drift_watcher_exists_and_has_something_running_it(deploy_text: str) -> 
     triggers = deploy_text.split("\njobs:", 1)[0]
     assert re.search(r"^\s+- cron:", triggers, re.MULTILINE), (
         "the drift watcher needs a `schedule:` cron -- a guard nothing runs is "
-        "how this project has been bitten seven times."
+        "how this project has been bitten six times."
     )
     assert "github.event_name != 'workflow_run'" in deploy_text, (
         "the drift job must not run on workflow_run, or it doubles every real "

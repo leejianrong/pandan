@@ -56,7 +56,8 @@ name: Deploy
 # signal said fine. It is trigger-independent: it asks what production last
 # actually deployed and compares it to main, so it catches this route, the
 # cancelled-CI route ci.yml's concurrency key now closes, a genuinely red CI run
-# on main, and whatever the seventh route turns out to be.
+# on main (also a silent non-deploy, and not otherwise reported), and whatever
+# the next route turns out to be.
 on:
   workflow_run:
     workflows: [CI]
@@ -145,8 +146,9 @@ jobs:
   # The watcher (KAN-586). Answers the one question no structural signal answers:
   # is production actually running main's app code?
   #
-  # "Guard with no watcher" has hit this project seven times now. This job is the
-  # watcher for the deploy contract itself, so state plainly what runs IT: the
+  # "Guard with no watcher" has hit this project six times by six different
+  # routes, and KAN-586 is the sixth. This job is the watcher for the deploy
+  # contract itself, so state plainly what runs IT: the
   # `schedule:` cron above (and `workflow_dispatch` for on-demand). It does NOT
   # run on `workflow_run`, so it never doubles a real deploy run. Two known ways
   # it can rot: GitHub disables `schedule:` triggers after 60 days with no repo
