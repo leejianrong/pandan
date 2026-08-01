@@ -574,6 +574,25 @@ class NotificationRead(BaseModel):
     created_at: datetime
 
 
+# --- the acting principal (KAN-530) ----------------------------------------
+
+
+class PrincipalRead(BaseModel):
+    """Who the caller is — the response of ``GET /api/v1/me`` (KAN-530).
+
+    Deliberately the **minimum** a consumer needs to key a local record off a
+    pandan identity: the user's UUID and their email. Every extra field here
+    becomes a cross-app contract that is awkward to withdraw, so add one only with
+    a consumer that needs it (the resolved principal is a full ``User``, so more is
+    always available if that day comes).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+
+
 class TokenScope(str, Enum):
     """A PAT's capability (M5 V18, KAN-251). ``read`` = observer (GET only);
     ``write`` = operator (the owning user's full board access, the default)."""

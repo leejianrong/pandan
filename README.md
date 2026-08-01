@@ -144,10 +144,13 @@ bearer token resolves to a user, and only that board's owner is allowed (else `4
 | `GET` `POST` `DELETE` | `/api/v1/cards/{id}/comments…` | Card comment thread |
 | `GET` `POST` | `/api/v1/boards`, `/api/v1/epics` | List / create boards and epics (+ `GET`/`PATCH`/`DELETE` by id) |
 | `GET` `POST` `DELETE` | `/api/v1/tokens…` | Manage your agent PATs |
+| `GET` | `/api/v1/me` | Who am I — the calling principal's `{id, email}` (KAN-530) |
 | `GET` | `/api/health` | Health check (unversioned) |
 
 Column and position changes go through the dedicated `/move` endpoint (not `PATCH`), so field edits
-and reordering stay cleanly separated. Human login lives under unversioned `/auth/*` + `/users/*`.
+and reordering stay cleanly separated. Human login lives under unversioned `/auth/*` + `/users/*`;
+`/users/me` is **cookie-only**, which is why bearer holders resolve themselves at `/api/v1/me`
+instead — the one `/api/v1` route that takes no board, so it answers `200` or `401` and never `403`.
 See [`docs/BREADBOARD.md`](docs/BREADBOARD.md) §6 for the core-board contract.
 
 ## Current status
