@@ -1,5 +1,51 @@
 name: Dependabot auto-merge
 
+# ============================================================================
+# DISABLED 2026-08-01 — this workflow does not run. Owner decision, KAN-586.
+# ============================================================================
+# Turned off with `gh workflow disable "Dependabot auto-merge"`; its state reads
+# `disabled_manually`. **That state lives in GitHub, not in this file** — nothing
+# in the repo can observe or assert it, which is exactly why this banner exists.
+# If you are reading this file to find out whether it runs, the answer is no;
+# confirm with `gh workflow list --all | grep auto-merge`.
+#
+# WHY. Arming auto-merge with the built-in GITHUB_TOKEN makes GitHub attribute
+# the merge to github-actions[bot], and GitHub creates NO workflow runs for
+# events triggered by GITHUB_TOKEN. No CI run on main means no `workflow_run`
+# event, so deploy.yml never fires: PR #250's fastapi bump merged green and sat
+# undeployed until an unrelated merge carried it forward days later. The full
+# chain, and why a push trigger on deploy.yml cannot fix it either, is in the
+# header of deploy.yml.
+#
+# The repair needs a merge performed by something OTHER than GITHUB_TOKEN, i.e.
+# a stored credential (`AUTOMERGE_TOKEN`, wired below). The owner chose not to
+# store one: the only token to hand was scoped to every repository on the
+# account, and a fine-grained PAT is maintenance for an automation whose entire
+# value is saving a click. Dependabot PRs are now merged BY HAND — a human merge
+# fires a normal push event, so CI runs and Deploy fires, which is the whole
+# point. Note also that this workflow is `on: pull_request` from Dependabot, so
+# it would need the token in the **Dependabot** secret store, not the Actions
+# one; that store is empty, so setting an ordinary Actions secret would silently
+# have changed nothing.
+#
+# DEPENDABOT ITSELF IS UNTOUCHED and should stay that way — it is the security-
+# patch feed, and it surfaced both the fastapi patch above and the `mcp` 2.0
+# major that became KAN-585. A dependabot PR sitting open is inert; only the
+# unattended GITHUB_TOKEN merge was ever the problem.
+#
+# TO RE-ENABLE: add a fine-grained PAT (this repo only; Contents + Pull requests
+# read/write) as the `AUTOMERGE_TOKEN` **Dependabot** secret, then
+# `gh workflow enable "Dependabot auto-merge"`. Delete this banner when you do.
+# The machinery below is left intact and its guards
+# (`mcp/tests/test_deploy_gates.py` §6) still assert the token design, so a
+# re-enable cannot quietly go back to a bare GITHUB_TOKEN.
+#
+# A middle option was considered and not taken: gate auto-merge on whether the
+# PR is image-affecting (deploy.yml's IMAGE_PATHS), auto-merging only the
+# ecosystems that never deploy. Cheap and token-free, but it keeps a second
+# deploy-relevant code path alive to save a handful of clicks a week.
+# ============================================================================
+
 # Auto-merge low-risk Dependabot PRs so the routine version churn never piles up in
 # the review queue (this is a 6-ecosystem monorepo — a single tool bump becomes
 # several PRs). Only **patch** and **minor** updates auto-merge; **major** bumps
