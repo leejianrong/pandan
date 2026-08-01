@@ -66,11 +66,35 @@
 #     assert half is precisely the "labels that look maintained and aren't" that
 #     KAN-475 rejected.
 #
-# One more reason to prefer the low-risk option here: CI NEVER BUILDS THIS FILE.
-# `.github/workflows/ci.yml` does not mention `Dockerfile` anywhere, so a change
-# to it matches no paths filter, every job reports success having skipped its
-# heavy steps, and deploy.yml then ships it (its filter DOES match `Dockerfile`).
-# Any build-input change here is unvalidated until the production deploy.
+# CI NOW BUILDS THIS FILE (KAN-584) — it did not when the note above was
+# written, and that was one of the reasons to prefer the low-risk option here.
+# ci.yml's `image` job runs `docker build -f Dockerfile .` behind a paths filter
+# covering this file, .dockerignore, fly.toml and the backend/frontend dependency
+# manifests, then asserts the built image is usable (static bundle present,
+# `import app.main` succeeds under `--no-dev`, alembic + uvicorn on PATH). Read
+# that job's comment for what it does and does NOT prove — in particular it is a
+# CI-side build, not the `flyctl deploy --remote-only` build that actually ships,
+# and the filter deliberately excludes ordinary backend/ + frontend/ source.
+#
+# WHAT STILL HAS NO WATCHER, and why the argument above survives regardless:
+# the floating bases can resolve to something new between the CI build and the
+# Fly build minutes later, so a green `image` job is evidence about the RECIPE,
+# not about the bytes prod runs. Digest pins would fix that and still have no
+# Dependabot to bump them (dependabot-core#5103), which is the same trade as
+# before.
+#
+# STILL NOT DONE, and KAN-584 re-derived it rather than reversing it: NO OCI
+# provenance labels on this image. KAN-586 suggested stamping
+# `org.opencontainers.image.revision` so its deploy-drift watcher could read the
+# deployed commit back instead of walking Actions history. It would indeed be
+# better — but only with an assert half, and there still isn't one within reach:
+# Fly's API reports the image ref/digest, not its labels, so reading the label
+# back means an authenticated pull from registry.fly.io, and the cheap
+# alternative (bake the revision in as an env var and expose it on
+# `GET /api/health`, then have the watcher curl production) is a backend change.
+# Stamping the label now, with nothing asserting it, is precisely the
+# "labels that look maintained and aren't" that KAN-475 rejected. The health-
+# endpoint version is worth a card.
 
 # ---- Stage 1: build the Svelte SPA ----
 FROM node:22-slim AS frontend
