@@ -219,6 +219,14 @@ blindly":
   against the head SHA of the newest Deploy run whose `Deploy to Fly.io` *job* succeeded** — not the
   newest run whose *workflow-level* conclusion was `success`, which reads `success` with that job
   `skipped` on every docs-only merge. That distinction is the trap.
+- **Dependabot PRs are merged BY HAND — the auto-merge workflow is disabled** (2026-08-01, KAN-586).
+  Dependabot still opens PRs and should keep doing so; it is the security-patch feed. But
+  `.github/workflows/dependabot-auto-merge.yml` is `disabled_manually`, because a merge it armed with
+  `GITHUB_TOKEN` fires no workflow runs at all and therefore never deploys. **Treat a green dependabot
+  PR exactly like any other: review the diff, then `gh pr merge <n> --merge --delete-branch`** — a human
+  merge fires a normal push event, so CI runs and Deploy fires. Majors were always human-reviewed
+  anyway. The disabled state lives in GitHub, not in the repo, so nothing here can assert it; the file's
+  header banner is the only in-repo record, and `gh workflow list --all` is how you confirm.
 - **Worktree-checked-out branches:** `gh pr merge --delete-branch` prints a *local* branch-delete
   error when the branch is checked out in a worktree, **but the merge still succeeds** — confirm with
   `gh pr view <n> --json state` (`MERGED`), don't mistake the exit code for a failed merge.
