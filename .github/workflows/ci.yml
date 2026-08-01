@@ -1,20 +1,23 @@
 name: CI
 
-# Validate every PR and every push to main (ADR 0004). Nine independent jobs:
+# Validate every PR and every push to main (ADR 0004). Ten independent jobs:
 # lint, fast unit tests (no Docker), integration tests (real Postgres via
 # testcontainers), the frontend build/type-check, Playwright e2e smoke tests
 # (real Postgres via a service container), the shared pandan-client's lint +
 # tests, the MCP server's lint + tests, the `kan` CLI's lint + tests (the
-# middle three all mocked httpx, no DB), and a supply-chain `security` scan
-# (secret scan over history + dependency vulnerability audit). The Deploy
-# workflow only runs after this whole workflow succeeds on main.
+# middle three all mocked httpx, no DB), a container `image` build of ./Dockerfile
+# and mcp/Dockerfile (KAN-584), and a supply-chain `security` scan (secret scan
+# over history + dependency vulnerability audit). The Deploy workflow only runs
+# after this whole workflow succeeds on main.
 #
 # CI path filtering (KAN-37): a leading `changes` job computes which areas of
-# the repo a PR touched; each of the eight jobs then guards its *heavy steps*
-# on the relevant output. On a docs-only change (nothing under backend/,
-# frontend/, mcp/, pandan-client/, pandan-cli/ — e.g. this workflow file itself,
-# docs/, .claude/, root *.md) every job still RUNS and REPORTS SUCCESS under its
-# existing `name:`, but skips the expensive install/test work in seconds.
+# the repo a PR touched; each of the nine gated jobs then guards its *heavy
+# steps* on the relevant output. On a docs-only change (nothing matching any
+# filter — docs/, .claude/, root *.md) every job still RUNS and REPORTS SUCCESS
+# under its existing `name:`, but skips the expensive install/test work in
+# seconds. Note the filters are no longer a clean "one area per directory": the
+# `mcp` filter also watches scripts/git-hooks/, .github/workflows/ and the root
+# Dockerfile, because tests guarding those live under mcp/tests/ (see there).
 #
 # This is a deliberately GATE-SAFE design: branch protection lists several of
 # these `name:`s as *required* status checks, and a required check that never
@@ -83,6 +86,8 @@ jobs:
       cli_code: ${{ steps.filter.outputs.cli_code }}
       cli_version: ${{ steps.filter.outputs.cli_version }}
       app: ${{ steps.filter.outputs.app }}
+      image: ${{ steps.filter.outputs.image }}
+      mcp_image: ${{ steps.filter.outputs.mcp_image }}
     steps:
       # Needed so paths-filter can diff on `push` events (on `pull_request` it
       # uses the GitHub API and doesn't strictly need the checkout).
@@ -116,6 +121,18 @@ jobs:
               # shape that can break them (a workflow-only PR) would be the one
               # shape that never runs the tests guarding them.
               - '.github/workflows/**'
+              # And once more (KAN-584): mcp/tests/test_image_build_inputs.py
+              # asserts that every repo path the ROOT Dockerfile COPYs is covered
+              # by deploy.yml's IMAGE_PATHS — i.e. that the deploy gate and the
+              # drift watcher can still see a change to what the image contains.
+              # Its two inputs are the root Dockerfile and deploy.yml. The latter
+              # is covered by the line above; without these two, the ONE change
+              # shape that can break the invariant (a Dockerfile-only PR, which is
+              # also the shape that produced KAN-584) would never run the test.
+              # That is the KAN-502 shape: a test whose input lives outside its
+              # own filter.
+              - 'Dockerfile'
+              - '.dockerignore'
             client:
               - 'pandan-client/**'
             cli:
@@ -147,6 +164,50 @@ jobs:
               - 'mcp/**'
               - 'pandan-client/**'
               - 'pandan-cli/**'
+            # --- container image build inputs (KAN-584) -----------------------
+            # Until now NOTHING in this file mentioned `Dockerfile`, so a
+            # Dockerfile-only PR matched no filter, every job reported success
+            # having skipped its heavy steps in 3-5 seconds, and deploy.yml
+            # (whose filter DOES match `Dockerfile`) then shipped it. The only
+            # validation was the Fly remote build, after the merge. PR #248 is
+            # the worked example.
+            #
+            # These two filters are deliberately NARROWER than `backend/**` +
+            # `frontend/**`. What they cover is the BUILD RECIPE and the
+            # DEPENDENCY MANIFESTS — the inputs that can break an image build
+            # while every other job stays green, which is exactly the dependabot
+            # bump shape. Ordinary source edits are excluded on purpose: the
+            # image runs no compile step over app source (it is `uv sync` +
+            # `npm run build` + COPY), and `npm run build` is already run by the
+            # `frontend` job and `uv sync --frozen` by lint/unit/integration. See
+            # the WHAT THIS DOES NOT COVER note on the `image` job below.
+            image:
+              - 'Dockerfile'
+              - '.dockerignore'
+              # Not a build input at all — `docker build` never reads it. It is
+              # here because a fly.toml change always deploys and is otherwise
+              # validated by nothing whatsoever, so at minimum it should carry a
+              # proof that the image it deploys still builds. Rare enough that
+              # the cost is noise.
+              - 'fly.toml'
+              - 'backend/pyproject.toml'
+              - 'backend/uv.lock'
+              - 'frontend/package.json'
+              - 'frontend/package-lock.json'
+            # mcp/Dockerfile has the SAME hole, checked rather than assumed:
+            # publish-mcp-image.yml is the only workflow in this repo that builds
+            # any image, and it triggers on `v*` tags only (KAN-452's finding), so
+            # an mcp/Dockerfile change is unvalidated until a release. The `mcp`
+            # job runs on it but only lints and pytests — it never builds.
+            mcp_image:
+              - 'mcp/Dockerfile'
+              - '.dockerignore'   # the build context is the REPO ROOT
+              - 'mcp/pyproject.toml'
+              - 'mcp/uv.lock'
+              # The image bakes the sibling path dep, so its manifests are build
+              # inputs too (mcp/Dockerfile COPYs pandan-client/).
+              - 'pandan-client/pyproject.toml'
+              - 'pandan-client/uv.lock'
 
   lint:
     name: Lint (ruff)
@@ -429,6 +490,129 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 7
+
+  # Build the container images (KAN-584). Before this job, `.github/workflows/`
+  # contained no reference to `Dockerfile` anywhere: a Dockerfile-only PR matched
+  # no filter, all 13 checks reported success having run nothing (PR #248: `Lint
+  # (ruff)` -> "Skip (no backend changes)" in 3s, same for Unit/Integration/
+  # Frontend), and deploy.yml then shipped it to production. This is the fifth
+  # "guard with no watcher" in this repo and the only one that was not a guard
+  # failing to run — it was a build input with no guard at all.
+  #
+  # WHAT THIS JOB PROVES, EXACTLY. That the Dockerfile plus this commit's build
+  # context still resolve, that every stage succeeds, and that the resulting
+  # image is USABLE — not merely that `docker build` exited 0. It is NOT the
+  # image that ships: `flyctl deploy --remote-only` rebuilds on Fly's builder
+  # minutes later, and this Dockerfile's bases float (`node:22-slim`,
+  # `python:3.12-slim`, `ghcr.io/astral-sh/uv:0.12` — see the BUILD INPUTS block
+  # at the top of ./Dockerfile), so the two builds can legitimately differ. The
+  # claim is about the RECIPE, not the bytes. Saying otherwise would be the
+  # failure this job is supposed to prevent: a build job that builds something,
+  # but not the thing that ships, and is trusted as if it did.
+  #
+  # WHAT IT DOES NOT COVER — stated because a silent gap in a guard's trigger is
+  # this project's most repeated defect:
+  #   * Ordinary source under backend/ and frontend/. The filter is the build
+  #     recipe + the dependency manifests only, so a source-only PR does NOT
+  #     build an image. Accepted: the image runs no compile over app source, and
+  #     the two build steps it does run are already run by other jobs
+  #     (`npm run build` by `frontend`, `uv sync --frozen` by lint/unit/
+  #     integration). A source edit that breaks ONLY the image build therefore
+  #     still reaches prod unbuilt. Widening the filter to `backend/** +
+  #     frontend/**` closes that at the price of a docker build on nearly every
+  #     PR; that trade was declined, not overlooked.
+  #   * fly.toml's CONTENTS. It is in the filter (a fly.toml change always
+  #     deploys) but `docker build` never reads it — nothing here validates a
+  #     malformed fly.toml.
+  #   * The Fly-side build. See above.
+  #   * Runtime behaviour needing a database. The image asserts import + static
+  #     bundle; `alembic upgrade head` and a real request are prod-verification.
+  #
+  # COST. The app image is the most expensive thing in this workflow: a cold
+  # `npm ci` + vite build + `uv sync` with no layer cache, ~25s on a 20-core dev
+  # box and a few minutes on a 2-core runner. That is the argument for the tight
+  # filter above — on the common PR shape this job skips in seconds like every
+  # other. No `type=gha` layer cache on purpose: the filter makes runs rare
+  # enough that the cache would usually be cold or stale, and a stale cache on a
+  # job whose entire point is "the inputs still resolve" is worse than no cache.
+  image:
+    name: Container images (docker build)
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip (no image build inputs changed)
+        if: needs.changes.outputs.image != 'true' && needs.changes.outputs.mcp_image != 'true'
+        run: echo "No container-image build inputs changed — skipping the image builds."
+
+      - uses: actions/checkout@v7
+        if: needs.changes.outputs.image == 'true' || needs.changes.outputs.mcp_image == 'true'
+
+      # --- the app image (./Dockerfile) — the one Fly deploys ---------------
+      - name: Build the app image
+        if: needs.changes.outputs.image == 'true'
+        run: docker build -f Dockerfile -t pandan-app:ci .
+
+      # "It built" is a weak claim: the frontend stage can emit an empty dist and
+      # the build still exits 0, and `uv sync --no-dev` here vs `--group dev`
+      # everywhere else means a runtime dependency misfiled into the dev group
+      # passes every other job in this workflow and only fails in this image. So
+      # assert the image is usable, in one `docker run`.
+      - name: Assert the app image is usable, not merely built
+        if: needs.changes.outputs.image == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm -i --entrypoint /app/.venv/bin/python pandan-app:ci - <<'PY'
+          import pathlib
+          import app.main as m
+
+          static = pathlib.Path("/app/static")
+          assert (static / "index.html").is_file(), "no /app/static/index.html — the SPA bundle did not land in the image"
+          assets = sorted(p.name for p in (static / "assets").iterdir())
+          assert assets, "/app/static/assets is empty — vite produced no bundle"
+          print(f"static bundle OK: index.html + {len(assets)} asset(s), e.g. {assets[0]}")
+
+          paths = {getattr(r, "path", None) for r in m.app.routes}
+          assert "/{full_path:path}" in paths, "SPA fallback not registered — main.py did not see STATIC_DIR at /app/static"
+          assert "/api/health" in paths, "the API router is not mounted"
+          print(f"app.main imported OK under --no-dev: {len(paths)} distinct route paths, SPA fallback + /api/health present")
+          PY
+      # The Dockerfile CMD is `alembic upgrade head && uvicorn ...`, resolved off
+      # PATH=/app/.venv/bin. Both are runtime deps that only this image installs
+      # without the dev group, and a missing one crash-loops the machine on boot.
+      - name: Assert the CMD's binaries exist
+        if: needs.changes.outputs.image == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh pandan-app:ci -c 'set -eu; alembic --version; uvicorn --version'
+
+      # --- the MCP image (mcp/Dockerfile) -----------------------------------
+      # Same hole, different workflow: publish-mcp-image.yml is the only place in
+      # this repo that builds this image and it runs on `v*` tags only, so an
+      # mcp/Dockerfile change is unvalidated until someone cuts a release and it
+      # fails there. Cheap enough (~10s locally) to just build it here too.
+      - name: Build the MCP image
+        if: needs.changes.outputs.mcp_image == 'true'
+        # Context is the REPO ROOT, not mcp/: mcp/Dockerfile COPYs the sibling
+        # pandan-client/ path dep. Mirrors publish-mcp-image.yml's `context: .`.
+        run: docker build -f mcp/Dockerfile -t pandan-mcp:ci .
+
+      # No tool-count assertion here on purpose — the 49-tool freeze lives in
+      # mcp/tests/test_schema.py and must have exactly one home. This asserts
+      # only that the installed server enumerates its tools at all, which is what
+      # an image smoke test can say that the test suite cannot.
+      - name: Assert the MCP image is usable, not merely built
+        if: needs.changes.outputs.mcp_image == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm -i --entrypoint python pandan-mcp:ci - <<'PY'
+          import asyncio
+
+          from pandan_mcp.server import mcp
+
+          tools = asyncio.run(mcp.list_tools())
+          assert tools, "the MCP server in the image enumerates no tools"
+          print(f"MCP image OK: {len(tools)} tools, e.g. {tools[0].name}")
+          PY
 
   # Supply-chain hardening (dev-playbook principles 12 & 13): a secret scan over
   # the full git history plus a dependency vulnerability audit of every project.
