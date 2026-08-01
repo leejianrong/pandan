@@ -1,4 +1,4 @@
-"""Smoke tests for the FastMCP server wiring + board-scoping (V10)."""
+"""Smoke tests for the MCP server wiring + board-scoping (V10)."""
 from __future__ import annotations
 
 import asyncio
@@ -30,12 +30,12 @@ def test_server_advertises_exactly_the_expected_tools():
 def test_every_tool_has_a_description_and_schema():
     for tool in _tools():
         assert tool.description, f"{tool.name} is missing a description"
-        assert tool.inputSchema, f"{tool.name} is missing an input schema"
+        assert tool.input_schema, f"{tool.name} is missing an input schema"
 
 
 def test_create_card_schema_marks_title_required():
     create_card = next(t for t in _tools() if t.name == "create_card")
-    assert create_card.inputSchema["required"] == ["title"]
+    assert create_card.input_schema["required"] == ["title"]
 
 
 # --- board-scoping default resolution (V10) --------------------------------
@@ -472,14 +472,14 @@ def test_update_board_still_requires_only_board_id():
     becomes invalid. Asserted before any behaviour, because a widened `required` set is
     a silent breaking change to every agent already calling this tool."""
     update_board = next(t for t in _tools() if t.name == "update_board")
-    assert update_board.inputSchema["required"] == ["board_id"]
+    assert update_board.input_schema["required"] == ["board_id"]
 
 
 def test_update_board_advertises_all_six_boardupdate_fields():
     """The previous four must survive verbatim — a rename would break callers as surely
     as a removal — and the two new ones must appear alongside them."""
     update_board = next(t for t in _tools() if t.name == "update_board")
-    assert set(update_board.inputSchema["properties"]) == {
+    assert set(update_board.input_schema["properties"]) == {
         "board_id",
         "name",
         "autosync_enabled",

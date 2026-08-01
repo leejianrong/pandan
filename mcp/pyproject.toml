@@ -4,7 +4,19 @@ version = "0.4.0"
 description = "MCP server exposing the Pandan API (/api/v1) as agent tools"
 requires-python = ">=3.12"
 dependencies = [
-    "mcp>=1.2",
+    # BOUNDED TO A MAJOR ON PURPOSE (KAN-585). This was `mcp>=1.2`, unbounded, and
+    # that is how SDK 2.0.0 arrived as a dependabot bump whose CI was red at
+    # *import*: 2.0.0 deleted `mcp.server.fastmcp` — the module every tool in
+    # `pandan_mcp/server.py` is registered through — and renamed the class
+    # `FastMCP` -> `MCPServer` under `mcp.server.mcpserver` (re-exported as
+    # `from mcp.server import MCPServer`). The SDK's own README says to carry an
+    # upper bound; ours now does.
+    #
+    # What watches the ceiling: dependabot's `uv` ecosystem on /mcp (weekly, majors
+    # ungrouped) opens the 3.x PR, and the `mcp` CI job fails it if the port is
+    # non-trivial — exactly the loop that surfaced 2.0.0. A bounded major is not an
+    # unwatched pin; an unbounded one was the actual defect.
+    "mcp>=2.0,<3",
     "httpx>=0.28",
     "pandan-client",
 ]

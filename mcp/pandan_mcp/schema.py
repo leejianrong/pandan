@@ -5,7 +5,7 @@ context before it does any work, and V49 measured **1,429 of those ~8,775
 `o200k_base` tokens (16%) as pure serializer artefact** — text that carries no
 information a model can act on:
 
-* FastMCP builds each tool's advertised schema with
+* The SDK builds each tool's advertised schema with
   ``arg_model.model_json_schema()``, and Pydantic stamps a generated ``title`` on
   the model *and* on every property: ``"title": "warmupArguments"``,
   ``"title": "Board Id"``. Each is a restatement of a name the model can already
@@ -15,11 +15,14 @@ information a model can act on:
   tokens for the same constraint.
 
 **This is provably cosmetic, and that is the whole safety argument for doing it.**
-FastMCP keeps two separate things on a ``Tool``: ``parameters`` — the schema it
-*advertises* to clients, built at ``tools/base.py:84`` — and ``fn_metadata``,
+The SDK keeps two separate things on a ``Tool``: ``parameters`` — the schema it
+*advertises* to clients, built at
+``mcp/server/mcpserver/tools/base.py:100`` — and ``fn_metadata``,
 whose ``arg_model`` is what actually *validates* an incoming call
-(``Tool.run`` → ``fn_metadata.call_fn_with_arg_validation``, ``tools/base.py:101``).
-This module rewrites only the former. No tool is renamed, no argument is added or
+(``Tool.run`` → ``fn_metadata.call_fn_with_arg_validation``,
+``mcp/server/mcpserver/tools/base.py:152``). Line numbers are against SDK **2.0.0**
+(KAN-585); under 1.x the same two objects lived at ``mcp/server/fastmcp/tools/base.py``
+:84 and :101. This module rewrites only the former. No tool is renamed, no argument is added or
 removed, and no call can be accepted or rejected differently, because the
 validator is a different object and is never touched. ``tests/test_schema.py``
 pins exactly that.
