@@ -3220,6 +3220,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--board", type=int,
         help="board id filled into objects that omit board_id (default: PANDAN_BOARD_ID)",
     )
+    # KAN-583: the response is `{"created": [<card>, …]}`, a recognised card
+    # envelope since KAN-502 — so `_project_rows` already serves a projection here.
+    # The flag is declared per-subparser, though, so until now the capability was
+    # unreachable: the renderer would have printed it and the parser rejected the
+    # ask. Same shape as KAN-529, one layer in.
+    _add_fields_arg(p_batch_create, "ticket,title,column")
     p_batch_create.set_defaults(func=_cmd_batch_create)
 
     # --- batch update (M5 V19 / KAN-252): atomic multi-card PATCH ------------
@@ -3235,6 +3241,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="JSON",
         help="a JSON array of {\"id\": <id>, ...fields} objects, or '-' to read stdin",
     )
+    # KAN-583, as above: `{"updated": [<card>, …]}` became a recognised card
+    # envelope in KAN-519, which taught the renderer the key and left the flag.
+    _add_fields_arg(p_batch_update, "ticket,assignee,column")
     p_batch_update.set_defaults(func=_cmd_batch_update)
 
     # --- template subcommands (M5 V19 / KAN-252): card templates ------------
@@ -3279,6 +3288,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_template_apply.add_argument("template_id", type=int)
     p_template_apply.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    # KAN-583: `apply_template` returns `batch-create`'s own `created` envelope, so
+    # the rows are cards and the projection noun is "card" — not this parser's
+    # ``noun="template"``, which only names the *single*-entity render it never hits.
+    _add_fields_arg(p_template_apply, "ticket,title,column")
     p_template_apply.set_defaults(func=_cmd_template_apply, noun="template")
 
     # --- login / config (local: no token, no network) ------------------------
