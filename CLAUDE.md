@@ -84,7 +84,8 @@ construction; look there for what's done and in flight:
 
 A running backend serves the live, authoritative API surface at **`GET /docs`** (OpenAPI). At a
 glance it's a REST CRUD surface under `/api/v1` for **boards, cards (stories), epics, and PATs**,
-plus a card `move` endpoint and an unversioned `GET /api/health` — **auth-required and owner-gated**
+plus a card `move` endpoint, a board-less `GET /api/v1/me` (KAN-530) and an unversioned
+`GET /api/health` — **auth-required and owner-gated**
 (see §Configuration and §Architecture). When extending the app, follow the shaped plan in
 [docs/SHAPING.md](docs/SHAPING.md) + [docs/BREADBOARD.md](docs/BREADBOARD.md) and build in vertical
 slices, matching the existing incremental style.
@@ -518,7 +519,12 @@ Preserve this pattern (it is a deliberate Shape A decision, [docs/BREADBOARD.md]
   simply cookie session → `User`; else PAT bearer → its owning `User`; else `401` — **every principal
   is a real `User`**, owner-gated identically. Route authz goes through `get_principal` +
   `authorize_board` (`require_user` is now just an alias of `get_principal` for per-user routes like
-  `/api/v1/tokens`) — don't add an ad-hoc check.
+  `/api/v1/tokens` and `/api/v1/me`) — don't add an ad-hoc check.
+- **`GET /api/v1/me` is the one `/api/v1` route with no board** (KAN-530, issue #253): it resolves the
+  principal and returns `{id, email}` — the **minimum**, on purpose, because it is a cross-app contract
+  (kaya delegates identity to pandan rather than minting tokens, and mirrors that UUID). It exists
+  because fastapi-users' `/users/me` is on the **async cookie path** and won't accept a bearer. Nothing
+  to authorize against ⇒ `200` or `401`, never `403`; a test pins that.
 - **Neon free tier scales to zero**, so the first request after idle is slow (~1s) — that's a
   documented cold start, not a bug.
 

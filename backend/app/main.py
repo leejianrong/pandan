@@ -28,6 +28,7 @@ from .routers import (
     cycles,
     epics,
     labels,
+    me,
     members,
     notifications,
     templates,
@@ -173,6 +174,10 @@ app.include_router(templates.router, prefix="/api/v1")  # M5 V19 (KAN-252): card
 app.include_router(cycles.router, prefix="/api/v1")  # V33 (KAN-297): cycles / iterations
 app.include_router(tokens.router, prefix="/api/v1")  # M3 V9 (ADR 0014): agent PATs
 app.include_router(notifications.router, prefix="/api/v1")  # V37 (KAN-301): inbox
+# Who-am-I for the acting principal (KAN-530). Board-less: it resolves the
+# principal and returns its id + email, so a bearer holder can finally ask who it
+# is — fastapi-users' /users/me below is cookie-only.
+app.include_router(me.router, prefix="/api/v1")
 # GitHub webhook receiver (KAN-42): standalone — auth is the HMAC signature, NOT
 # the cookie/PAT principal resolver, so it is intentionally not owner-gated.
 app.include_router(webhooks.router, prefix="/api/v1")
