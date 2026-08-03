@@ -5,7 +5,7 @@ description = "Pandan MVP backend — FastAPI + sync SQLAlchemy 2.0 + psycopg v3
 license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.140.13",
+    "fastapi>=0.141.1",
     "uvicorn[standard]>=0.51.0",
     "sqlalchemy[asyncio]>=2.0.51",
     "psycopg[binary]>=3.3.4",
@@ -34,7 +34,7 @@ dev = [
     "pytest>=8.3",
     "httpx>=0.28",
     "testcontainers[postgres]>=4.15.0",
-    "ruff>=0.16.0",
+    "ruff>=0.16.1",
 ]
 
 [tool.uv]
