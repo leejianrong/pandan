@@ -1,5 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
-import { cleanupE2eBoards, column, openFreshBoard, pickSelect, uniqueTitle } from "./helpers";
+import {
+  cleanupE2eBoards,
+  column,
+  docsImagePath,
+  openFreshBoard,
+  pickSelect,
+  uniqueTitle,
+} from "./helpers";
 
 // M5 V14 (KAN-247): query depth + saved views. Saving a filtered view and
 // switching to it filters the board server-side; the table view renders the same
@@ -97,9 +104,16 @@ test("table view renders the cards and sorts on a header click", async ({ page }
   await page.getByRole("button", { name: "Sort by Title" }).click();
   await expect(rows.first()).toContainText(zeta);
 
-  // Light + dark screenshots (CI-safe path).
+  // Light + dark screenshots (CI-safe path), also refreshing the published docs
+  // images locally. Never in CI: it must not rewrite a committed asset.
   await page.screenshot({ path: testInfo.outputPath("v14-table-light.png"), fullPage: true });
+  if (!process.env.CI) {
+    await page.screenshot({ path: docsImagePath("v14-table-light.png"), fullPage: true });
+  }
   await page.getByRole("button", { name: "Switch to dark theme" }).click();
   await expect(page.locator(':root[data-theme="dark"]')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("v14-table-dark.png"), fullPage: true });
+  if (!process.env.CI) {
+    await page.screenshot({ path: docsImagePath("v14-table-dark.png"), fullPage: true });
+  }
 });

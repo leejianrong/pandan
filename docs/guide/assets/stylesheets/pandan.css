@@ -1,0 +1,442 @@
+/* ==========================================================================
+   Pandan docs theme.
+
+   Carries the app's "Graphite (Zinc & Teal)" palette onto the documentation
+   site so the two read as one product. The token values here are copied from
+   frontend/src/app.css; when that palette changes, change this file with it.
+
+   Teal is the primary. Violet is reserved for agent / epic accents, exactly as
+   in the app. Green, amber and red stay semantic.
+   ========================================================================== */
+
+/* --- Light scheme --------------------------------------------------------- */
+
+[data-md-color-scheme="default"] {
+  --pandan-bg: #f6f7f8;
+  --pandan-surface: #ffffff;
+  --pandan-surface-2: #eceef1;
+  --pandan-border: #dcdfe4;
+  --pandan-text: #1a1d21;
+  --pandan-muted: #616870;
+  --pandan-accent: #0d9488;
+  --pandan-accent-soft: #d5f1ec;
+  --pandan-agent: #7c3aed;
+  --pandan-agent-soft: #eee6fd;
+  --pandan-success: #16a34a;
+  --pandan-success-soft: #dcf3e3;
+  --pandan-warning: #b45309;
+  --pandan-warning-soft: #fbeccd;
+  --pandan-danger: #dc2626;
+  --pandan-danger-soft: #fde4e4;
+  --pandan-shadow: 0 1px 1px rgba(20, 25, 30, 0.08),
+    0 8px 20px -12px rgba(20, 25, 30, 0.28);
+
+  /* Material's own tokens, remapped. */
+  --md-default-bg-color: var(--pandan-bg);
+  --md-default-fg-color: var(--pandan-text);
+  --md-default-fg-color--light: var(--pandan-muted);
+  --md-default-fg-color--lighter: #8b929a;
+  --md-default-fg-color--lightest: var(--pandan-border);
+  --md-primary-fg-color: var(--pandan-surface);
+  --md-primary-bg-color: var(--pandan-text);
+  --md-primary-bg-color--light: var(--pandan-muted);
+  --md-accent-fg-color: var(--pandan-accent);
+  --md-typeset-color: var(--pandan-text);
+  --md-typeset-a-color: var(--pandan-accent);
+  --md-code-bg-color: var(--pandan-surface-2);
+  --md-code-fg-color: var(--pandan-text);
+  --md-footer-bg-color: #15191c;
+  --md-footer-bg-color--dark: #101315;
+}
+
+/* --- Dark scheme ---------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] {
+  --pandan-bg: #101315;
+  --pandan-surface: #1a1f23;
+  --pandan-surface-2: #15191c;
+  --pandan-border: #2b3238;
+  --pandan-text: #e8ebed;
+  --pandan-muted: #99a2ab;
+  --pandan-accent: #2dd4bf;
+  --pandan-accent-soft: #0f312d;
+  --pandan-agent: #b794f6;
+  --pandan-agent-soft: #241a3d;
+  --pandan-success: #4ade80;
+  --pandan-success-soft: #14301f;
+  --pandan-warning: #fbbf24;
+  --pandan-warning-soft: #3a2c10;
+  --pandan-danger: #f87171;
+  --pandan-danger-soft: #3a1717;
+  --pandan-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.8);
+
+  --md-default-bg-color: var(--pandan-bg);
+  --md-default-fg-color: var(--pandan-text);
+  --md-default-fg-color--light: var(--pandan-muted);
+  --md-default-fg-color--lighter: #6f7880;
+  --md-default-fg-color--lightest: var(--pandan-border);
+  --md-primary-fg-color: var(--pandan-surface-2);
+  --md-primary-bg-color: var(--pandan-text);
+  --md-primary-bg-color--light: var(--pandan-muted);
+  --md-accent-fg-color: var(--pandan-accent);
+  --md-typeset-color: var(--pandan-text);
+  --md-typeset-a-color: var(--pandan-accent);
+  --md-code-bg-color: var(--pandan-surface-2);
+  --md-code-fg-color: var(--pandan-text);
+  --md-footer-bg-color: #0b0e10;
+  --md-footer-bg-color--dark: #080a0b;
+}
+
+/* --- Header and navigation ------------------------------------------------
+   The app's top bar is a surface with a hairline border, not a saturated brand
+   bar, so the docs header matches that restraint in both schemes. */
+
+.md-header {
+  background-color: var(--pandan-surface);
+  color: var(--pandan-text);
+  border-bottom: 1px solid var(--pandan-border);
+  box-shadow: none;
+}
+
+.md-header__title {
+  font-weight: 600;
+}
+
+.md-header .md-logo img,
+.md-header .md-logo svg {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+/* Tabs sit under the header on the same surface. */
+.md-tabs {
+  background-color: var(--pandan-surface);
+  color: var(--pandan-text);
+  border-bottom: 1px solid var(--pandan-border);
+}
+
+.md-tabs__link {
+  color: var(--pandan-muted);
+  opacity: 1;
+  font-weight: 500;
+}
+
+.md-tabs__link:hover,
+.md-tabs__link--active {
+  color: var(--pandan-accent);
+}
+
+/* Search field reads as an app input. */
+.md-search__form {
+  background-color: var(--pandan-surface-2);
+  border: 1px solid var(--pandan-border);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.md-search__form:hover {
+  background-color: var(--pandan-surface-2);
+  border-color: var(--pandan-accent);
+}
+
+/* Active page in the sidebar gets the teal treatment. */
+.md-nav__link--active,
+.md-nav__link--active code {
+  color: var(--pandan-accent);
+  font-weight: 600;
+}
+
+.md-nav__title {
+  color: var(--pandan-muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* --- Typography -----------------------------------------------------------
+   Headings are set in sentence case throughout the docs, so they want a little
+   more weight and a little less size than the Material defaults. */
+
+.md-typeset {
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+  color: var(--pandan-text);
+  margin-bottom: 0.6em;
+}
+
+.md-typeset h2 {
+  font-weight: 650;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+  margin-top: 2.2em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--pandan-border);
+}
+
+.md-typeset h3 {
+  font-weight: 600;
+  font-size: 1.08rem;
+  margin-top: 1.8em;
+}
+
+.md-typeset h4 {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.md-typeset a {
+  text-decoration-color: color-mix(in srgb, var(--pandan-accent) 35%, transparent);
+  text-underline-offset: 0.2em;
+}
+
+.md-typeset a:hover {
+  text-decoration-color: var(--pandan-accent);
+}
+
+/* --- Code ----------------------------------------------------------------- */
+
+.md-typeset code {
+  background-color: var(--pandan-surface-2);
+  border: 1px solid var(--pandan-border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.86em;
+}
+
+.md-typeset pre > code {
+  border: none;
+  padding: 0.9em 1em;
+}
+
+.md-typeset .highlight,
+.md-typeset pre {
+  border-radius: 8px;
+}
+
+/* Border only. Do NOT set `overflow: hidden` here to make the radius clip the
+   inner background: it also kills the horizontal scroll on a long line, so a
+   wide command silently gets cut off instead of scrolling. */
+.md-typeset .highlight {
+  border: 1px solid var(--pandan-border);
+}
+
+.md-typeset .highlight > pre > code {
+  overflow-x: auto;
+}
+
+.md-typeset .highlight code {
+  background-color: var(--pandan-surface-2);
+}
+
+/* A console block is a transcript, so mute the prompt lines' chrome. */
+.md-typeset .language-console .go {
+  color: var(--pandan-muted);
+}
+
+/* --- Keyboard keys -------------------------------------------------------
+   pymdownx.keys output, styled like the app's <kbd> in the shortcuts overlay. */
+
+.md-typeset kbd {
+  display: inline-block;
+  background-color: var(--pandan-surface);
+  color: var(--pandan-text);
+  border: 1px solid var(--pandan-border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  box-shadow: none;
+  padding: 0.05em 0.45em;
+  font-family: var(--md-code-font-family, monospace);
+  font-size: 0.8em;
+  line-height: 1.6;
+  word-break: keep-all;
+}
+
+.md-typeset .keys kbd + kbd {
+  margin-left: 0.15em;
+}
+
+/* --- Tables -------------------------------------------------------------- */
+
+.md-typeset table:not([class]) {
+  border: 1px solid var(--pandan-border);
+  border-radius: 8px;
+  box-shadow: none;
+  font-size: 0.74rem;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--pandan-surface-2);
+  color: var(--pandan-text);
+  font-weight: 600;
+}
+
+.md-typeset table:not([class]) td {
+  border-top: 1px solid var(--pandan-border);
+  vertical-align: top;
+}
+
+/* --- Admonitions ---------------------------------------------------------
+   Tinted with the app's soft token for each semantic colour, with a 3px spine
+   instead of Material's full border. */
+
+.md-typeset .admonition,
+.md-typeset details {
+  border: 1px solid var(--pandan-border);
+  border-left: 3px solid var(--pandan-muted);
+  border-radius: 8px;
+  background-color: var(--pandan-surface);
+  box-shadow: none;
+  font-size: 0.75rem;
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  background-color: transparent;
+  font-weight: 600;
+}
+
+.md-typeset .admonition.tip,
+.md-typeset details.tip {
+  border-left-color: var(--pandan-accent);
+}
+.md-typeset .tip > .admonition-title,
+.md-typeset details.tip > summary {
+  background-color: var(--pandan-accent-soft);
+}
+
+.md-typeset .admonition.note,
+.md-typeset details.note,
+.md-typeset .admonition.info,
+.md-typeset details.info {
+  border-left-color: var(--pandan-agent);
+}
+.md-typeset .note > .admonition-title,
+.md-typeset .info > .admonition-title,
+.md-typeset details.note > summary,
+.md-typeset details.info > summary {
+  background-color: var(--pandan-agent-soft);
+}
+
+.md-typeset .admonition.success,
+.md-typeset details.success {
+  border-left-color: var(--pandan-success);
+}
+.md-typeset .success > .admonition-title,
+.md-typeset details.success > summary {
+  background-color: var(--pandan-success-soft);
+}
+
+.md-typeset .admonition.warning,
+.md-typeset details.warning {
+  border-left-color: var(--pandan-warning);
+}
+.md-typeset .warning > .admonition-title,
+.md-typeset details.warning > summary {
+  background-color: var(--pandan-warning-soft);
+}
+
+.md-typeset .admonition.danger,
+.md-typeset .admonition.failure,
+.md-typeset details.danger,
+.md-typeset details.failure {
+  border-left-color: var(--pandan-danger);
+}
+.md-typeset .danger > .admonition-title,
+.md-typeset .failure > .admonition-title,
+.md-typeset details.danger > summary,
+.md-typeset details.failure > summary {
+  background-color: var(--pandan-danger-soft);
+}
+
+/* --- Content tabs -------------------------------------------------------- */
+
+.md-typeset .tabbed-labels > label {
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: var(--pandan-muted);
+}
+
+.md-typeset .tabbed-set > input:checked + label {
+  color: var(--pandan-accent);
+  border-color: var(--pandan-accent);
+}
+
+/* --- Card grid ----------------------------------------------------------
+   Used on the landing page and each section index. Styled here so the layout
+   holds up regardless of what the theme ships. */
+
+.md-typeset .grid.cards > ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.8rem;
+  margin: 1em 0;
+  padding: 0;
+  list-style: none;
+}
+
+.md-typeset .grid.cards > ul > li {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  background-color: var(--pandan-surface);
+  border: 1px solid var(--pandan-border);
+  border-radius: 8px;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--pandan-accent);
+  box-shadow: var(--pandan-shadow);
+}
+
+.md-typeset .grid.cards > ul > li > :first-child {
+  margin-top: 0;
+  font-weight: 600;
+  color: var(--pandan-text);
+}
+
+.md-typeset .grid.cards > ul > li > :last-child {
+  margin-bottom: 0;
+  color: var(--pandan-muted);
+  font-size: 0.72rem;
+}
+
+/* --- Screenshots -------------------------------------------------------
+   Screenshots are committed as light/dark pairs and selected with a
+   `#only-light` / `#only-dark` URL fragment on the image, so each scheme shows
+   the matching capture. Framed to read as a figure rather than as content. */
+
+.md-typeset img[src$="#only-light"],
+.md-typeset img[src$="#only-dark"] {
+  border: 1px solid var(--pandan-border);
+  border-radius: 8px;
+  box-shadow: var(--pandan-shadow);
+}
+
+[data-md-color-scheme="default"] .md-typeset img[src$="#only-dark"],
+[data-md-color-scheme="slate"] .md-typeset img[src$="#only-light"] {
+  display: none;
+}
+
+/* --- Footer ------------------------------------------------------------- */
+
+.md-footer-meta {
+  font-size: 0.7rem;
+}
+
+/* --- Small screens ----------------------------------------------------- */
+
+@media screen and (max-width: 76.1875em) {
+  /* The slide-out drawer uses the same surface as the header. */
+  .md-nav--primary .md-nav__title {
+    background-color: var(--pandan-surface);
+    color: var(--pandan-text);
+    border-bottom: 1px solid var(--pandan-border);
+  }
+}

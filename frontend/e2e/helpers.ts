@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import {
   expect,
   request,
@@ -210,4 +212,25 @@ export async function cleanupE2eBoards(
       await ctx.dispose();
     }
   }
+}
+
+// --- documentation screenshots ---------------------------------------------
+// The specs that shoot the UI for the docs used to drop a "review copy" at the
+// worktree root (../dashboard-light.png and friends), which meant eight PNGs sat
+// untracked-then-committed at the repo root, displayed by nothing.
+//
+// They now write straight into the published docs' image directory, so the
+// screenshots on https://leejianrong.github.io/pandan/ are regenerable: run the
+// e2e suite locally and `git diff docs/guide/assets/images/` is the change.
+//
+// Guarded by `if (!process.env.CI)` at each call site, exactly as the root copies
+// were — CI must never rewrite committed assets, it only keeps its own copy under
+// testInfo.outputPath().
+//
+// The light/dark pair matters: the docs select between them with a `#only-light` /
+// `#only-dark` URL fragment, so BOTH themes must be shot or one scheme shows a
+// stale image. See docs/guide/assets/stylesheets/pandan.css.
+export function docsImagePath(name: string): string {
+  // cwd is frontend/ when Playwright runs, so ".." is the repo root.
+  return resolve(process.cwd(), "..", "docs", "guide", "assets", "images", name);
 }

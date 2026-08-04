@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- Favicon variant of the brand glyph. Slightly heavier bars than the header
+       logo so the shape survives at 16x16. -->
+  <rect width="24" height="24" rx="5" fill="#101315"/>
+  <rect x="4"  y="4"  width="7" height="11" rx="2" fill="#2dd4bf"/>
+  <rect x="13" y="7"  width="7" height="8"  rx="2" fill="#b794f6"/>
+  <rect x="4"  y="17" width="7" height="3"  rx="1.5" fill="#2dd4bf"/>
+  <rect x="13" y="17" width="7" height="3"  rx="1.5" fill="#2dd4bf"/>
+</svg>

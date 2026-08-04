@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Pandan">
+  <!-- Mirrors the app's brand glyph (frontend/src/lib/components/Brand.svelte):
+       two columns of rounded cards, teal with one violet card for the agent /
+       epic accent. Mid-tone teal-500 and violet-500 are used instead of the
+       app's theme tokens so the one file reads correctly on both the light and
+       the dark header. -->
+  <rect x="3"  y="3"  width="7" height="11" rx="2" fill="#14b8a6"/>
+  <rect x="14" y="6"  width="7" height="8"  rx="2" fill="#8b5cf6"/>
+  <rect x="3"  y="16" width="7" height="5"  rx="2" fill="#14b8a6"/>
+  <rect x="14" y="16" width="7" height="5"  rx="2" fill="#14b8a6"/>
+</svg>

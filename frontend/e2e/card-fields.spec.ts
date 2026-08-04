@@ -1,10 +1,10 @@
 import { copyFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   cardInColumn,
   cleanupE2eBoards,
   column,
+  docsImagePath,
   openFreshBoard,
   pickSelect,
   uniqueTitle,
@@ -67,8 +67,7 @@ test("a card with priority + label + due renders badge, chip, and overdue pill",
   await expect(reloaded.locator(".due-pill.overdue")).toBeVisible();
 
   // Light + dark screenshots (CI-safe path via testInfo.outputPath — never a
-  // hardcoded absolute path), with review copies at the worktree root.
-  const root = resolve(process.cwd(), "..");
+  // hardcoded absolute path), refreshing the published docs images locally.
   await expect(page.locator("html")).toHaveAttribute("data-theme", /light|dark/);
 
   for (const theme of ["light", "dark"] as const) {
@@ -79,6 +78,10 @@ test("a card with priority + label + due renders badge, chip, and overdue pill",
     await expect(cardInColumn(page, "Todo", title)).toBeVisible();
     const out = testInfo.outputPath(`v11-card-fields-${theme}.png`);
     await page.screenshot({ path: out });
-    copyFileSync(out, resolve(root, `v11-card-fields-${theme}.png`));
+    // Refresh the published docs screenshot in place. Never in CI: it must not
+    // rewrite a committed asset, and it keeps its own copy above.
+    if (!process.env.CI) {
+      copyFileSync(out, docsImagePath(`v11-card-fields-${theme}.png`));
+    }
   }
 });

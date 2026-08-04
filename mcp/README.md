@@ -6,9 +6,14 @@ REST API (`/api/v1`) as tools an agent (e.g. Claude Code) can call. It is a thin
 source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 **V10** (ADR 0015).
 
-> **New here?** The [Agent onboarding guide](../docs/guides/agent-onboarding.md)
-> walks through getting access, minting a token, and wiring this server into Claude
-> Code end to end.
+> **New here? Read the docs site, not this file.**
+> [Set up the MCP server](https://leejianrong.github.io/pandan/agents/mcp-setup/) walks through
+> getting access, minting a token, and wiring this server into Claude Code end to end, and
+> [MCP tool reference](https://leejianrong.github.io/pandan/agents/mcp-tools/) documents the tools
+> for users. This README is the implementation-facing companion: how the server is built, tested and
+> published.
+>
+> Source for those pages: [`docs/guide/agents/`](../docs/guide/agents/).
 
 > **Prefer the [`pandan` CLI](../pandan-cli/) if your agent can run one.** It is the
 > primary interface; this server is the deliberate **fallback**. See
