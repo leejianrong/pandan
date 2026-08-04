@@ -1,7 +1,13 @@
 import { copyFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import { cardInColumn, cleanupE2eBoards, column, openFreshBoard, uniqueTitle } from "./helpers";
+import {
+  cardInColumn,
+  cleanupE2eBoards,
+  column,
+  docsImagePath,
+  openFreshBoard,
+  uniqueTitle,
+} from "./helpers";
 
 // M5 V13 (KAN-246): the needs-human handoff flag. An agent flags a card as needing
 // a human (the flag + note are the agent/CLI/MCP surface in this slice — full
@@ -46,7 +52,6 @@ test("a card flagged needs-human renders the needs-human badge", async ({ page }
     data: { attention_note: "need a decision on the auth flow" },
   });
   expect(reflag.ok()).toBeTruthy();
-  const root = resolve(process.cwd(), "..");
   for (const theme of ["light", "dark"] as const) {
     await page.evaluate((t) => localStorage.setItem("kanban.theme", t), theme);
     await page.reload();
@@ -55,7 +60,11 @@ test("a card flagged needs-human renders the needs-human badge", async ({ page }
     await expect(themed.locator(".needs-human-badge")).toBeVisible();
     const out = testInfo.outputPath(`v13-needs-human-${theme}.png`);
     await page.screenshot({ path: out });
-    copyFileSync(out, resolve(root, `v13-needs-human-${theme}.png`));
+    // Refresh the published docs screenshot in place. Never in CI: it must not
+    // rewrite a committed asset, and it keeps its own copy above.
+    if (!process.env.CI) {
+      copyFileSync(out, docsImagePath(`v13-needs-human-${theme}.png`));
+    }
   }
 
   // Verify the resolve path too: clear it and confirm the badge is gone.

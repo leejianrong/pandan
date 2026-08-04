@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { cleanupE2eBoards, login, openView, uniqueTitle } from "./helpers";
+import { cleanupE2eBoards, docsImagePath, login, openView, uniqueTitle } from "./helpers";
 
 // M5 V16 awareness dashboard (KAN-249): the Dashboard view composes, for the
 // active board, in-flight-by-assignee (+ PR links), a needs-attention list (V13),
@@ -188,8 +188,8 @@ test("dashboard screenshots — light + dark", async ({ page }, testInfo) => {
 
   await page.screenshot({ path: testInfo.outputPath("dashboard-light.png"), fullPage: true });
   if (!CI) {
-    // Review copy at the worktree root (relative to the frontend/ cwd) for the PM.
-    await page.screenshot({ path: "../dashboard-light.png", fullPage: true });
+    // Refresh the published docs screenshot in place (see docsImagePath).
+    await page.screenshot({ path: docsImagePath("dashboard-light.png"), fullPage: true });
   }
 
   // Flip to dark via the top-bar theme toggle and re-shoot.
@@ -197,6 +197,6 @@ test("dashboard screenshots — light + dark", async ({ page }, testInfo) => {
   await expect(page.locator(':root[data-theme="dark"]')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("dashboard-dark.png"), fullPage: true });
   if (!CI) {
-    await page.screenshot({ path: "../dashboard-dark.png", fullPage: true });
+    await page.screenshot({ path: docsImagePath("dashboard-dark.png"), fullPage: true });
   }
 });
