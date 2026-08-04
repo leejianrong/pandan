@@ -556,8 +556,34 @@ Preserve this pattern (it is a deliberate Shape A decision, [docs/BREADBOARD.md]
 
 ## How the docs relate (source of truth for intent)
 
-This is a Shape Up project. The docs are a deliberate chain, not scratch notes — treat them as the
-spec for intended behavior:
+**Two audiences, split by directory, and the split is enforced by the build.**
+
+- **[docs/guide/](docs/guide/index.md) is USER documentation and the only thing published** to
+  <https://leejianrong.github.io/pandan/>: install, first steps, the browser guide (incl. keyboard
+  shortcuts), the CLI, agents/MCP, self-hosting, reference, about. If a user asks "how do I …", the
+  answer belongs here, and this is where to fix it.
+- **Everything else under `docs/` is contributor material and is NOT published**: the Shape Up chain,
+  ADRs, `milestone-*/`, `guides/` (ops + testing how-tos), the dogfooding log.
+
+`zensical.toml` sets **`docs_dir = "docs/guide"`**, and that is load-bearing rather than cosmetic:
+Zensical (0.0.50) has **no `exclude_docs` / `not_in_nav` option**, and `nav` only controls what is
+*listed*, so every file under `docs_dir` builds and ships as a reachable page. Before this split the
+site published all 62 files — `REQS.md`, session prompts, UAT logs — merely unlisted. Pointing
+`docs_dir` at the subtree is the only thing that actually excludes them, and it leaves every planning
+file in place so the ~40 `docs/adr/…` links in this file keep resolving. (FastAPI does the same: its
+site root is `docs/en/docs/`.)
+
+Two consequences when editing `docs/guide/`:
+- **A link to a planning doc must be an absolute GitHub URL.** The target is outside the build tree,
+  so a relative `.md` link fails `--strict`.
+- **Add the page to `nav` in `zensical.toml`.** An unlisted page still builds, so it would ship as an
+  orphan nothing links to. A test does not catch this; the nav is the index.
+
+Verify with `uv run --project docs-tooling --frozen zensical build --strict --clean` (the `docs` CI
+job); `--strict` fails on a broken internal link.
+
+The planning chain itself is a deliberate sequence, not scratch notes — treat it as the spec for
+intended behavior:
 
 `REQS.md` (raw ask) → `FRAME.md` → `PRD.md` + [CONTEXT.md](docs/CONTEXT.md) (+ `adr/`) →
 `SHAPING.md` (selects Shape A) → `BREADBOARD.md` (UI places & wiring) → build in slices.

@@ -7,8 +7,23 @@ call — so the API stays the single source of truth (API-first, ADR 0005).
 Milestone 2 follow-on; card commands **KAN-22**, board + epic commands
 **KAN-23**, packaging + this README + the CI job **KAN-24**.
 
-> **New here?** The [Agent onboarding guide](../docs/guides/agent-onboarding.md)
-> covers getting access, minting a token, and using this CLI in CI end to end.
+> **New here? Read the docs site, not this file.**
+> [Installation](https://leejianrong.github.io/pandan/install/) →
+> [First steps](https://leejianrong.github.io/pandan/first-steps/) gets you from nothing to reading a
+> board, and the [CLI guide](https://leejianrong.github.io/pandan/cli/) covers
+> [reading](https://leejianrong.github.io/pandan/cli/reading/),
+> [writing](https://leejianrong.github.io/pandan/cli/writing/),
+> [output formats](https://leejianrong.github.io/pandan/cli/output-formats/),
+> [exit codes](https://leejianrong.github.io/pandan/cli/errors-and-exit-codes/) and
+> [CI](https://leejianrong.github.io/pandan/cli/ci/).
+> This README stays as the exhaustive per-flag reference.
+>
+> Source for those pages: [`docs/guide/cli/`](../docs/guide/cli/).
+>
+> **The two things a first-time user trips on**, both documented on the site:
+> a fresh install targets `http://localhost:8000`, so run `pandan config set --api-url …` before
+> anything else; and `pandan login` (which prompts, or takes `--token-stdin`) is the way to save a
+> PAT, not `config set --token`, which leaks it into shell history.
 
 It uses only the standard library's `argparse` (no `click`/`typer`) — consistent
 with the repo's thin ethos.

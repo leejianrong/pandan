@@ -17,14 +17,15 @@
       }
     },
     "pandan-docker": {
-      "//": "Prebuilt OCI image (KAN-47). `-i` keeps stdin open for the stdio transport; `--rm` cleans up. The -e flags forward the values from the env block below into the container. Pin a version instead of :latest if you prefer (e.g. :0.4). Use host.docker.internal instead of localhost to reach a backend on the host. The image path still carries the old name — retargeting it is KAN-437.",
+      "//": "Prebuilt OCI image (KAN-47). `-i` keeps stdin open for the stdio transport; `--rm` cleans up. The -e flags carry no =value, which forwards the values from the env block below into the container instead of putting the token in the argument list. Pin a version instead of :latest if you prefer (e.g. :0.22.0). Use host.docker.internal instead of localhost to reach a backend on the host.",
+      "//image-rename": "The image is ghcr.io/<owner>/pandan-mcp as of KAN-437 (publish-mcp-image.yml builds that path) and it is public. The pre-rebrand ghcr.io/leejianrong/simple-kanban-mcp is also still public and pullable, so an old .mcp.json keeps working — but new releases only go to pandan-mcp.",
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
         "-e", "PANDAN_API_URL",
         "-e", "PANDAN_TOKEN",
         "-e", "PANDAN_BOARD_ID",
-        "ghcr.io/leejianrong/simple-kanban-mcp:latest"
+        "ghcr.io/leejianrong/pandan-mcp:latest"
       ],
       "env": {
         "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",

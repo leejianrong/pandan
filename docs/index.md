@@ -1,21 +1,46 @@
-# Pandan
+# Pandan — internal docs map
 
-A small, API-first kanban board built as a [Shape Up](https://basecamp.com/shapeup) project —
-view, create, edit, delete, and drag-to-move stories across columns, behind a clean REST API with
-an agent-driven task-tracking layer on top. It runs live at
-[simple-kanban-jian.fly.dev](https://simple-kanban-jian.fly.dev).
+This file is the map of the **contributor-facing** docs in this folder: the decision records that
+explain *why* the system is shaped the way it is, and the Shape Up planning chain behind each
+milestone.
 
-This site is the project's documentation: the decision records that explain *why* the system is
-shaped the way it is, the Shape Up planning chain behind each milestone, and the hands-on guides for
-running and extending it.
+> **Looking for how to *use* Pandan?** That is a separate, published site built from
+> [`docs/guide/`](guide/index.md):
+> **<https://leejianrong.github.io/pandan/>**
+>
+> Installing the CLI, minting a token, using the board, keyboard shortcuts, wiring the MCP server,
+> and self-hosting all live there. Nothing in *this* folder outside `guide/` is published.
 
-## Start here
+## What is published, and what is not
 
-- **New to the project?** Read the [context and glossary](CONTEXT.md) for the domain model and the
-  exact terms used everywhere else, then skim the [architecture decisions](adr/0001-tech-stack-and-monorepo.md).
-- **Running or extending it?** The [developer workflows](DEVELOPER-WORKFLOWS.md) and the
-  [guides](guides/agent-onboarding.md) cover the day-to-day loop.
-- **Driving the board from an agent?** Start with [agent onboarding](guides/agent-onboarding.md).
+`zensical.toml` sets `docs_dir = "docs/guide"`, so the documentation site is built from that subtree
+alone. Zensical has no `exclude_docs` option, and its `nav` only controls what is *listed*, so every
+file under `docs_dir` ships as a reachable page. Pointing `docs_dir` at the subtree is what actually
+keeps the planning trail off the public site.
+
+| Path | Published? | What it is |
+| --- | --- | --- |
+| `docs/guide/**` | **Yes** | User documentation. The site. |
+| `docs/adr/**` | No | Architecture decision records. |
+| `docs/REQS,FRAME,PRD,CONTEXT,SHAPING,BREADBOARD.md` | No | The Shape Up chain. |
+| `docs/milestone-*/**` | No | Per-milestone frame → shaping → breadboard → slices, session prompts, UAT logs. |
+| `docs/guides/**` | No | Internal ops and testing how-tos. |
+| `docs/agent-pm-dogfooding-log.md` | No | Running log of driving this board as an agent PM. |
+| `docs/blog/`, `docs/superpowers/`, `docs/kaya-vision.md` | No | Writing and adjacent planning. |
+
+If you add a page to `docs/guide/`, add it to the `nav` in `zensical.toml` too. An unlisted file
+still builds, so it would ship as an orphan page nothing links to.
+
+## Start here (contributors)
+
+- **New to the codebase?** Read the [context and glossary](CONTEXT.md) for the domain model and the
+  exact terms used everywhere else, then skim the
+  [architecture decisions](adr/0001-tech-stack-and-monorepo.md).
+- **Working on it day to day?** [Developer workflows](DEVELOPER-WORKFLOWS.md) covers the branch, PR,
+  worktree and deploy machinery. `CLAUDE.md` at the repo root is the agent brief.
+- **Where is the work tracked?** The project dogfoods itself: the *Pandan Roadmap* board on the
+  deployed instance is the authoritative task list, plus
+  [`docs/milestone-7/SLICES.md`](milestone-7/SLICES.md) for the current milestone.
 
 ## How the docs fit together
 
@@ -36,10 +61,10 @@ flowchart LR
 - **[Shape Up chain](REQS.md)** — the raw ask (`REQS`), narrowed to a `FRAME`, written up as a
   `PRD`, grounded in a shared `CONTEXT`, then shaped into a solution (`SHAPING`) and wired as a
   `BREADBOARD` of UI places before any code is built.
-- **[Architecture decisions](adr/0001-tech-stack-and-monorepo.md)** — numbered ADRs capturing each
-  load-bearing choice, its alternatives, and the trade-off, from the tech stack (0001) through
-  board authorization (0013), MCP board-scoping (0015), observability (0017), and the `pandan`
-  rebrand (0018).
+- **[Architecture decisions](adr/0001-tech-stack-and-monorepo.md)** — nineteen numbered ADRs
+  capturing each load-bearing choice, its alternatives, and the trade-off, from the tech stack
+  (0001) through board authorization (0013), MCP board-scoping (0015), observability (0017), the
+  `pandan` rebrand (0018), and MCP surface right-sizing (0019).
 - **Milestones** — the core board plus [Milestone 2](milestone-2/SLICES.md) (agent task tracking:
   epics, API versioning, a query API, token auth, and an MCP server),
   [Milestone 3](milestone-3/SLICES.md) (accounts, multi-board with ownership, board authorization,
@@ -47,8 +72,9 @@ flowchart LR
   UI, fleet reporting), [Milestone 6](milestone-6/SLICES.md) (abuse hardening, projects, cycles,
   design system, notifications) and [Milestone 7](milestone-7/SLICES.md) (the `pandan` rebrand +
   agent-ergonomic CLI), each planned with its own frame → shaping → breadboard → slices.
-- **[Guides](guides/agent-onboarding.md)** — practical setup: onboarding an agent, wiring GitHub
-  PR auto-sync, and running the end-to-end tests behind auth.
+- **[Internal guides](guides/autosync-github-setup.md)** — ops and testing how-tos that are not user
+  documentation: auto-sync setup and operations, running the end-to-end tests behind auth, and edge
+  hardening.
 
 !!! note "The code is the source of truth"
 

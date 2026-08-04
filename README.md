@@ -4,11 +4,16 @@ A small, deployable Kanban board for scrum/software teams — **Svelte 5 + FastA
 Its defining goal is **API-first**: every UI action is a plain REST endpoint, so an MCP server, a
 CLI, or an LLM agent can drive the board without any UI or backend rework — and all three now exist.
 
+> **📖 Documentation: [leejianrong.github.io/pandan](https://leejianrong.github.io/pandan/)**
+> — how to install the CLI, use the board, drive it from an agent, and self-host it. Start at
+> [Installation](https://leejianrong.github.io/pandan/install/) then
+> [First steps](https://leejianrong.github.io/pandan/first-steps/).
+
 > **🚀 Live demo: [simple-kanban-jian.fly.dev](https://simple-kanban-jian.fly.dev)**
 > (Hosted on Fly.io + Neon; the free tier scales to zero, so the first request after idle can take
 > ~1s to wake — that's a cold start, not a bug.)
 
-> **Status: feature-complete and deployed — Milestones 1, 2, and 3 all shipped.**
+> **Status: deployed and in active development — Milestones 1–6 shipped, Milestone 7 nearly done.**
 > The core board (view / create / edit / delete / drag-to-move) runs end to end behind a full
 > REST API, with a pytest + Playwright test suite and CI/CD to Fly.io. On top of that:
 > GitHub login, multiple owned boards, epics, card dependencies / work-links / comments, a query
@@ -20,7 +25,8 @@ CLI, or an LLM agent can drive the board without any UI or backend rework — an
 Three fixed columns (**Todo / In Progress / Done**) holding cards. Each card has a Jira-style
 ticket number (`KAN-1`, `KAN-2`, …), a title, and optional description, story points
 ({1,2,3,5,8,13}), assignee, epic link, dependencies, work-links, and comments. You log in with
-GitHub and own one or more boards; every board is private to its owner (no sharing yet). Cards can
+GitHub and own one or more boards; a board has one **owner** plus optional **members** with a
+`viewer` / `editor` / `owner` role (KAN-12/13), and is invisible to everyone else. Cards can
 be grouped under epics (`EPIC-1`, …) and shown in a separate Epics view.
 
 The interesting part is *how it's shaped*: a clean, versioned `/api/v1` surface with
@@ -47,9 +53,14 @@ straight at it:
 Both authenticate with a personal access token you mint in the **Tokens** tab; a PAT acts as you
 and is owner-gated exactly like your session.
 
-**→ New here? Start with the [Agent onboarding guide](docs/guides/agent-onboarding.md)** — it walks
-through getting access, minting a token, wiring the MCP into Claude Code, verifying the connection,
-and example agent workflows.
+**→ New here? Start with the documentation site**, which is the source of truth for using Pandan:
+- [Installation](https://leejianrong.github.io/pandan/install/) → [First steps](https://leejianrong.github.io/pandan/first-steps/) (mint a token, point the CLI at a board, read it)
+- [Agents and MCP](https://leejianrong.github.io/pandan/agents/) (wire the MCP server into Claude Code, then the workflows worth handing an agent)
+- [Using the CLI](https://leejianrong.github.io/pandan/cli/) (filters, output formats, exit codes, CI)
+
+> One trap worth knowing before you start: with no configuration the CLI targets
+> `http://localhost:8000`, so `pandan warmup` reports `server not ready yet` on a fresh install even
+> though nothing is waking up. Run `pandan config set --api-url …` first.
 
 ## Tech stack
 
@@ -185,20 +196,31 @@ REQS.md  →  FRAME.md  →  PRD.md + CONTEXT.md (+ adr/)  →  SHAPING.md  → 
 - **[CONTEXT.md](docs/CONTEXT.md)** — canonical glossary and domain model.
 - **[SHAPING.md](docs/SHAPING.md)** — three candidate shapes, a fit check, and why "Thin Slice" won.
 - **[BREADBOARD.md](docs/BREADBOARD.md)** — every UI place, affordance, and API wiring.
-- **[adr/](docs/adr/)** — fifteen decisions (0001–0015; all Accepted except 0010, superseded)
+- **[adr/](docs/adr/)** — nineteen decisions (0001–0019; all Accepted except 0010, superseded)
   tracing the whole arc: stack, Postgres-from-day-one, single-artifact serving, hosting/CI,
   API-first, data model, and last-write-wins concurrency, then epics, agent tokens, GitHub login,
-  multi-board ownership, board authorization, self-serve PATs, and MCP board-scoping.
-- **[guides/](docs/guides/)** — practical how-tos, including the
-  [Agent onboarding guide](docs/guides/agent-onboarding.md) and the
-  [GitHub PR-board auto-sync setup guide](docs/guides/autosync-github-setup.md).
+  multi-board ownership, board authorization, self-serve PATs, MCP board-scoping, PR auto-sync,
+  observability, the `pandan` rebrand, and MCP surface right-sizing.
+- **[guides/](docs/guides/)** — internal how-tos that aren't user documentation: the
+  [GitHub PR-board auto-sync ops guide](docs/guides/autosync-github-setup.md),
+  [e2e testing behind auth](docs/guides/e2e-testing-with-auth.md), and
+  [edge hardening](docs/guides/edge-hardening.md).
+
+> **The planning trail is deliberately not published.** The
+> [documentation site](https://leejianrong.github.io/pandan/) is built from `docs/guide/` only, so it
+> covers how to *use* Pandan and nothing else. Everything above stays in the repo for contributors.
+> See the comment at the top of [`zensical.toml`](zensical.toml) for why `docs_dir` is a subtree.
 
 ## Still out of scope
 
-The early non-goals that have since shipped — authentication, multiple boards, comments, and the
-MCP/CLI agent clients — are now built. What remains deliberately out of scope: billing, custom
-columns, WIP limits, labels, attachments, due dates, history/audit, real-time collaboration, and
-**board sharing** (boards are single-owner today; multi-user collaboration is a future milestone).
+Most of the early non-goals have since shipped: authentication, multiple boards, comments, the
+MCP/CLI agent clients, **labels**, **due dates**, **history/audit** (the activity feed), and
+**board sharing** (a board now has members with `viewer`/`editor`/`owner` roles).
+
+What remains deliberately out of scope: billing, custom columns, WIP limits, file attachments,
+subtasks, and real-time collaboration (last-write-wins, no websockets, ADR
+[0007](docs/adr/0007-no-auth-concurrency-and-realtime.md)). The current limits are listed honestly at
+[Current limits](https://leejianrong.github.io/pandan/about/limits/).
 
 ## Licence
 

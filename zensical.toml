@@ -1,7 +1,7 @@
 # Zensical configuration for the Pandan documentation site.
 #
 # Zensical (https://zensical.org) is the successor to Material for MkDocs from
-# the same team. It renders the docs/ markdown tree to a static site/ directory.
+# the same team. It renders a markdown tree to a static site/ directory.
 #
 #   uv run --project docs-tooling --frozen zensical build --strict --clean
 #
@@ -10,96 +10,146 @@
 #
 # The generated site/ directory is a build artifact — it is gitignored and CI
 # rebuilds it fresh on every run.
+#
+# ---------------------------------------------------------------------------
+# WHY docs_dir IS docs/guide AND NOT docs
+#
+# This site is USER documentation: how to install Pandan, use the board, drive
+# it from the CLI, and wire it to an agent. The repo's planning material (the
+# Shape Up chain, the ADRs, per-milestone slices, session prompts, UAT logs, the
+# dogfooding log) is engineering history and is deliberately NOT published.
+#
+# Zensical has no `exclude_docs` / `not_in_nav` option: EVERY file under
+# docs_dir is built and served, and `nav` only controls what is *listed*. So
+# omitting a file from nav is not enough to keep it off the site — it just makes
+# it unlisted-but-reachable, which is what the previous config did.
+#
+# Pointing docs_dir at the docs/guide subtree is what actually excludes the
+# planning docs. It also leaves every planning file exactly where it is, so the
+# ~40 `docs/adr/...` links in CLAUDE.md and the relative cross-links between
+# planning docs all keep working. (FastAPI does the same thing: its site root is
+# docs/en/docs/.)
+#
+# Consequence to remember: a link from a page here to a planning doc must be an
+# absolute GitHub URL, because the planning file is outside the build tree and a
+# relative .md link to it fails --strict.
+# ---------------------------------------------------------------------------
 
 [project]
-site_name = "Pandan Docs"
-site_description = "Design docs, ADRs, and guides for the Pandan project — a Shape Up, API-first kanban board with an agent-driven task-tracking layer."
+site_name = "Pandan"
+site_description = "Pandan is an API-first kanban board that agents and humans drive through the same API, with the same permissions."
 site_author = "Jian"
-site_url = "https://leejianrong.github.io/simple-kanban/"
+site_url = "https://leejianrong.github.io/pandan/"
 copyright = "Copyright &copy; 2026 Pandan"
 
-docs_dir = "docs"
+docs_dir = "docs/guide"
 site_dir = "site"
 
 repo_url = "https://github.com/leejianrong/pandan"
 repo_name = "leejianrong/pandan"
 
-# Explicit navigation. Files under docs/ that are not listed here (internal
-# session prompts, spikes, UAT logs) are still built but stay out of the nav.
+# Explicit navigation. Every published file is listed here on purpose: because
+# Zensical builds everything under docs_dir, an unlisted file would still ship
+# as an orphan page nobody can navigate to.
 nav = [
   { "Home" = "index.md" },
-  { "Shape Up chain" = [
-    "REQS.md",
-    "FRAME.md",
-    "PRD.md",
-    "CONTEXT.md",
-    "SHAPING.md",
-    "BREADBOARD.md",
+  { "Get started" = [
+    "install.md",
+    "first-steps.md",
   ] },
-  { "Architecture decisions" = [
-    "adr/0001-tech-stack-and-monorepo.md",
-    "adr/0002-postgres-and-alembic-from-day-one.md",
-    "adr/0003-single-artifact-deployment.md",
-    "adr/0004-hosting-and-cicd.md",
-    "adr/0005-api-first-mcp-ready.md",
-    "adr/0006-data-model-and-domain-decisions.md",
-    "adr/0007-no-auth-concurrency-and-realtime.md",
-    "adr/0008-implementation-stack-details.md",
-    "adr/0009-epic-as-first-class-entity.md",
-    "adr/0010-optional-agent-token-auth.md",
-    "adr/0011-github-cookie-session-auth.md",
-    "adr/0012-multi-board-with-ownership.md",
-    "adr/0013-board-authorization.md",
-    "adr/0014-agent-personal-access-tokens.md",
-    "adr/0015-mcp-board-scoping-and-retiring-api-tokens.md",
-    "adr/0016-github-pr-board-autosync.md",
+  { "User guide" = [
+    "tutorial/index.md",
+    "tutorial/boards.md",
+    "tutorial/cards.md",
+    "tutorial/moving-work.md",
+    "tutorial/epics.md",
+    "tutorial/organising.md",
+    "tutorial/collaboration.md",
+    "tutorial/dashboard.md",
+    "tutorial/keyboard-shortcuts.md",
   ] },
-  { "Milestone 2 — agent task tracking" = [
-    "milestone-2/FRAME.md",
-    "milestone-2/SHAPING.md",
-    "milestone-2/BREADBOARD.md",
-    "milestone-2/SLICES.md",
+  { "CLI" = [
+    "cli/index.md",
+    "cli/configure.md",
+    "cli/reading.md",
+    "cli/writing.md",
+    "cli/output-formats.md",
+    "cli/errors-and-exit-codes.md",
+    "cli/ci.md",
   ] },
-  { "Milestone 3 — accounts & boards" = [
-    "milestone-3/FRAME.md",
-    "milestone-3/SHAPING.md",
-    "milestone-3/BREADBOARD.md",
-    "milestone-3/SLICES.md",
+  { "Agents & MCP" = [
+    "agents/index.md",
+    "agents/mcp-setup.md",
+    "agents/mcp-tools.md",
+    "agents/workflows.md",
+    "agents/token-budget.md",
   ] },
-  { "Guides" = [
-    "guides/agent-onboarding.md",
-    "guides/autosync-github-setup.md",
-    "guides/e2e-testing-with-auth.md",
-    "DEVELOPER-WORKFLOWS.md",
+  { "Self-hosting" = [
+    "self-hosting/index.md",
+    "self-hosting/local.md",
+    "self-hosting/configuration.md",
+    "self-hosting/deploy.md",
+    "self-hosting/github-autosync.md",
+  ] },
+  { "Reference" = [
+    "reference/api.md",
+    "reference/glossary.md",
+  ] },
+  { "About" = [
+    "about/design-decisions.md",
+    "about/limits.md",
+    "about/releases.md",
   ] },
 ]
 
+# The site's palette, logo and type are matched to the app's "Graphite (Zinc &
+# Teal)" theme in assets/stylesheets/pandan.css, so the docs and the product
+# read as one thing. `primary`/`accent` are "custom" so no built-in Material
+# colour rule fights that stylesheet.
+extra_css = ["assets/stylesheets/pandan.css"]
+
 [project.theme]
 language = "en"
+logo = "assets/images/pandan-logo.svg"
+favicon = "assets/images/favicon.svg"
 features = [
   "navigation.tabs",
   "navigation.sections",
   "navigation.top",
   "navigation.footer",
+  "navigation.indexes",
   "toc.follow",
   "content.code.copy",
   "search.suggest",
   "search.highlight",
+  "search.share",
   "announce.dismiss",
 ]
 
+# Two palettes with a `media` key each, so the site follows the reader's OS
+# preference by default and the toggle overrides it. This mirrors the app, whose
+# app.css defaults to `@media (prefers-color-scheme: dark)` with an explicit
+# [data-theme] override. Without `media` the site would always open light.
 [[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
 scheme = "default"
+primary = "custom"
+accent = "custom"
 toggle.icon = "lucide/sun"
 toggle.name = "Switch to dark mode"
 
 [[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
 scheme = "slate"
+primary = "custom"
+accent = "custom"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 
 # Markdown extensions — the sensible-default set Zensical scaffolds, kept so
-# admonitions, code highlighting, content tabs, and mermaid diagrams render.
+# admonitions, code highlighting, content tabs, keyboard keys and mermaid
+# diagrams render. `pymdownx.keys` is load-bearing here: the keyboard-shortcuts
+# page is written with ++ctrl+k++ syntax.
 [project.markdown_extensions.abbr]
 [project.markdown_extensions.admonition]
 [project.markdown_extensions.attr_list]

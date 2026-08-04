@@ -107,8 +107,14 @@ So the four combinations:
 | `true` | `true` | All of the above, **and** a merged PR moves the card to Done. |
 
 There's no UI toggle for these yet — set them with `pandan board update` (KAN-529; needs CLI
-**0.21.0+**), authenticating with your own PAT (see the [Agent onboarding guide](agent-onboarding.md)
-for minting one). Find your board id with `pandan board list`.
+**0.21.0+**), authenticating with your own PAT (see
+[First steps](https://leejianrong.github.io/pandan/first-steps/) for minting one). Find your board id
+with `pandan board list`.
+
+> **This file is the ops/internal reference.** The user-facing version of this setup, which is
+> published, is [GitHub auto-sync](https://leejianrong.github.io/pandan/self-hosting/github-autosync/)
+> (source: [`docs/guide/self-hosting/github-autosync.md`](../guide/self-hosting/github-autosync.md)).
+> Keep the two in step when the behaviour changes.
 
 Turn auto-sync on for board `1`, keeping merge→done off:
 

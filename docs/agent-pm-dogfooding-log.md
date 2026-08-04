@@ -28,33 +28,41 @@ decide what to work on, and delegate each card to **one sub-agent at a time**, t
 Your job is throughput + quality + keeping the board honest, and (a standing goal in this repo)
 **dogfooding**: notice and record where the tool itself is awkward to drive as an agent.
 
-## Getting started (new users — read if the Kanban MCP isn't wired yet)
+## Getting started (new users — read if the Pandan MCP isn't wired yet)
 
-If `mcp__kanban__*` tools aren't available in this session, the board isn't connected yet. Point
-the user at the project and its onboarding guide, then help them wire it up:
+> **This section was rewritten on 2026-08-05.** The snapshot carried over from the old skill was
+> entirely pre-rebrand — `simple-kanban` repo URLs, `mcp__kanban__*` tool names, `kanban_pat_…`,
+> `KANBAN_*` env, and the `simple-kanban-mcp` image — so a new user sent here got instructions for a
+> product that had been renamed two milestones earlier. Fixed rather than preserved, because the whole
+> point of the section is to onboard someone.
 
-- **Repo:** <https://github.com/leejianrong/simple-kanban>
-- **Full onboarding guide (source of truth):**
-  [`docs/guides/agent-onboarding.md`](https://github.com/leejianrong/simple-kanban/blob/main/docs/guides/agent-onboarding.md)
+If `mcp__pandan__*` tools aren't available in this session, the board isn't connected yet.
+**Point the user at the published docs site — it is the source of truth and this list is a summary:**
 
-The short path to a working `kanban` MCP server in Claude Code:
+- **Docs:** <https://leejianrong.github.io/pandan/> (source: `docs/guide/`)
+- **Repo:** <https://github.com/leejianrong/pandan>
+- **MCP setup page:** <https://leejianrong.github.io/pandan/agents/mcp-setup/>
 
-1. **Get access + mint a PAT.** Log in at <https://simple-kanban-jian.fly.dev> (GitHub), open the
-   **Tokens** tab, create one, and copy the `kanban_pat_…` secret (shown once). It authenticates as
-   that user and is owner-gated exactly like them. (Or self-host — see the guide.)
-2. **Wire the MCP** in `.mcp.json`. Two options (the guide has copy-paste blocks for both):
-   - **Container (no local toolchain):** run the published image —
-     `docker run -i --rm -e KANBAN_API_URL -e KANBAN_TOKEN -e KANBAN_BOARD_ID
-     ghcr.io/leejianrong/simple-kanban-mcp:latest`. (Requires a published release; if the image
-     isn't available yet, use the source path below.)
+The short path to a working `pandan` MCP server in Claude Code:
+
+1. **Get access + mint a PAT.** Log in at <https://simple-kanban-jian.fly.dev> (GitHub — that origin
+   keeps the old name on purpose, ADR 0018 / KAN-424), open the **Tokens** tab, create one, and copy
+   the `pandan_pat_…` secret (shown once). It authenticates as that user and is permission-checked
+   exactly like them.
+2. **Wire the MCP** in `.mcp.json` (copy `.mcp.json.example`, keep one entry):
+   - **Container (no local toolchain):**
+     `docker run -i --rm -e PANDAN_API_URL -e PANDAN_TOKEN -e PANDAN_BOARD_ID
+     ghcr.io/leejianrong/pandan-mcp:latest` — public, no `docker login`.
    - **From source with `uv`:** `uv run --directory ./mcp python -m pandan_mcp` from a checkout.
-3. **Set env:** `KANBAN_API_URL` (`https://simple-kanban-jian.fly.dev` or a self-host origin),
-   `KANBAN_TOKEN` (the PAT), and **`KANBAN_BOARD_ID`** (set it, or list/create tools span all your
-   boards / land on the earliest). Restart Claude Code, then verify with the `warmup` then
-   `list_boards` tools.
+3. **Set env:** `PANDAN_API_URL`, `PANDAN_TOKEN` (the PAT), and **`PANDAN_BOARD_ID`** (set it, or
+   list/create tools span all your boards / land on the earliest). Restart Claude Code, then verify
+   with `warmup` then `list_boards`.
+
+The `KANBAN_*` spellings and a `kanban_pat_…` token still work as a deprecated per-value fallback
+(read second, one-line notice on stderr), so a half-migrated setup resolves correctly.
 
 > Two personas: someone who just wants to **use** the board (track their own work via the MCP —
-> steps above are enough) vs. a **contributor** driving the *simple-kanban repo itself* forward (the
+> steps above are enough) vs. a **contributor** driving the *pandan repo itself* forward (the
 > PM playbook below — needs a repo checkout, `gh`, and follows the branch/PR/merge conventions). The
 > orchestration playbook that follows assumes the contributor persona.
 
@@ -2671,3 +2679,114 @@ one real deploy** that closed a three-change drift.
 - **One recurring red is now expected and correct:** the drift watcher runs every three hours and fails
   whenever `main` carries image-affecting commits production is not running. It has already gone red,
   then green. That is the point — the drift it reports used to be invisible.
+
+---
+
+## 2026-08-05 — Cold-start onboarding on a new laptop, and the user-docs split
+
+A real first-run: a fresh WSL2 Ubuntu machine (glibc 2.35, `uv` present, no `pandan`, no
+`~/.config/pandan/`, no `.mcp.json`, no `PANDAN_*` env) taken from nothing to reading the Pandan
+Roadmap board, following only what the repo told a new user to do. Then the docs were restructured
+based on what that run exposed.
+
+### The install itself: about four minutes, no blockers
+
+Every documented step worked first try. Worth recording because it is the part that usually rots:
+
+| Step | Result |
+|---|---|
+| `curl` the prebuilt binary from `releases/latest/download/pandan-linux-x86_64` | 15 MB, resolved first try |
+| `chmod +x` + `mv ~/.local/bin/` | `~/.local/bin` already on `PATH` |
+| `pandan --version` | `pandan 0.22.0 (09882f5)` — real commit, matches release `v0.22.0` |
+| `pandan warmup` (configured) | `ok  API is awake` |
+| `pandan login --token-stdin` | wrote `~/.config/pandan/config.toml` at mode `600` |
+| `pandan board list` → `config set --board-id 5` → `pandan overview` | 8 boards, board read correctly |
+
+**V50's provenance string earns its keep.** `pandan 0.22.0 (09882f5)` was independently verifiable
+against `git log` and `gh release view` in one command each. That is exactly the "a stale binary is
+detectable" property the version-bump guard exists to protect.
+
+**The config file is `600` by default.** Nobody had to be told to lock it down before putting a PAT in
+it. Good default, worth not regressing.
+
+### Eight findings, in the order they were hit
+
+1. **`warmup` on a fresh install is actively misleading.** `DEFAULT_API_URL` is
+   `http://localhost:8000`, so an unconfigured CLI reports
+   `waking  server not ready yet (ConnectError); retry shortly`. Nothing is waking up; nothing is
+   listening. Worse, the docs recommended `until pandan warmup; do sleep 2; done`, which on a fresh
+   install **loops forever**. The message never names the URL it tried. → **KAN-613**.
+2. **`pandan login` was documented nowhere.** There is a dedicated verb that prompts without echoing,
+   takes `--token-stdin`, and accepts `--api-url` / `--board-id` so a new machine is *one command*. The
+   onboarding guide only taught `export PANDAN_API_URL=…`, so users re-export every shell and never
+   find it. Now the headline of First steps.
+3. **No `pandan me`,** though `GET /api/v1/me` exists (KAN-530). It was the first thing reached for to
+   check "did my token work". → **KAN-614**.
+4. **`pandan list` cannot resume its own pagination.** Under `--limit` it prints
+   `(more — next cursor: …)`, but `list` has no `--cursor` flag; only `activity` does. Verified
+   empirically (`unrecognized arguments: --cursor`) and in the parser. So the CLI advertises a cursor it
+   cannot consume. → **KAN-615**.
+5. **The install snippet had no `cd`.** `curl -o pandan` run from a checkout drops 15 MB of untracked
+   binary into the working tree. Fixed in the docs.
+6. **This file's own "Getting started" was entirely pre-rebrand** — `simple-kanban` URLs,
+   `mcp__kanban__*`, `kanban_pat_`, `KANBAN_*`, `simple-kanban-mcp`. A new user pointed here got
+   instructions for a renamed product. Rewritten above.
+7. **"There is no board sharing yet" was flatly wrong**, in both `docs/guides/agent-onboarding.md` and
+   `README.md`. `BoardMember` with `viewer`/`editor`/`owner` has existed since KAN-12/13
+   (`backend/app/routers/members.py`). The guide went further and told teams to self-host one instance
+   each. Fixed in both.
+8. **`.mcp.json.example` still pointed at `ghcr.io/leejianrong/simple-kanban-mcp`** and described the
+   rename as pending, though `publish-mcp-image.yml` builds `pandan-mcp` and **both paths are public**
+   (verified with anonymous ghcr manifest pulls: `200` each). Retargeted.
+
+Also stale and fixed: README claimed "Milestones 1, 2, and 3 all shipped" and listed labels, due
+dates, history/audit and board sharing as *out of scope* when all four exist; it said fifteen ADRs
+when there are nineteen.
+
+### The docs restructure
+
+The user's ask was to revamp the Zensical site to be user documentation in the style of the FastAPI
+docs, excluding planning material.
+
+**The blocking discovery: Zensical 0.0.50 has no `exclude_docs` / `not_in_nav`.** Everything under
+`docs_dir` is built and served; `nav` only controls what is *listed*. The old config had
+`docs_dir = "docs"`, so the site was publishing all 62 files — `REQS.md`, `V10-SESSION-PROMPT.md`, UAT
+logs, this log — merely unlisted. Dropping them from `nav` would not have removed them.
+
+So `docs_dir` is now **`docs/guide/`** (33 new pages). Chosen over moving ~50 planning files to
+`docs/internal/` because it moves nothing, breaks no relative cross-link, and keeps the ~40
+`docs/adr/…` links in `CLAUDE.md` resolving. FastAPI does the same thing (`docs/en/docs/`).
+
+Two rules this creates, now written into `CLAUDE.md`:
+- a link from `docs/guide/` to a planning doc must be an **absolute GitHub URL**, since the target is
+  outside the build tree and a relative `.md` link fails `--strict`;
+- a new page must be added to `nav`, or it ships as an orphan page nothing links to.
+
+Also fixed: `site_url` still said `github.io/simple-kanban/`, and `nav` was missing ADRs 0017–0019,
+milestones 5/6/7, and `guides/edge-hardening.md`.
+
+### On making it look like the product
+
+The site was styled to the app's "Graphite (Zinc & Teal)" palette by copying the tokens out of
+`frontend/src/app.css` into `docs/guide/assets/stylesheets/pandan.css`, with a brand glyph rebuilt as
+SVG (the app's is CSS-drawn `<i>` elements, so there was no asset to reuse).
+
+Two things worth remembering:
+
+**Both palettes now carry a `media` key,** so the site follows the reader's OS theme like the app does.
+Without it Material always opens light regardless of preference.
+
+**`overflow: hidden` on `.md-typeset .highlight` silently truncates long code lines.** It was added to
+make the border-radius clip the inner background, and it killed horizontal scrolling — long `curl`
+URLs were visibly cut off mid-word in a screenshot. Caught only by *looking* at the rendered page,
+which is the argument for screenshotting a theme change rather than trusting that the build is green.
+`npx playwright screenshot --color-scheme=dark --viewport-size=…` is enough; no test harness needed.
+
+### Takeaway
+
+The mechanics of onboarding are in good shape: the binary, the provenance string, the file
+permissions, the exit codes and the error contract all behaved. **Every real problem was a
+documentation problem** — a misleading message, an undocumented verb, and three claims that had been
+true once. That is a better failure mode than the reverse, and it is also the one that a repo which
+tells you to trust the code over the docs will keep producing, so periodic cold-start runs like this
+one are worth repeating.
