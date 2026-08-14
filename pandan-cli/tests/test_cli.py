@@ -2185,6 +2185,42 @@ def test_all_selectors_missing_still_reports_them(monkeypatch, env, capsys):
     assert "(unresolved: KAN-404)" in out
 
 
+def test_unresolved_survives_fields_projection(monkeypatch, env, capsys):
+    """The regression that shipped: `--fields` returns early from `_humanize` via
+    `_project_rows`, so the projected rendering dropped the report entirely — in the
+    combination an agent is most likely to use, since `--refs --fields` is the cheap
+    read. Found by running it against production, not by the suite."""
+    patch_client(
+        monkeypatch,
+        FakeClient(result={"cards": [CARD], "unresolved": ["KAN-404"]}),
+    )
+    code = cli.run(
+        ["list", "--board", "3", "--refs", "KAN-404", "--fields", "ticket_number,column"]
+    )
+    assert code == cli.EXIT_OK
+    assert "(unresolved: KAN-404)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["list", "--board", "3", "--refs", "KAN-404"],
+        ["list", "--board", "3", "--refs", "KAN-404", "--fields", "ticket_number"],
+        ["list", "--board", "3", "--refs", "KAN-404", "--full"],
+    ],
+)
+def test_every_human_rendering_path_reports_unresolved(monkeypatch, env, capsys, argv):
+    """One case per exit out of `_humanize`. The point is the *set*: a miss must not
+    be silent on ANY human path, so a fourth exit added later fails here rather than
+    quietly reintroducing the bug above."""
+    patch_client(
+        monkeypatch,
+        FakeClient(result={"cards": [CARD], "unresolved": ["KAN-404"]}),
+    )
+    assert cli.run(argv) == cli.EXIT_OK
+    assert "(unresolved: KAN-404)" in capsys.readouterr().out
+
+
 def test_structured_output_carries_unresolved(monkeypatch, env, capsys):
     fake_result = {"cards": [], "unresolved": ["KAN-404"]}
     patch_client(monkeypatch, FakeClient(result=fake_result))
