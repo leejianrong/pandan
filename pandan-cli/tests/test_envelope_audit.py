@@ -157,6 +157,11 @@ NON_ENVELOPE_KEYS = {
     "blocked_by": "list_dependencies, beside `card_id`",
     "blocks": "list_dependencies, beside `card_id`",
     "next_cursor": "a pagination string beside `cards`/`activity`, never rows itself",
+    "unresolved": (
+        "issue #254 — the ids=/refs= selectors that matched nothing, a string list "
+        "beside `cards`; rendered by `_humanize`'s `_CARD_ENVELOPES` branch as an "
+        "`(unresolved: …)` line, never rows itself"
+    ),
 }
 
 
@@ -181,7 +186,7 @@ def test_the_scanner_actually_found_the_shapes_it_claims_to():
     # `created`, the very key `batch-create` already put in `_LIST_ENVELOPES`.
     assert keys["apply_template"] == keys["create_cards"]
     # Shapes 2 + 3: built into a local, one key by literal and one by subscript.
-    assert keys["list_cards"] == {"cards", "next_cursor"}
+    assert keys["list_cards"] == {"cards", "next_cursor", "unresolved"}
     assert keys["list_activity"] == {"activity", "next_cursor"}
     # The passthrough contributes nothing — a single entity is not an envelope.
     assert keys["get_card"] == set()

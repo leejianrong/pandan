@@ -100,7 +100,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import httpx
-from pandan_client import PandanApiError, PandanClient
+from pandan_client import PandanApiError, PandanClient, split_card_selectors
 
 from . import build_info, context, toon
 from .config import (
@@ -544,11 +544,17 @@ def _humanize(
     # list_cards; create_cards'/apply_template's `created` (KAN-502); update_cards'
     # `updated` (KAN-519 — the audit finding, see ``_CARD_ENVELOPES``).
     if envelope in _CARD_ENVELOPES:
-        if not rows:
-            return f"(no {envelope})"
-        lines = [_card_line(c) for c in rows]
+        # `(no cards)` stays the empty rendering, but it is now a *line* rather than
+        # an early return: a batch read (issue #254) where every selector missed has
+        # no rows and yet is precisely the case that must not render as silence.
+        lines = [_card_line(c) for c in rows] if rows else [f"(no {envelope})"]
         if result.get("next_cursor"):
             lines.append(f"(more — next cursor: {result['next_cursor']})")
+        if result.get("unresolved"):
+            # The selectors an ids=/refs= read matched nothing for. Printed for the
+            # same reason the API reports them at all: omitting a miss silently is
+            # the one option issue #254 ruled out.
+            lines.append(f"(unresolved: {', '.join(result['unresolved'])})")
         return "\n".join(lines)
     if envelope == "boards":  # list_boards
         return "\n".join(_board_line(b) for b in rows) if rows else "(no boards)"
@@ -1747,8 +1753,16 @@ def _resolve_epic_opt(client: PandanClient, raw: str | int | None) -> int | None
 
 
 def _cmd_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    # --refs takes one mixed list of ids and/or tickets (issue #254); the shared
+    # splitter puts each in the API's ids=/refs= bucket. A batch read is bounded by
+    # the server's selector cap, so --limit is refused there rather than truncating.
+    ids = refs = None
+    if getattr(args, "refs", None):
+        ids, refs = split_card_selectors(args.refs)
     return client.list_cards(
         board_id=_resolve_board(args.board, config),
+        ids=ids,
+        refs=refs,
         column=args.column,
         epic_id=_resolve_epic_opt(client, args.epic),
         cycle_id=args.cycle,
@@ -2722,6 +2736,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_list = sub.add_parser("list", parents=[common], help="list / query cards")
     p_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_list.add_argument(
+        "--refs",
+        metavar="REFS",
+        help=(
+            "read a known set of cards in ONE request: a comma-separated list of ids "
+            "and/or tickets (e.g. 'KAN-12,45,KAN-9'). Selectors that match nothing are "
+            "omitted and listed under `unresolved`. Max 100; not combinable with --limit"
+        ),
+    )
     p_list.add_argument("--column", choices=COLUMNS, help="filter by column")
     p_list.add_argument(
         "--epic", type=_id_or_ticket_arg, metavar="EPIC",

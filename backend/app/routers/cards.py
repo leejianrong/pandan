@@ -2,7 +2,8 @@
 
 Mounted by ``main.py`` under ``/api/v1`` (e.g. ``/api/v1/cards``):
 
-- GET    /cards         — list/query cards (filter + keyset pagination; see list_cards)
+- GET    /cards         — list/query cards (filter + keyset pagination; also the
+                          batch read by ``ids=``/``refs=``, issue #254; see list_cards)
 - POST   /cards         — create a card (appended to the end of its column)
 - GET    /cards/{id}    — read one card
 - PATCH  /cards/{id}    — edit fields (title/description/story_points/assignee)
@@ -18,6 +19,7 @@ boards. See :mod:`app.authz`.
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import datetime
@@ -46,6 +48,7 @@ from ..ordering import next_position, renumber_column
 from ..pagination import NEXT_CURSOR_HEADER, decode_cursor, encode_cursor
 from ..schemas import (
     MAX_BATCH_ITEMS,
+    MAX_CARD_SELECTORS,
     CardBatchUpdateItem,
     CardCreate,
     CardMove,
@@ -63,6 +66,107 @@ from ..schemas import (
 from .boards import resolve_board_id
 
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+# --- batch read by id / ticket ref (issue #254) -------------------------------
+# The header a batch read uses to name the selectors that came back with nothing.
+# A header, not a body field, because the response body is a bare ``CardRead[]``
+# and the SPA depends on that shape; ``X-Next-Cursor`` set the same precedent.
+UNRESOLVED_HEADER = "X-Unresolved-Selectors"
+
+# A ticket ref as the CLI displays it. Both prefixes parse, because a well-formed
+# ``EPIC-3`` is a real ticket that simply is not a card — that is an *unresolved*
+# selector (reported), not malformed input (rejected). Anything else is a client
+# bug and 422s.
+_TICKET_RE = re.compile(r"^(KAN|EPIC)-\d+$", re.IGNORECASE)
+
+
+def _split_selectors(raw: str, *, param: str) -> list[str]:
+    """Split a comma-separated selector list, preserving order and dropping repeats.
+
+    Order is preserved so the unresolved report reads back in the caller's own terms;
+    duplicates are dropped so ``ids=7,7`` cannot be reported as one hit and one miss.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        key = token.upper()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(token)
+    if not out:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{param} was given but contained no selectors",
+        )
+    return out
+
+
+def _parse_card_selectors(
+    ids: str | None, refs: str | None
+) -> tuple[list[str], list[int], list[str]]:
+    """Parse ``ids``/``refs`` into (original tokens, numeric ids, ticket refs).
+
+    Malformed input 422s rather than silently resolving to nothing: ``ids=abc`` is a
+    client bug, and reporting it as "unresolved" would let a broken caller look like
+    one asking about a deleted card.
+    """
+    tokens: list[str] = []
+    numeric: list[int] = []
+    tickets: list[str] = []
+
+    if ids is not None:
+        for token in _split_selectors(ids, param="ids"):
+            if not token.isdigit():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=f"ids must be numeric card ids, got {token!r}",
+                )
+            tokens.append(token)
+            numeric.append(int(token))
+
+    if refs is not None:
+        for token in _split_selectors(refs, param="refs"):
+            if not _TICKET_RE.match(token):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=f"refs must be tickets like 'KAN-12', got {token!r}",
+                )
+            tokens.append(token)
+            tickets.append(token.upper())
+
+    # Capped, and a documented 422 rather than a silent truncation — a caller that
+    # asked for 150 refs and got 100 cards has no way to tell that from 50 misses.
+    if len(tokens) > MAX_CARD_SELECTORS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"too many selectors: {len(tokens)} (max {MAX_CARD_SELECTORS}). "
+                "Split the read into batches."
+            ),
+        )
+    return tokens, numeric, tickets
+
+
+def _unresolved_selectors(tokens: Sequence[str], cards: Sequence[Card]) -> list[str]:
+    """The requested selectors that no returned card answers to.
+
+    Computed from what actually came back, so it covers every reason a selector can
+    miss with one rule: the card never existed, it is soft-deleted, or it sits on a
+    board the caller cannot see. Deliberately *not* distinguished — telling an
+    outsider "that id exists but is not yours" would leak the row's existence, which
+    is exactly what the owner-scoping in the query is there to prevent.
+    """
+    found_ids = {str(card.id) for card in cards}
+    found_tickets = {card.ticket_number.upper() for card in cards}
+    return [
+        token
+        for token in tokens
+        if token not in found_ids and token.upper() not in found_tickets
+    ]
 
 
 def _get_or_404(db: Session, card_id: int) -> Card:
@@ -298,6 +402,8 @@ def list_cards(
     db: Session = Depends(get_db),
     principal: User = Depends(get_principal),
     board_id: int | None = None,
+    ids: str | None = None,
+    refs: str | None = None,
     column: ColumnEnum | None = None,
     epic_id: int | None = None,
     cycle_id: int | None = None,
@@ -319,6 +425,30 @@ def list_cards(
     **Owner-scoped (V8):** results are limited to boards the caller owns. A
     ``board_id`` naming a board you don't own is a ``403`` (not a silently-empty
     list).
+
+    **Batch read by id / ticket ref (issue #254):** ``ids=12,45,67`` and/or
+    ``refs=KAN-12,KAN-45`` fetch a known set of cards in **one** request, replacing an
+    N-round-trip fan-out (the motivating case is kaya rendering ``[[KAN-12]]``
+    wikilinks — a spec note with forty refs was forty reads per render). Both are
+    comma-separated, order-preserving and de-duplicated; they OR with each other and
+    AND with every filter below, so ``refs=…&column=done`` is "which of these are
+    done". Combined they are capped at ``MAX_CARD_SELECTORS`` (default 100) — over it
+    is a ``422``, never a silent truncation.
+
+    A selector that resolves to nothing is **omitted from the body and named in the
+    ``X-Unresolved-Selectors`` response header** (comma-separated, in the order given).
+    That is the deliberate choice between the two defensible answers: a renderer must
+    not have one bad ref blank the whole note, but a miss must not be silent either.
+    The header is present only when something missed, so its absence means a complete
+    answer. Unknown, soft-deleted and not-yours all report identically — distinguishing
+    them would leak whether a row exists on a board you cannot see. Malformed input is
+    a different thing and 422s: ``ids=abc``, or a ``refs`` token that is not a
+    ``KAN-``/``EPIC-`` ticket. (A well-formed ``EPIC-3`` parses and then resolves to
+    nothing, because it is a real ticket that is not a card.)
+
+    Because the unresolved report is computed from what came back, ``ids``/``refs``
+    **cannot be combined with ``limit`` or ``cursor``** (``422``): a truncated page
+    would report visible cards as misses. The selector cap already bounds the result.
 
     Filters (all optional, AND-ed): ``board_id`` (cards on that board — the SPA
     always sends it to scope the view; omitted → all *your* boards); ``column``;
@@ -370,6 +500,28 @@ def list_cards(
     caps a top-N by that order. The body stays a bare ``CardRead[]`` so the SPA is
     unaffected; it re-sorts by ``position`` per column client-side.
     """
+    # Batch read by id / ticket ref (issue #254). Parsed before anything else so a
+    # malformed selector fails before any query work.
+    selector_tokens: list[str] = []
+    selector_ids: list[int] = []
+    selector_refs: list[str] = []
+    batch_read = ids is not None or refs is not None
+    if batch_read:
+        selector_tokens, selector_ids, selector_refs = _parse_card_selectors(ids, refs)
+        # Pagination would corrupt the unresolved report: a page cut short leaves
+        # real, visible cards looking like misses, and the caller cannot tell the
+        # difference. The selector list is already capped, so paging it is
+        # meaningless anyway — say so instead of silently returning a wrong report.
+        if cursor is not None or limit is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "ids/refs cannot be combined with limit or cursor — a batch read "
+                    f"is already bounded by the {MAX_CARD_SELECTORS}-selector cap, and "
+                    "truncating it would misreport the unresolved selectors"
+                ),
+            )
+
     # Treat an empty/whitespace-only ``q`` as absent (a true no-op, R5 back-compat).
     q_text = q.strip() if q is not None else None
     q_active = bool(q_text)
@@ -392,6 +544,14 @@ def list_cards(
     else:
         # No board named → scope to every board the caller owns.
         query = query.where(Card.board_id.in_(visible_board_ids(principal)))
+    if batch_read:
+        # OR across the two selector kinds (a card matches by id *or* by ticket), but
+        # AND-ed with every other filter and with the owner-scoping above — so a
+        # selector for a board you cannot see resolves to nothing and is reported as
+        # unresolved, never as a 403 that would confirm the row exists.
+        query = query.where(
+            or_(Card.id.in_(selector_ids), Card.ticket_number.in_(selector_refs))
+        )
     if column is not None:
         query = query.where(Card.column == column.value)
     if epic_id is not None:
@@ -494,6 +654,14 @@ def list_cards(
     if sort is None and not q_active and limit is not None and len(cards) == limit:
         last = cards[-1]
         response.headers[NEXT_CURSOR_HEADER] = encode_cursor(last.updated_at, last.id)
+
+    # Name the selectors that came back with nothing (issue #254). Emitted only when
+    # something actually missed, so its presence is the signal — a caller can treat
+    # "header absent" as "you got everything you asked for" without parsing it.
+    if batch_read:
+        missing = _unresolved_selectors(selector_tokens, cards)
+        if missing:
+            response.headers[UNRESOLVED_HEADER] = ",".join(missing)
 
     _attach_dependencies(db, cards)
     return cards

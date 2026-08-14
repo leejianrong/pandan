@@ -107,6 +107,46 @@ pandan get KAN-591 --full
 pandan get 591              # numeric id works as well as the ticket
 ```
 
+### Many cards at once
+
+When you already know which cards you want, `--refs` reads them in **one** request instead of one
+`get` each. Ids and tickets can be mixed freely:
+
+```bash
+pandan list --refs KAN-12,45,KAN-9
+```
+
+This matters when something resolves a list of references — rendering the `[[KAN-12]]` links in a
+note, building a report, or an agent following up on a handful of tickets. Forty refs is one request
+rather than forty.
+
+A selector that matches nothing is left out of the results and listed separately, so one bad
+reference never blanks the whole answer:
+
+```console
+$ pandan list --refs KAN-12,KAN-404
+KAN-12	todo	Cursor pagination	pts=3
+(unresolved: KAN-404)
+```
+
+`unresolved` covers every reason a card did not come back — it never existed, it is in the trash, or
+it belongs to someone else. Those are deliberately not distinguished: saying "that one exists but is
+not yours" would tell you something about a board you cannot see.
+
+A few limits worth knowing:
+
+- **100 selectors** per request. Over that is an error, not a quietly shortened list.
+- **`--refs` cannot be combined with `--limit`.** A truncated page would make real cards look
+  missing, and you would have no way to tell.
+- A malformed selector (`--refs oops`) is an error rather than an unresolved one, so a typo cannot
+  masquerade as a deleted card.
+
+Combine it with filters to ask narrower questions:
+
+```bash
+pandan list --refs KAN-12,KAN-45,KAN-9 --column done   # which of these are finished?
+```
+
 ## Flow metrics
 
 ```console
