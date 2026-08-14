@@ -47,7 +47,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from mcp.server import MCPServer
-from pandan_client import PandanClient
+from pandan_client import PandanClient, split_card_selectors
 
 from .config import load_config
 from .schema import compact_advertised_schemas
@@ -175,6 +175,7 @@ def delete_board(board_id: int) -> dict[str, Any]:
 @mcp.tool()
 def list_cards(
     board_id: int | None = None,
+    refs: str | None = None,
     column: Column | None = None,
     epic_id: int | None = None,
     cycle_id: int | None = None,
@@ -210,14 +211,23 @@ def list_cards(
     remain the response includes ``next_cursor`` to pass back as ``cursor`` (not
     available together with ``sort`` or ``q``).
 
+    **``refs`` reads a known set of stories in ONE call** — a comma-separated list of
+    ids and/or tickets, e.g. ``"KAN-12,45,KAN-9"``. Use it instead of N ``get_card``
+    calls whenever you already hold the refs. Capped at 100, cannot be combined with
+    ``limit``/``cursor``, and any selector matching nothing is left out of ``cards``
+    and named in ``unresolved`` rather than failing the call.
+
     **Pass ``fields``** — the keys to keep on each row, e.g.
     ``["ticket_number","title","column","assignee"]`` (aliases: ticket, pts). A full
     22-key page of a busy board costs ~9× a narrowed one; an unknown name errors and
     lists the valid ones. Descriptions are cut to 500 chars with a
     ``(truncated, N chars total …)`` hint — ``full=true`` returns them whole.
     """
+    ids_param, refs_param = split_card_selectors(refs) if refs else (None, None)
     result = _client_instance().list_cards(
         board_id=_board(board_id),
+        ids=ids_param,
+        refs=refs_param,
         column=column,
         epic_id=epic_id,
         cycle_id=cycle_id,

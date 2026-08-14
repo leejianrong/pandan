@@ -49,6 +49,10 @@ def _int_env(name: str, default: int) -> int:
 # the real amplification lever. The body-size ceiling env var lives in ``app.main``.
 MAX_BATCH_ITEMS = _int_env("MAX_BATCH_ITEMS", 500)  # cards per PATCH /cards/batch
 MAX_TEMPLATE_CARDS = _int_env("MAX_TEMPLATE_CARDS", 200)  # cards per template
+# Selectors per batch read (GET /cards?ids=/refs=, issue #254). Lower than the write
+# batch on purpose: this one arrives in the URL, and the point of the endpoint is to
+# replace an N-round-trip fan-out, not to become an alternative full-table read.
+MAX_CARD_SELECTORS = _int_env("MAX_CARD_SELECTORS", 100)
 
 
 class ColumnEnum(str, Enum):

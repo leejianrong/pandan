@@ -24,7 +24,7 @@ Every board-scoped tool takes an optional `board_id`. Omit it and it falls back 
 
 | Tool | What it does |
 | --- | --- |
-| `list_cards` | Query cards. Filter by column, epic, cycle, assignee, priority, label, due date, needs-human, or full text. |
+| `list_cards` | Query cards. Filter by column, epic, cycle, assignee, priority, label, due date, needs-human, or full text. `refs` reads a known set of cards in one call — see below. |
 | `get_card` | One card in full: description, labels, dependencies both ways, links, priority, due date. |
 | `create_card` | Create one card. |
 | `create_cards` | Create several. Fail-fast, **not** atomic. |
@@ -134,6 +134,32 @@ Available on:
 
 The other reads are deliberately left unshaped, because they return between 7 and 474 tokens each and
 adding arguments to shape a small payload costs more schema than it saves.
+
+### Reading a known set of cards
+
+When you already hold the references, `refs` fetches them all in one call rather than N `get_card`
+round trips:
+
+```json
+{
+  "name": "list_cards",
+  "arguments": { "refs": "KAN-12,45,KAN-9", "fields": ["ticket_number", "title", "column"] }
+}
+```
+
+Ids and tickets mix freely in the one string. Combined with `fields` this is the cheapest way to
+resolve a list of references, which is why it exists: an agent following up on a handful of tickets
+was previously paying a full round trip each.
+
+Anything that matches nothing comes back under `unresolved` instead of failing the call, so one stale
+reference does not cost you the other thirty-nine:
+
+```json
+{ "cards": [ … ], "unresolved": ["KAN-404"] }
+```
+
+Capped at 100 selectors, and not combinable with `limit`/`cursor` — a truncated page would report
+real cards as unresolved.
 
 ## Why 49 tools
 

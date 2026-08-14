@@ -91,7 +91,7 @@ never returned by any read.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/api/v1/cards` | Filter, search, sort, paginate. |
+| `GET` | `/api/v1/cards` | Filter, search, sort, paginate. Also the batch read — see below. |
 | `POST` | `/api/v1/cards` | |
 | `GET` | `/api/v1/cards/{card_id}` | |
 | `PATCH` | `/api/v1/cards/{card_id}` | Field edits only. Cannot move. |
@@ -109,6 +109,35 @@ never returned by any read.
 | `DELETE` | `/api/v1/cards/{card_id}/links/{link_id}` | |
 | `GET` | `/api/v1/cards/{card_id}/comments` | |
 | `POST` | `/api/v1/cards/{card_id}/comments` | |
+
+#### Reading many cards by id or ticket
+
+`GET /api/v1/cards` doubles as a batch read, so resolving a known set of references costs one request
+rather than one per card:
+
+```
+GET /api/v1/cards?ids=12,45,67
+GET /api/v1/cards?refs=KAN-12,KAN-45
+```
+
+Both are comma-separated, order-preserving and de-duplicated. They OR with each other and AND with
+every other filter, so `?refs=…&column=done` asks which of those cards are done.
+
+Selectors that resolve to nothing are **omitted from the body and named in the
+`X-Unresolved-Selectors` response header**, comma-separated, in the order given. The header appears
+only when something missed, so its absence means you got everything you asked for.
+
+Unknown, trashed and not-yours all report identically — distinguishing them would reveal whether a row
+exists on a board the caller cannot see. Malformed input is a different case and returns `422`:
+`ids=abc`, or a `refs` token that is not a `KAN-`/`EPIC-` ticket. A well-formed `EPIC-3` parses and
+then resolves to nothing, since it is a real ticket that is not a card.
+
+Two limits, both `422` rather than silent:
+
+- At most **100 selectors** per request (`MAX_CARD_SELECTORS`), counted across `ids` and `refs`
+  together.
+- `ids`/`refs` **cannot be combined with `limit` or `cursor`**, because a truncated page would report
+  visible cards as unresolved.
 
 !!! warning "Move is a separate endpoint from edit"
 

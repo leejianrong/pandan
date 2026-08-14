@@ -104,6 +104,56 @@ def test_list_cards_scopes_by_board_id():
     assert seen["params"] == {"board_id": "7"}
 
 
+# --- batch read by id / ticket ref (issue #254) ----------------------------
+
+
+def test_list_cards_sends_ids_and_refs():
+    handler, seen = capture(httpx.Response(200, json=[{"id": 12}]))
+    make_client(handler).list_cards(ids="12,45", refs="KAN-9")
+    assert seen["params"] == {"ids": "12,45", "refs": "KAN-9"}
+
+
+def test_list_cards_lifts_the_unresolved_header_into_the_envelope():
+    """The miss must reach the caller without them knowing the API reports in
+    headers — omitting it silently is the one option issue #254 ruled out."""
+    handler, _ = capture(
+        httpx.Response(
+            200,
+            json=[{"id": 12}],
+            headers={"X-Unresolved-Selectors": "99,KAN-404"},
+        )
+    )
+    out = make_client(handler).list_cards(ids="12,99", refs="KAN-404")
+    assert out == {"cards": [{"id": 12}], "unresolved": ["99", "KAN-404"]}
+
+
+def test_no_unresolved_key_when_nothing_missed():
+    """Absence is the signal, so the key must not appear as an empty list."""
+    handler, _ = capture(httpx.Response(200, json=[{"id": 12}]))
+    out = make_client(handler).list_cards(ids="12")
+    assert out == {"cards": [{"id": 12}]}
+    assert "unresolved" not in out
+
+
+def test_split_card_selectors_buckets_ids_and_tickets():
+    from pandan_client import split_card_selectors
+
+    assert split_card_selectors("KAN-12,45,KAN-9") == ("45", "KAN-12,KAN-9")
+    assert split_card_selectors("1,2,3") == ("1,2,3", None)
+    assert split_card_selectors("KAN-1") == (None, "KAN-1")
+    assert split_card_selectors("") == (None, None)
+    # Whitespace around a token is the caller's formatting, not a selector.
+    assert split_card_selectors(" 7 , KAN-8 ") == ("7", "KAN-8")
+
+
+def test_split_card_selectors_does_not_validate_ticket_shape():
+    """Validation is the API's 422 to raise; duplicating the rule client-side is
+    how the two drift. Anything non-numeric is simply passed through as a ref."""
+    from pandan_client import split_card_selectors
+
+    assert split_card_selectors("not-a-ticket") == (None, "not-a-ticket")
+
+
 def test_list_epics_scopes_by_board_id_and_wraps_result():
     handler, seen = capture(httpx.Response(200, json=[{"id": 3, "name": "E"}]))
     out = make_client(handler).list_epics(board_id=7)

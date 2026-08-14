@@ -393,6 +393,8 @@ def test_list_maps_all_filters(monkeypatch, env):
             "list_cards",
             {
                 "board_id": 3,
+                "ids": None,
+                "refs": None,
                 "column": "done",
                 "epic_id": 5,
                 "cycle_id": None,
@@ -2138,6 +2140,56 @@ def test_config_set_token_stdin_never_needs_argv(monkeypatch, capsys):
 
 def test_config_set_rejects_non_integer_board_id():
     assert cli.run(["config", "set", "--board-id", "abc"]) == cli.EXIT_ERROR
+
+
+# --- batch read: list --refs (issue #254) ----------------------------------
+
+
+def test_list_refs_splits_ids_from_tickets(monkeypatch, env):
+    """One mixed list on the CLI, two params on the wire — the caller should not have
+    to know which bucket each token belongs in."""
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    assert cli.run(["list", "--board", "3", "--refs", "KAN-12,45,KAN-9"]) == cli.EXIT_OK
+    params = fake.calls[0][1]
+    assert params["ids"] == "45"
+    assert params["refs"] == "KAN-12,KAN-9"
+
+
+def test_list_without_refs_sends_neither_param(monkeypatch, env):
+    """Purely additive: an ordinary list must be unchanged on the wire."""
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    assert cli.run(["list", "--board", "3"]) == cli.EXIT_OK
+    params = fake.calls[0][1]
+    assert params["ids"] is None and params["refs"] is None
+
+
+def test_unresolved_selectors_are_printed_not_swallowed(monkeypatch, env, capsys):
+    """The header exists so a miss is never silent; the human renderer has to honour
+    that or the CLI reintroduces exactly the problem."""
+    patch_client(
+        monkeypatch,
+        FakeClient(result={"cards": [CARD], "unresolved": ["99", "KAN-404"]}),
+    )
+    assert cli.run(["list", "--board", "3", "--refs", "99,KAN-404"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "(unresolved: 99, KAN-404)" in out
+
+
+def test_all_selectors_missing_still_reports_them(monkeypatch, env, capsys):
+    """The regression this most invites: no rows used to return `(no cards)` early,
+    which would drop the one piece of information the caller needs."""
+    patch_client(monkeypatch, FakeClient(result={"cards": [], "unresolved": ["KAN-404"]}))
+    assert cli.run(["list", "--board", "3", "--refs", "KAN-404"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "(no cards)" in out
+    assert "(unresolved: KAN-404)" in out
+
+
+def test_structured_output_carries_unresolved(monkeypatch, env, capsys):
+    fake_result = {"cards": [], "unresolved": ["KAN-404"]}
+    patch_client(monkeypatch, FakeClient(result=fake_result))
+    assert cli.run(["list", "--board", "3", "--refs", "KAN-404", "--format", "json"]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out)["unresolved"] == ["KAN-404"]
 
 
 # --- config unset + require_board (issue #277) ------------------------------

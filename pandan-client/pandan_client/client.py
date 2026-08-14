@@ -81,6 +81,26 @@ def _clean(fields: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in fields.items() if value is not None}
 
 
+def split_card_selectors(raw: str) -> tuple[str | None, str | None]:
+    """Split one mixed selector list into the API's ``(ids, refs)`` pair.
+
+    The REST endpoint keeps ``ids=`` and ``refs=`` separate, which is right for a
+    machine caller that already knows which it holds. A human or an agent usually
+    does not — a note's wikilinks are ``KAN-12``, a script's are numeric, and a list
+    pasted from somewhere is both. So the CLI and the MCP server take one mixed list
+    and this puts each token in the right bucket, exactly as every other
+    id-or-ticket argument in the CLI already behaves.
+
+    Tokens are not validated here beyond "is it all digits" — a malformed selector is
+    the API's ``422`` to raise, and duplicating that rule client-side is how the two
+    drift. Returns ``(None, None)`` for an all-empty input so the caller sends
+    neither param.
+    """
+    ids = [t.strip() for t in raw.split(",") if t.strip().isdigit()]
+    refs = [t.strip() for t in raw.split(",") if t.strip() and not t.strip().isdigit()]
+    return (",".join(ids) or None, ",".join(refs) or None)
+
+
 class PandanClient:
     def __init__(
         self,
@@ -244,6 +264,8 @@ class PandanClient:
         self,
         *,
         board_id: int | None = None,
+        ids: str | None = None,
+        refs: str | None = None,
         column: str | None = None,
         epic_id: int | None = None,
         cycle_id: int | None = None,
@@ -262,6 +284,9 @@ class PandanClient:
         params = _clean(
             {
                 "board_id": board_id,
+                # Batch read by numeric id / ticket ref (issue #254).
+                "ids": ids,
+                "refs": refs,
                 "column": column,
                 "epic_id": epic_id,
                 "cycle_id": cycle_id,
@@ -285,6 +310,12 @@ class PandanClient:
         next_cursor = response.headers.get("X-Next-Cursor")
         if next_cursor:
             result["next_cursor"] = next_cursor
+        # Selectors from an ids=/refs= batch read that matched nothing (issue #254).
+        # Lifted out of its header into the envelope, and only when non-empty, so a
+        # caller sees the miss without having to know the endpoint reports in headers.
+        unresolved = response.headers.get("X-Unresolved-Selectors")
+        if unresolved:
+            result["unresolved"] = unresolved.split(",")
         return result
 
     def list_epics(self, *, board_id: int | None = None) -> dict[str, Any]:

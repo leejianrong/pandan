@@ -9,8 +9,13 @@ adapters never drift (DRY; API-first, ADR 0005). Public surface:
 """
 from __future__ import annotations
 
-from .client import DEFAULT_TIMEOUT, PandanApiError, PandanClient
+from .client import DEFAULT_TIMEOUT, PandanApiError, PandanClient, split_card_selectors
 
-__all__ = ["DEFAULT_TIMEOUT", "PandanApiError", "PandanClient"]
+__all__ = [
+    "DEFAULT_TIMEOUT",
+    "PandanApiError",
+    "PandanClient",
+    "split_card_selectors",
+]
 
 __version__ = "0.1.0"
