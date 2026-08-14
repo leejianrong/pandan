@@ -187,8 +187,22 @@ jobs:
           main_sha=$(git rev-parse HEAD)
 
           # Walk Deploy runs newest-first for the first one that really deployed.
+          #
+          # `event=workflow_run` is LOAD-BEARING, not a tidy-up. This watcher is
+          # itself a job in deploy.yml, so every one of its own scheduled runs is a
+          # `Deploy` run — eight a day on the 3-hourly cron, none of which can ever
+          # contain a `Deploy to Fly.io` job (the deploying jobs are hard-gated on
+          # `event_name == 'workflow_run'`). Unfiltered, the watcher's own runs
+          # evict the real deploys from any fixed window: within ~5 days 39 of the
+          # last 45 Deploy runs were this cron, the newest genuine deploy sat 46
+          # back, and the watcher failed every 3 hours with "No Deploy run in the
+          # last 40 has a successful 'Deploy to Fly.io' job" while production was
+          # in fact exactly on main's tip. A watcher that cries wolf on its own
+          # heartbeat is worse than no watcher — it trains you to ignore the alarm
+          # that matters. Filtering to `workflow_run` makes the window mean what it
+          # says: the last 40 times a merge to main could have shipped.
           deployed=""
-          for run_id in $(gh api "repos/$REPO/actions/workflows/deploy.yml/runs?per_page=40" \
+          for run_id in $(gh api "repos/$REPO/actions/workflows/deploy.yml/runs?per_page=40&event=workflow_run" \
                             --jq '.workflow_runs[].id'); do
             shipped=$(gh api "repos/$REPO/actions/runs/$run_id/jobs" \
                         --jq '[.jobs[] | select(.name == "Deploy to Fly.io" and .conclusion == "success")] | length')
