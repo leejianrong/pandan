@@ -113,6 +113,13 @@ jobs:
               # KAN-484 shipped those tests and reported this hole from outside
               # its fence.
               - 'scripts/git-hooks/**'
+              # And again (KAN-721): mcp/tests/test_freeze_interpreter_guard.py
+              # exercises scripts/check-freeze-interpreter.sh, the release's
+              # pre-freeze glibc guard. It lives outside mcp/ for the same reason
+              # the hook does, and this is the same hole — doubly worth closing
+              # here, because the guard it replaced was itself inert and nothing
+              # noticed for months.
+              - 'scripts/check-freeze-interpreter.sh'
               # And once more (KAN-586): mcp/tests/test_deploy_gates.py pins the
               # CI/Deploy/auto-merge invariants that keep a merge to main actually
               # reaching production — the concurrency key just above, deploy.yml's

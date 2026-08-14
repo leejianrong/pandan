@@ -24,6 +24,16 @@ name: Release CLI binary
 # because it ran on the same fresh image it built on. The macOS leg is
 # unaffected and builds on its native runner exactly as before.
 #
+# THAT FIX IS NOW GUARDED BY SOMETHING THAT CAN FAIL (KAN-721). The original
+# guard ran `strings` over the finished onefile, and was measured to be inert:
+# it sees only PyInstaller's prebuilt bootloader, so it reported `GLIBC_2.14`
+# for a definitively broken asset and for a good one alike. It has been replaced
+# by `scripts/check-freeze-interpreter.sh`, which runs BEFORE the freeze and
+# reads the glibc floor of the very libpython PyInstaller is about to copy in —
+# the actual root cause, and a check that has been watched failing (against this
+# repo's own system CPython, which needs GLIBC_2.35). The smoke test below,
+# which RUNS the asset inside the glibc-2.28 container, remains the proof.
+#
 # TRIGGER: version tags only (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
 # This never runs on a PR or a branch push — publishing is a deliberate,
 # tag-gated ops action (mirrors the repo's tag convention; v0.1.0 already exists).
@@ -99,6 +109,18 @@ jobs:
       - name: Install deps (incl. build group)
         run: uv sync --frozen --group build --python 3.12
 
+      # Regression guard for KAN-81, replacing the `strings` tripwire that used to
+      # sit AFTER the freeze (KAN-721). It judges the interpreter uv just resolved
+      # — PyInstaller copies that interpreter's libpython into the onefile, so its
+      # glibc floor IS the asset's glibc floor — which is both the root cause and
+      # the only part of this that can be watched failing. Runs BEFORE the freeze,
+      # so a wrong interpreter costs a second instead of a whole build. Linux only:
+      # the floor is a glibc concept and the macOS leg has no equivalent.
+      - name: Guard — the interpreter about to be frozen has a GLIBC <= 2.28 floor
+        if: matrix.container != ''
+        working-directory: .
+        run: ./scripts/check-freeze-interpreter.sh pandan-cli/.venv/bin/python 28
+
       # Stamp the commit into the package BEFORE freezing (V50, KAN-435) so the
       # shipped binary's `--version` prints `pandan <ver> (<sha>)` instead of a
       # bare version that a stale install shares with current source. Writes the
@@ -124,44 +146,13 @@ jobs:
           --add-data "pandan_cli/skills:pandan_cli/skills"
           packaging/pyinstaller_entry.py
 
-      # Regression guard (KAN-81, linux only): assert the built onefile requires
-      # no GLIBC symbol newer than 2.28. `strings` only sees the outer bootloader
-      # (not the extracted libpython), so this is a cheap tripwire — the real
-      # proof is the smoke-test step below, which actually RUNS the binary inside
-      # this glibc-2.28 container. If someone reverts the linux leg to a newer
-      # runner, the bootloader itself starts requiring a newer GLIBC and this
-      # trips before we ever ship.
-      - name: Guard — binary requires GLIBC <= 2.28
-        if: matrix.container != ''
-        run: |
-          set -euo pipefail
-          bin="dist/${{ matrix.asset }}"
-          maxglibc=$(strings "$bin" | grep -oE 'GLIBC_2\.[0-9]+' | sort -V | tail -1)
-          echo "Highest GLIBC symbol required by $bin bootloader: ${maxglibc:-none}"
-          if [ -n "${maxglibc:-}" ]; then
-            minor=${maxglibc#GLIBC_2.}
-            if [ "$minor" -gt 28 ]; then
-              echo "::error::$bin requires $maxglibc (> GLIBC_2.28) — it will not run on Ubuntu 20.04 / Debian 11 / RHEL 8."
-              exit 1
-            fi
-          fi
-          # Best-effort second signal: PyInstaller onefile extracts its bundle to
-          # a temp dir at run time. Run the binary with $TMPDIR pinned and inspect
-          # the extracted libpython with readelf. Never fail the job on extraction
-          # trouble — the "runs under glibc 2.28" smoke test below is the
-          # authoritative check; this is just extra evidence in the log.
-          if command -v readelf >/dev/null 2>&1; then
-            extract=$(mktemp -d)
-            TMPDIR="$extract" ./"$bin" --help >/dev/null 2>&1 || true
-            so=$(find "$extract" -name 'libpython3.12.so*' 2>/dev/null | head -1 || true)
-            if [ -n "$so" ]; then
-              echo "readelf GLIBC versions required by bundled $(basename "$so"):"
-              readelf -V "$so" 2>/dev/null | grep -oE 'GLIBC_2\.[0-9]+' | sort -V | uniq || true
-            else
-              echo "note: could not capture extracted libpython for readelf (onefile cleans up its temp dir); relying on the run test."
-            fi
-            rm -rf "$extract"
-          fi
+      # NOTE (KAN-721): a `strings dist/… | grep GLIBC_` guard used to sit here and
+      # has been REMOVED, not merely moved — do not reintroduce it. `strings` sees
+      # only PyInstaller's PREBUILT bootloader, whose symbols are a property of the
+      # wheel upstream shipped rather than of the build host, so the check returned
+      # the same `GLIBC_2.14` for a definitively broken asset as for a good one.
+      # The pre-freeze interpreter guard above replaces it; the smoke test below
+      # remains the authoritative proof.
 
       # Prove the frozen binary actually runs on the target OS before we ship it.
       # For linux this executes INSIDE the glibc-2.28 container, so a clean run
