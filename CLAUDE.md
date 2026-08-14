@@ -34,9 +34,11 @@ CLI was ~11× cheaper. **That gap is now largely closed from the MCP side** (KAN
 the tokens measurably were take `fields` + `full`, worth **−82% across five real reads** for **+552
 resident tokens**. **KAN-517** then measured the nine reads KAN-501 left raw and extended exactly three
 more — `list_notifications` (an unpaginated inbox: 14,326 tokens over 127 rows), `list_boards` and
-`get_epic` — for a further +222, so the resident figure is now **8,162**. The other six stay raw *on
-measurement*, at 7–474 tokens each: shaping a small payload is the opposite of the trade ADR 0019
-endorsed, and a test pins them that way. That figure counts `{name, description, input_schema}` per
+`get_epic` — for a further +222. The resident figure is now **8,391**, and the number written here has
+drifted before — it read 8,162 while `main` measured 8,266, so **re-run the script rather than quoting
+this line** (the +125 of that gap is issue #254's `refs` argument, the rest predates it). The other six
+stay raw *on measurement*, at 7–474 tokens each: shaping a small payload is the opposite of the trade
+ADR 0019 endorsed, and a test pins them that way. That figure counts `{name, description, input_schema}` per
 tool; a `tools/list` entry also carries an **`outputSchema`** worth a further **836** compact if your
 client forwards it — measured and bracketed separately in
 [ADR 0019](docs/adr/0019-mcp-surface-right-sizing.md) § *The fourth field* (KAN-518), deliberately not
@@ -85,7 +87,11 @@ construction; look there for what's done and in flight:
 A running backend serves the live, authoritative API surface at **`GET /docs`** (OpenAPI). At a
 glance it's a REST CRUD surface under `/api/v1` for **boards, cards (stories), epics, and PATs**,
 plus a card `move` endpoint, a board-less `GET /api/v1/me` (KAN-530) and an unversioned
-`GET /api/health` — **auth-required and owner-gated**
+`GET /api/health` — **auth-required and owner-gated**. `GET /api/v1/cards` doubles as a **batch read**
+(`?ids=12,45` / `?refs=KAN-12,KAN-45`, issue #254): capped at 100 selectors, not combinable with
+`limit`/`cursor`, and selectors that match nothing are omitted from the body and named in the
+`X-Unresolved-Selectors` header — unknown, trashed and not-yours report *identically*, on purpose, so
+a batch read can't become an existence oracle for boards you can't see
 (see §Configuration and §Architecture). When extending the app, follow the shaped plan in
 [docs/SHAPING.md](docs/SHAPING.md) + [docs/BREADBOARD.md](docs/BREADBOARD.md) and build in vertical
 slices, matching the existing incremental style.
@@ -130,7 +136,14 @@ uv run pytest tests/integration/test_x.py::test_name  # run a single test
 > e2e job uses a Postgres service container and caches the Chromium download by Playwright version.
 > **Not all of them are *required* checks** — required contexts are currently lint, unit, integration
 > and the frontend build, so the MCP and image jobs (which run the KAN-452/484/523/584/586 guards) can
-> be bypassed by an admin merge; tracked in KAN-596.
+> be bypassed by an admin merge; tracked in KAN-596. **The `Security scan` is also non-required, and it
+> sat red on `main` for days unnoticed** (2026-08-14, a `nanoid` high advisory) — being non-required
+> means nothing blocks on it, *not* that it is passing. It runs three steps in order — gitleaks →
+> `pip-audit` → `npm audit --audit-level=high` — so **which step failed is worth checking before
+> assuming**: a ~12s failure is gitleaks, ~50s is npm audit. Two gotchas: gitleaks scans **git
+> history**, so a secret cannot be cleared by a follow-up commit (rewrite the branch), and it happily
+> flags a high-entropy *fake* token in a test — the convention in `pandan-cli/tests/` is word-only fake
+> PATs (`pandan_pat_test`, `pandan_pat_fromfile`), which is cheaper than an allowlist entry.
 > If `uv` is unavailable, a `python -m venv` + `pip install -e .` (or install from `pyproject.toml`)
 > works too — the package is intentionally not installable (`tool.uv package = false`), so always
 > run from `backend/` (`alembic.ini` sets `prepend_sys_path = .` so `import app` resolves).
@@ -219,6 +232,14 @@ blindly":
   against the head SHA of the newest Deploy run whose `Deploy to Fly.io` *job* succeeded** — not the
   newest run whose *workflow-level* conclusion was `success`, which reads `success` with that job
   `skipped` on every docs-only merge. That distinction is the trap.
+  **The watcher blinded itself once, and the shape is worth remembering** (2026-08-14): it is a job in
+  `deploy.yml`, so its own cron runs *are* `Deploy` runs — eight a day, none able to contain a deploy
+  job — and they evicted the real deploys from its fixed 40-run window. 39 of the last 45 Deploy runs
+  were the cron, the newest genuine deploy had fallen to 46 back, and it failed every three hours with
+  "No Deploy run in the last 40…" while production sat on `main`'s exact tip. Fixed by filtering the
+  runs query to `event=workflow_run` (pinned by `test_drift_watcher_ignores_its_own_scheduled_runs`).
+  The lesson generalises past this one query: **a watcher that emits the same kind of signal it
+  samples will eventually sample itself.**
 - **Dependabot PRs are merged BY HAND — the auto-merge workflow is disabled** (2026-08-01, KAN-586).
   Dependabot still opens PRs and should keep doing so; it is the security-patch feed. But
   `.github/workflows/dependabot-auto-merge.yml` is `disabled_manually`, because a merge it armed with
@@ -257,7 +278,11 @@ checkout. Integration tests are unaffected — they spin up throwaway testcontai
 **Running e2e from a worktree — the ports are env-overridable too (KAN-391).** Playwright uses
 `reuseExistingServer` in dev, and the backend/Vite origins default to `:8000`/`:5173`; on a
 multi-project machine those ports are often held by an unrelated local app, so a worktree e2e run
-silently reuses the foreign server and every spec fails at auth (`test-login` 404s) — a false red.
+silently reuses the foreign server and every spec fails at auth — a false red. **The status code tells
+you which foreign server you hit**: `test-login` **404**s when it is our backend running without
+`E2E_AUTH_BYPASS`, but **405**s when the squatter is not a Pandan backend at all (the unmounted `POST`
+falls through to the GET-only SPA catch-all). A 405 with `/api/health` also 404ing means the port
+belongs to something else entirely — check before believing 40+ red specs.
 `FRONTEND_PORT` / `BACKEND_PORT` (read by `frontend/vite.config.ts`, `frontend/playwright.config.ts`,
 and `frontend/e2e/helpers.ts`) let a worktree run on free ports **with no source edits**, defaulting
 to `5173`/`8000` so CI and normal dev are unchanged (`API_ORIGIN` can also be set explicitly to
