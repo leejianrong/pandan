@@ -31,6 +31,19 @@ can't leak into a shell transcript / model context. Vars:
 - ``PANDAN_BOARD_ID`` — optional default board (an integer id) for board-scoped
   commands (``list``/``create``) when they omit ``--board``. Unset → the API's own
   fallback (list = all your boards; create = your earliest board).
+- ``PANDAN_REQUIRE_BOARD`` — opt-in safety switch (issue #277). When truthy, any
+  board-scoped verb that is given no ``--board`` **fails** instead of silently
+  falling back to ``board_id`` (or, with none set, to whatever the API picks).
+  Default off, so no existing invocation changes behaviour. Config-file key:
+  ``require_board``. It is **new since the rebrand**, so it has no deprecated
+  ``KANBAN_*`` spelling.
+
+  The failure mode it closes is asymmetric, which is why it is worth a whole
+  setting: a stale default on a *read* is a confusing answer, but on ``create``
+  it is a card filed on the wrong board — and with ten boards on one account,
+  nothing in the output says so. Opt-in rather than default-on because the
+  fallback is genuinely convenient on a single-board account, which is where
+  most people start.
 - ``PANDAN_MAX_TEXT_CHARS`` — the content-truncation limit in **characters**
   (V45, KAN-428): how much of a long free-text field (a card/epic
   ``description``, a comment/notification ``body``, an ``attention_note``) any
@@ -69,6 +82,7 @@ _ENV_NAMES: dict[str, tuple[str, ...]] = {
     "board_id": ("PANDAN_BOARD_ID", "KANBAN_BOARD_ID"),
     # New since the rebrand → one spelling only, no deprecated fallback to carry.
     "max_text_chars": ("PANDAN_MAX_TEXT_CHARS",),
+    "require_board": ("PANDAN_REQUIRE_BOARD",),
 }
 # Every key the config file / .mcp.json / env chain carries, in a single tuple so
 # reading, merging and re-writing the file can't drift (a `config set` that only
@@ -79,6 +93,7 @@ _ENV_API_URL = _ENV_NAMES["api_url"][0]
 _ENV_TOKEN = _ENV_NAMES["token"][0]
 _ENV_BOARD_ID = _ENV_NAMES["board_id"][0]
 _ENV_MAX_TEXT_CHARS = _ENV_NAMES["max_text_chars"][0]
+_ENV_REQUIRE_BOARD = _ENV_NAMES["require_board"][0]
 
 # The ``.mcp.json`` server key, current name first then the retired one.
 _MCP_SERVER_NAMES = ("pandan", "kanban")
@@ -116,6 +131,9 @@ class Config:
     board_id: int | None
     # V45 (KAN-428): the content-truncation limit in characters; 0 = don't truncate.
     max_text_chars: int = DEFAULT_MAX_TEXT_CHARS
+    # Issue #277: when True, a board-scoped verb with no --board is an error rather
+    # than a silent fallback. Defaults False — opting in is the user's call.
+    require_board: bool = False
 
 
 def config_file_path() -> Path:
@@ -298,6 +316,7 @@ def load_config(*, require_token: bool = True) -> Config:
         token=token,
         board_id=board_id,
         max_text_chars=_parse_max_text_chars(resolved.get("max_text_chars", "")),
+        require_board=parse_require_board(resolved.get("require_board", "")),
     )
 
 
@@ -346,11 +365,42 @@ def _parse_max_text_chars(raw: str) -> int:
     return value
 
 
+_TRUE_WORDS = frozenset({"1", "true", "yes", "on"})
+_FALSE_WORDS = frozenset({"0", "false", "no", "off"})
+
+
+def parse_require_board(raw: str) -> bool:
+    """Parse the ``require_board`` switch; empty → ``False`` (the default).
+
+    A value that is neither truthy nor falsy is a **hard error**, not a shrug. This
+    is the one setting whose whole job is to prevent a write landing on the wrong
+    board, so ``PANDAN_REQUIRE_BOARD=ture`` must not quietly resolve to "off" and
+    hand back the exact silent fallback the user asked to disable. Failing loud
+    costs a typo fix; failing soft costs a card on someone else's board.
+
+    Accepts TOML's own ``true``/``false`` as well as the shell idioms, since the
+    value arrives either from a config file or from an env var.
+    """
+    text = raw.strip().lower()
+    if not text:
+        return False
+    if text in _TRUE_WORDS:
+        return True
+    if text in _FALSE_WORDS:
+        return False
+    raise ConfigError(
+        f"{_ENV_REQUIRE_BOARD} must be one of "
+        f"{'/'.join(sorted(_TRUE_WORDS))} or {'/'.join(sorted(_FALSE_WORDS))}, "
+        f"got {raw!r}"
+    )
+
+
 def write_config_file(
     *,
     api_url: str | None = None,
     token: str | None = None,
     board_id: str | None = None,
+    require_board: bool | None = None,
 ) -> Path:
     """Merge the given values into the user config file (``0600``), preserving any
     existing keys not being set, and return its path. Only non-``None`` args are
@@ -378,6 +428,11 @@ def write_config_file(
             current[key] = val.strip()
         else:
             current.pop(key, None)  # empty string clears
+    if require_board is not None:
+        # Written explicitly even when False: `config set --no-require-board` has to
+        # be able to override a truthy value, and a key that vanished would instead
+        # fall through to .mcp.json. Env still wins over the file either way.
+        current["require_board"] = "true" if require_board else "false"
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_render_toml(current), encoding="utf-8")
@@ -385,14 +440,56 @@ def write_config_file(
     return path
 
 
+def unset_config_keys(keys: tuple[str, ...]) -> tuple[Path, tuple[str, ...]]:
+    """Remove ``keys`` from the user config file; return its path and the subset that
+    was actually present.
+
+    Exists because the file also holds the PAT (issue #277): telling a user — or an
+    agent — to "just delete the line" means opening a file at mode ``0600`` whose
+    other line is a live credential. Reporting which keys were really there lets the
+    caller distinguish "cleared" from "was not set", instead of both printing OK.
+
+    Unknown keys are the caller's to reject; this only touches ``_CONFIG_KEYS``.
+    """
+    migrate_legacy_config_file()
+    path = config_file_path()
+    current: dict[str, str] = {}
+    if path.is_file():
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+            table = _config_table(data)
+            if isinstance(table, dict):
+                current = {
+                    k: str(table[k]) for k in _CONFIG_KEYS if table.get(k) is not None
+                }
+        except (OSError, tomllib.TOMLDecodeError):
+            current = {}
+
+    removed = tuple(k for k in keys if k in current)
+    for key in removed:
+        del current[key]
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_render_toml(current), encoding="utf-8")
+    path.chmod(0o600)  # still holds the token — owner-only
+    return path, removed
+
+
 _INT_CONFIG_KEYS = ("board_id", "max_text_chars")
+_BOOL_CONFIG_KEYS = ("require_board",)
 
 
 def _render_toml(values: dict[str, str]) -> str:
     """Render the ``[pandan]`` table. The integer-valued keys are emitted as bare
-    integers when they parse as one; everything else is a quoted string. The value
-    set is tiny and known (a URL, a ``pandan_pat_…`` token, two ints), so
-    hand-rendering is safe."""
+    integers when they parse as one, the boolean ones as bare ``true``/``false``;
+    everything else is a quoted string. The value set is tiny and known (a URL, a
+    ``pandan_pat_…`` token, two ints, one bool), so hand-rendering is safe.
+
+    A bool must not be quoted: ``tomllib`` would hand back the string ``"false"``,
+    which ``parse_require_board`` reads back as ``False`` correctly today but only
+    by coincidence of the word list. Emitting real TOML keeps the file honest for
+    anything else that reads it.
+    """
     lines = [f"[{_CONFIG_TABLE_NAMES[0]}]"]
     for key in _CONFIG_KEYS:
         if key not in values:
@@ -400,6 +497,8 @@ def _render_toml(values: dict[str, str]) -> str:
         val = values[key]
         if key in _INT_CONFIG_KEYS and val.lstrip("-").isdigit():
             lines.append(f"{key} = {val}")
+        elif key in _BOOL_CONFIG_KEYS and val.strip().lower() in _TRUE_WORDS | _FALSE_WORDS:
+            lines.append(f"{key} = {'true' if val.strip().lower() in _TRUE_WORDS else 'false'}")
         else:
             escaped = val.replace("\\", "\\\\").replace('"', '\\"')
             lines.append(f'{key} = "{escaped}"')

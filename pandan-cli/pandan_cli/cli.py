@@ -104,6 +104,7 @@ from pandan_client import PandanApiError, PandanClient
 
 from . import build_info, context, toon
 from .config import (
+    _CONFIG_KEYS,
     DEFAULT_API_URL,
     DEFAULT_MAX_TEXT_CHARS,
     Config,
@@ -111,7 +112,9 @@ from .config import (
     config_file_path,
     find_mcp_json,
     load_config,
+    parse_require_board,
     resolve_values,
+    unset_config_keys,
     write_config_file,
 )
 
@@ -1620,8 +1623,26 @@ def _is_bare_invocation(argv: list[str]) -> bool:
 
 def _resolve_board(arg_board: int | None, config: Config) -> int | None:
     """The per-call ``--board`` wins, else ``PANDAN_BOARD_ID``, else None (let the
-    API apply its own fallback). Mirrors the MCP server's ``_board`` helper."""
-    return arg_board if arg_board is not None else config.board_id
+    API apply its own fallback). Mirrors the MCP server's ``_board`` helper.
+
+    With ``require_board`` set (issue #277), the two fallbacks are refused instead:
+    an absent ``--board`` is an error, so a verb can never act on a board the user
+    did not name. This is the single chokepoint for the "default board" path — the
+    handful of calls that pass ``board_id=None`` *deliberately* (ticket lookup, which
+    spans every board because ticket sequences are globally unique) don't come
+    through here, so they keep working with the switch on.
+    """
+    if arg_board is not None:
+        return arg_board
+    if config.require_board:
+        raise CliError(
+            "--board is required (require_board is set). "
+            "Pass --board <id>, or turn the check off with "
+            "`pandan config unset require_board`.",
+            code="board_required",
+            arg="--board",
+        )
+    return config.board_id
 
 
 # --- id / ticket resolution (KAN-285) ---------------------------------------
@@ -2347,6 +2368,10 @@ def _cmd_config_show(args: argparse.Namespace) -> int:
         # The effective truncation limit (V45, KAN-428) — reported here because
         # "why is my description cut off?" is otherwise unanswerable from outside.
         "max_text_chars": resolved.get("max_text_chars") or str(DEFAULT_MAX_TEXT_CHARS),
+        # Issue #277 — reported for the same reason as max_text_chars: with it on,
+        # "why did that fail?" is otherwise unanswerable from outside, and with it
+        # off, "am I actually protected?" is the question that prompted the issue.
+        "require_board": str(parse_require_board(resolved.get("require_board", ""))).lower(),
         "config_file": str(config_file_path()),
         "mcp_json": str(mcp) if mcp else None,
     }
@@ -2381,13 +2406,65 @@ def _cmd_config_set(args: argparse.Namespace) -> int:
             raise CliError("no token read from stdin", code="no_token", arg="--token-stdin")
     elif args.token is not None:
         token = args.token
-    if args.api_url is None and args.board_id is None and token is None:
+    require_board = getattr(args, "require_board", None)
+    if (
+        args.api_url is None
+        and args.board_id is None
+        and token is None
+        and require_board is None
+    ):
         raise CliError(
-            "nothing to set (pass --api-url / --board-id / --token[-stdin])",
+            "nothing to set (pass --api-url / --board-id / --token[-stdin] / "
+            "--require-board)",
             code="invalid_input",
         )
-    path = write_config_file(api_url=args.api_url, token=token, board_id=args.board_id)
+    path = write_config_file(
+        api_url=args.api_url,
+        token=token,
+        board_id=args.board_id,
+        require_board=require_board,
+    )
     print(f"wrote {path}")
+    return EXIT_OK
+
+
+def _cmd_config_unset(args: argparse.Namespace) -> int:
+    """Remove keys from the user config file (issue #277).
+
+    The gap this fills: ``config set`` could write a default board but nothing could
+    clear one, and an empty env var doesn't override the file (empty is treated as
+    unset, so the file wins — arguably right, but it left no escape hatch). Clearing
+    a key meant hand-editing a ``0600`` file that also holds a live PAT.
+
+    Reports per key whether it was actually removed, because "cleared it" and "it was
+    never set" are different answers to "why is this still targeting board 5?" — the
+    second one means the value is coming from the environment or ``.mcp.json``, which
+    this command cannot and should not touch.
+    """
+    unknown = [k for k in args.keys if k not in _CONFIG_KEYS]
+    if unknown:
+        raise CliError(
+            f"unknown config key(s): {', '.join(unknown)}. "
+            f"Valid keys: {', '.join(_CONFIG_KEYS)}.",
+            code="invalid_input",
+            arg=unknown[0],
+        )
+    path, removed = unset_config_keys(tuple(args.keys))
+    for key in args.keys:
+        print(f"{key}\t{'removed' if key in removed else 'not set'}")
+    print(f"wrote {path}")
+    if removed:
+        # Only worth saying when something changed, and only when it can still bite:
+        # the file is the *middle* source, so a cleared key may just unmask an env
+        # var or .mcp.json entry rather than actually clearing the effective value.
+        still = {k: v for k, v in resolve_values().items() if k in removed}
+        for key, val in still.items():
+            shown = _redact_token(val) if key == "token" else val
+            print(
+                f"note: {key} still resolves to {shown} from the environment "
+                f"or .mcp.json — see `pandan config show`",
+                file=sys.stderr,
+            )
     return EXIT_OK
 
 
@@ -3311,16 +3388,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_login.set_defaults(local_func=_cmd_login)
 
-    p_config = sub.add_parser("config", help="inspect / set the config file (set / show / path)")
+    p_config = sub.add_parser(
+        "config", help="inspect / set the config file (set / unset / show / path)"
+    )
     config_sub = p_config.add_subparsers(
         dest="config_command", metavar="<subcommand>", required=True
     )
 
     p_config_set = config_sub.add_parser(
-        "set", parents=[common], help="write api_url / board_id / token to the config file"
+        "set",
+        parents=[common],
+        help="write api_url / board_id / token / require_board to the config file",
     )
     p_config_set.add_argument("--api-url")
     p_config_set.add_argument("--board-id")
+    require_grp = p_config_set.add_mutually_exclusive_group()
+    require_grp.add_argument(
+        "--require-board",
+        dest="require_board",
+        action="store_true",
+        default=None,
+        help=(
+            "fail any board-scoped verb given no --board, instead of falling back to "
+            "the default board (safer with several boards on one account)"
+        ),
+    )
+    require_grp.add_argument(
+        "--no-require-board",
+        dest="require_board",
+        action="store_false",
+        default=None,
+        help="allow the default-board fallback again (the default)",
+    )
     token_grp = p_config_set.add_mutually_exclusive_group()
     token_grp.add_argument(
         "--token", help="the PAT (discouraged — ends up in shell history; prefer --token-stdin)"
@@ -3329,6 +3428,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--token-stdin", action="store_true", help="read the PAT from stdin (keeps it out of argv)"
     )
     p_config_set.set_defaults(local_func=_cmd_config_set)
+
+    p_config_unset = config_sub.add_parser(
+        "unset",
+        parents=[common],
+        help="remove keys from the config file (so you needn't hand-edit a file holding your PAT)",
+    )
+    p_config_unset.add_argument(
+        "keys",
+        nargs="+",
+        metavar="KEY",
+        help=f"one or more of: {', '.join(_CONFIG_KEYS)}",
+    )
+    p_config_unset.set_defaults(local_func=_cmd_config_unset)
 
     p_config_show = config_sub.add_parser(
         "show", parents=[common], help="print the effective config (token redacted)"
