@@ -34,7 +34,7 @@ positional arguments:
     template      manage card templates (list / create / delete / apply)
     login         save your PAT to the config file (prompts; never on the
                   command line)
-    config        inspect / set the config file (set / show / path)
+    config        inspect / set the config file (set / unset / show / path)
     context       ambient board context for an agent session (install /
                   uninstall / show / status)
     dep           manage card dependencies (add / rm / list blocking edges)

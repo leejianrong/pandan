@@ -2140,6 +2140,125 @@ def test_config_set_rejects_non_integer_board_id():
     assert cli.run(["config", "set", "--board-id", "abc"]) == cli.EXIT_ERROR
 
 
+# --- config unset + require_board (issue #277) ------------------------------
+# Two independent halves of one report: there was no way to clear a config value
+# without hand-editing a 0600 file that also holds a live PAT, and — the sharper
+# edge — an absent default board does not make ``--board`` mandatory, it makes the
+# target *unpredictable*. A stale default on a read is a confusing answer; the same
+# mistake on ``create`` files a card on the wrong board with nothing in the output
+# to say so.
+
+
+def test_config_unset_clears_a_key_without_touching_the_token(monkeypatch, capsys):
+    """The whole point of the verb: the file also holds the PAT, so "just delete the
+    line" means opening a credential file by hand."""
+    monkeypatch.setattr("sys.stdin", io.StringIO("pandan_pat_keepme\n"))
+    assert cli.run(["config", "set", "--token-stdin", "--board-id", "8"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert cli.run(["config", "unset", "board_id"]) == cli.EXIT_OK
+    assert "board_id\tremoved" in capsys.readouterr().out
+
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    cfg = config.load_config()
+    assert cfg.board_id is None
+    assert cfg.token == "pandan_pat_keepme"  # the neighbouring secret survived
+
+
+def test_config_unset_distinguishes_cleared_from_never_set(monkeypatch, capsys):
+    """"Cleared it" and "it was never there" are different answers to 'why is this
+    still pointing at board 5?' — the second means the value comes from the
+    environment or .mcp.json, which this verb cannot touch."""
+    assert cli.run(["config", "set", "--board-id", "8"]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert cli.run(["config", "unset", "board_id", "max_text_chars"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "board_id\tremoved" in out
+    assert "max_text_chars\tnot set" in out
+
+
+def test_config_unset_warns_when_the_value_still_resolves(monkeypatch, capsys):
+    """Clearing the file only unmasks the next source. Reporting OK while the value
+    is unchanged is precisely the silent behaviour the issue is about."""
+    assert cli.run(["config", "set", "--board-id", "8"]) == cli.EXIT_OK
+    capsys.readouterr()
+    monkeypatch.setenv("PANDAN_BOARD_ID", "9")
+    assert cli.run(["config", "unset", "board_id"]) == cli.EXIT_OK
+    captured = capsys.readouterr()
+    assert "board_id\tremoved" in captured.out
+    assert "still resolves to 9" in captured.err  # stderr: stdout stays parseable
+
+
+def test_config_unset_rejects_an_unknown_key(capsys):
+    """A typo must not report success having done nothing — that is the same
+    failure shape as the silent board fallback."""
+    assert cli.run(["config", "unset", "boardid"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "invalid_input"
+    assert err.arg == "boardid"
+
+
+def test_require_board_refuses_a_board_scoped_verb_with_no_board(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
+    monkeypatch.setenv("PANDAN_REQUIRE_BOARD", "1")
+    assert cli.run(["list"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "board_required"
+    assert err.arg == "--board"
+
+
+def test_require_board_still_allows_an_explicit_board(monkeypatch, env):
+    """The switch makes ``--board`` mandatory, not impossible."""
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    monkeypatch.setenv("PANDAN_REQUIRE_BOARD", "true")
+    assert cli.run(["list", "--board", "7"]) == cli.EXIT_OK
+    assert fake.calls[0][1]["board_id"] == 7
+
+
+def test_require_board_is_off_by_default(monkeypatch, env):
+    """Opt-in: the fallback is genuinely convenient on a single-board account, which
+    is where everyone starts. No existing invocation may change behaviour."""
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
+    assert cli.run(["list"]) == cli.EXIT_OK
+    assert fake.calls[0][1]["board_id"] == 5
+
+
+def test_require_board_rejects_an_unparseable_value(monkeypatch, env, capsys):
+    """The one setting whose job is preventing a misfiled write must not read
+    ``ture`` as "off" and hand back the exact fallback the user disabled."""
+    patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    monkeypatch.setenv("PANDAN_REQUIRE_BOARD", "ture")
+    assert cli.run(["list"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "config"
+    assert "ture" in err.message
+
+
+def test_require_board_round_trips_through_the_config_file(monkeypatch, capsys):
+    """Written as a real TOML bool, not a quoted string, so anything else reading the
+    file sees a boolean."""
+    assert cli.run(["config", "set", "--require-board"]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert "require_board = true" in config.config_file_path().read_text(encoding="utf-8")
+    monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_x")
+    assert config.load_config().require_board is True
+
+    assert cli.run(["config", "set", "--no-require-board"]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert config.load_config().require_board is False
+
+
+def test_require_board_off_in_the_file_is_written_not_dropped(monkeypatch, capsys):
+    """``--no-require-board`` must persist ``false`` rather than removing the key: the
+    file is the middle source, so a vanished key would fall through to .mcp.json and
+    the override would not stick."""
+    assert cli.run(["config", "set", "--no-require-board"]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert "require_board = false" in config.config_file_path().read_text(encoding="utf-8")
+
+
 # --- next / dispatch (M5 V12, KAN-245) -------------------------------------
 
 

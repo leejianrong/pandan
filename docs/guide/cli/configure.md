@@ -68,6 +68,7 @@ api_url	https://simple-kanban-jian.fly.dev
 token	set (…c_DE)
 board_id	5
 max_text_chars	500
+require_board	false
 config_file	/home/you/.config/pandan/config.toml
 mcp_json	None
 ```
@@ -79,7 +80,14 @@ four characters. When a command behaves unexpectedly, start here.
 pandan config path                                    # just the file path
 pandan config set --api-url https://board.example.com # write one value
 pandan config set --board-id 7
+pandan config unset board_id                          # clear one value
 ```
+
+`config unset` takes one or more keys — `api_url`, `token`, `board_id`, `max_text_chars`,
+`require_board` — and tells you per key whether it removed something or the key was never set. That
+distinction matters: the config file is only the middle source, so clearing a key there can simply
+unmask an environment variable or `.mcp.json` entry. When that happens, `config unset` says so on
+stderr rather than reporting success while nothing changed.
 
 The file is plain TOML and you can edit it by hand:
 
@@ -89,6 +97,36 @@ api_url = "https://simple-kanban-jian.fly.dev"
 board_id = 5
 token = "pandan_pat_…"
 ```
+
+Prefer `config set` and `config unset` to hand-editing, though — the file holds your PAT, so every
+hand-edit is a text editor open on a live credential.
+
+## Requiring an explicit board
+
+By default, a board-scoped command with no `--board` falls back to your default board, and with no
+default set, to whatever the API picks. On a single-board account that is just convenient. Once you
+have several boards it is a sharp edge: a stale default makes a read give a confusing answer, and
+makes `create` file a card on the wrong board with nothing in the output to say so.
+
+Turn the fallback off and make `--board` mandatory:
+
+```bash
+pandan config set --require-board      # or: export PANDAN_REQUIRE_BOARD=1
+```
+
+```console
+$ pandan list
+error	board_required	--board is required (require_board is set). Pass --board <id>, or turn the
+check off with `pandan config unset require_board`.	--board
+```
+
+It is opt-in, so nothing changes until you ask for it, and `--board` still works exactly as before —
+the setting makes it required, not different. Commands that aren't board-scoped (`board list`,
+`config show`, `warmup`) are unaffected, as is looking a card up by ticket, since `KAN-` numbers are
+unique across every board.
+
+To turn it back off, either `pandan config set --no-require-board` (writes `false`) or
+`pandan config unset require_board` (removes the key so another source can supply it).
 
 ## Truncation limit
 
@@ -154,4 +192,6 @@ pandan config show
 ```
 
 Settings resolve per value from the environment, then the config file, then `.mcp.json`. Keep the
-token in the file, and override the board with `--board` when you need to reach elsewhere.
+token in the file, and override the board with `--board` when you need to reach elsewhere. `config
+unset` clears a value without opening the file by hand, and `--require-board` makes `--board`
+mandatory once you have enough boards for a stale default to be a hazard.

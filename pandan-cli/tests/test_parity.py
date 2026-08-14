@@ -150,6 +150,7 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
     ("overview",): "the CLI's content-first bare invocation (V46) — board state, no new capability",
     ("login",): "writes the local config file; a PAT never travels over MCP",
     ("config", "set"): "local config file",
+    ("config", "unset"): "local config file (issue #277)",
     ("config", "show"): "local config file",
     ("config", "path"): "local config file",
     ("context", "install"): "installs the packaged skill / SessionStart hook (V48)",
