@@ -493,6 +493,27 @@ def _emit(
         print(_summary_line(*found))
 
 
+def _with_unresolved(text: str, result: Any) -> str:
+    """Append the ``(unresolved: …)`` line to a rendered list, if there is one.
+
+    A batch read (issue #254) reports the selectors that matched nothing, and the
+    whole reason that report exists is that omitting a miss silently was the one
+    option the issue ruled out. So the rule has to hold on **every** human path,
+    not just the default one.
+
+    It is a shared helper rather than a line repeated in each branch because the
+    first version was exactly that repetition, and it shipped a bug: ``--fields``
+    returns early from ``_humanize`` via ``_project_rows``, so the projected
+    rendering silently dropped the report — in the combination an agent is most
+    likely to use, since ``--refs --fields`` is the cheap read. Funnelling both
+    exits through one function is what makes a third exit fail loudly instead.
+    """
+    unresolved = result.get("unresolved") if isinstance(result, dict) else None
+    if not unresolved:
+        return text
+    return f"{text}\n(unresolved: {', '.join(unresolved)})"
+
+
 def _humanize(
     result: Any,
     *,
@@ -529,7 +550,10 @@ def _humanize(
     if fields:
         projected = _project_rows(result, fields, limit=limit)
         if projected is not None:
-            return projected
+            # `--fields` returns early, so it has to append the unresolved line
+            # itself — and this is the combination that matters most, since
+            # `--refs --fields` is the cheap read an agent actually makes.
+            return _with_unresolved(projected, result)
     # Whether a result IS a list is decided in exactly one place — ``_list_envelope``
     # — and this chain dispatches on its answer (KAN-478). Before that, the two
     # functions each carried their own idea of list-ness and disagreed: V44's
@@ -550,12 +574,7 @@ def _humanize(
         lines = [_card_line(c) for c in rows] if rows else [f"(no {envelope})"]
         if result.get("next_cursor"):
             lines.append(f"(more — next cursor: {result['next_cursor']})")
-        if result.get("unresolved"):
-            # The selectors an ids=/refs= read matched nothing for. Printed for the
-            # same reason the API reports them at all: omitting a miss silently is
-            # the one option issue #254 ruled out.
-            lines.append(f"(unresolved: {', '.join(result['unresolved'])})")
-        return "\n".join(lines)
+        return _with_unresolved("\n".join(lines), result)
     if envelope == "boards":  # list_boards
         return "\n".join(_board_line(b) for b in rows) if rows else "(no boards)"
     if envelope == "epics":  # list_epics
