@@ -244,6 +244,37 @@ def test_drift_watcher_looks_at_the_deploy_job_not_the_run(deploy_text: str) -> 
     )
 
 
+def _uncommented(block: str) -> str:
+    """`block` with whole-line comments removed.
+
+    The same trap _job_block documents, one level in: the fix below is EXPLAINED
+    by a comment inside the very job it constrains, so a search of the raw block
+    matches the prose after the code is gone.
+    """
+    return "\n".join(
+        line for line in block.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def test_drift_watcher_ignores_its_own_scheduled_runs(deploy_text: str) -> None:
+    """The watcher lives IN deploy.yml, so its own cron runs are `Deploy` runs --
+    eight a day, none able to contain a `Deploy to Fly.io` job. Unfiltered they
+    evict real deploys from the fixed window: 39 of the last 45 Deploy runs were
+    this cron, the newest genuine deploy sat 46 back, and the watcher failed every
+    3 hours ("No Deploy run in the last 40...") while production was exactly on
+    main's tip. Alarm fatigue on a watcher is the whole failure mode it exists to
+    prevent, so pin the filter that makes the window mean what it says."""
+    drift = _uncommented(_job_block(deploy_text, "drift"))
+    runs_query = re.search(r"actions/workflows/deploy\.yml/runs\?([^\"']+)", drift)
+    assert runs_query, "the drift watcher no longer queries deploy.yml's runs at all"
+    params = runs_query.group(1)
+    assert "event=workflow_run" in params, (
+        "the drift watcher must filter its runs query to `event=workflow_run`, or "
+        "its own schedule/workflow_dispatch runs crowd every real deploy out of "
+        f"the window and it fails permanently on a false alarm. Query was: ?{params}"
+    )
+
+
 # --- 6. the auto-merge must not hand gh a bare GITHUB_TOKEN -----------------
 
 
