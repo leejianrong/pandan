@@ -2790,3 +2790,118 @@ documentation problem** — a misleading message, an undocumented verb, and thre
 true once. That is a better failure mode than the reverse, and it is also the one that a repo which
 tells you to trust the code over the docs will keep producing, so periodic cold-start runs like this
 one are worth repeating.
+
+---
+
+## 2026-08-16 — five maintenance cards, and a fixture that wrote to the repo it lived in
+
+A PM session cleared **KAN-592, KAN-595, KAN-596, KAN-615 and KAN-831** (7 points) across three
+worktree agents. Wave 1 (592/595/596) was chosen because the files are provably disjoint and none of
+them bumps the CLI version; the CLI cluster then ran behind a pre-assigned version ladder. Five of
+the eight cards in scope touch `pandan_cli/cli.py`, so the ladder existed to make every version-line
+conflict resolve mechanically as "keep the higher one". It worked — KAN-615's agent hit the conflict
+when KAN-831 landed mid-flight, resolved it, and the KAN-484 merge-base guard correctly did **not**
+false-positive on the merge commit.
+
+### The incident: a test fixture that damaged the shared clone
+
+The KAN-595 agent's drift-watcher test built a synthetic git history — commits authored
+`t <t@example.invalid>`, one of which **deleted the entire repository** — and it landed on the real
+`main`, then got **pushed onto the open PR**. Four things compounded, and each is worth its own line:
+
+1. **The agent had `main` checked out in its treehouse tree.** `main` is a *shared ref across every
+   worktree of one clone*, so moving it in a pooled tree moved the primary checkout's `main` too. The
+   existing brief said "never `cd` into the parent checkout"; it did not say "never work on `main`",
+   and that gap is what the whole incident rests on.
+2. **`tmp_path` is not isolation.** The fixture already used `tmp_path_factory.mktemp` + `git init`.
+   That bought nothing, because a pre-push hook is handed `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`,
+   and with `GIT_DIR` set, `git init` in a scratch dir **reuses the real gitdir** — so `git add -A &&
+   git commit` writes the fixture's tree into the real repo. Scrubbing `GIT_*` alone was also not
+   enough; the fix needs `git -C <tmp>` *and* a pre-write assertion that
+   `rev-parse --absolute-git-dir` really is the scratch repo.
+3. **A linked worktree shares `.git/config`.** The fixture ran `git config user.email t@example.invalid`,
+   which landed in the *shared* config. **Every commit made in any worktree of this clone for the next
+   ~90 minutes was authored `t <t@example.invalid>`** — including two that are now on `main`
+   (`23044ec` KAN-831, `d8e2c2b` KAN-615) plus a merge commit. Content is correct; only authorship is
+   wrong, and rewriting a protected branch to fix metadata was judged not worth it.
+4. **`core.bare` also got set to `true`** in that shared config, which made the primary checkout
+   report `fatal: this operation must be run in a work tree`. This is the exact scenario
+   `scripts/git-hooks/pre-push`'s own KAN-523 header describes ("a normal checkout whose `core.bare`
+   got set to true") — now observed in the wild rather than hypothesised.
+
+**Recovery, and the order that made it safe.** Nothing was lost, because the *first* action was to
+preserve rather than repair: tag the polluted tip, write the index to a patch, and take a
+`git stash create` commit object so the WIP entered the object database independently of any ref.
+Only then reset. This is the same non-destructive rule the briefs carry, and the session that hands
+it out is exactly the session likely to need it.
+
+**The fix that matters is in the diff, not in the cleanup.** The containment now follows
+`test_prepush_hook.py`'s `_clean_env` pattern (whole `GIT_*` namespace stripped, `GIT_CONFIG_GLOBAL`/
+`GIT_CONFIG_SYSTEM` pinned to `/dev/null`, identity supplied *as environment* so the fixture never
+runs `git config` at all), plus a mutation test that runs the whole file under the hostile ambient
+env that caused the incident and asserts the target repo is byte-identical afterwards — pointed at a
+**decoy** repo, so proving containment never requires risking the thing being contained.
+
+**Generalisable:** a test that shells out to `git` has a blast radius, and nobody bounds it. Two files
+in this repo have now been bitten by inherited `GIT_*` (KAN-484, KAN-595). The containment lives as a
+private helper in one test file that nobody discovers until after they have damaged the clone; it
+belongs in a shared `mcp/tests/conftest.py` fixture. And the pre-push hook is the highest-privilege
+context these tests ever run in, and the one nobody runs them in.
+
+### The recurring finding, two more instances
+
+The milestone's "guard with no watcher" family produced two more variants, one level out each time:
+
+- **KAN-596 — a classifier with no consumer.** `ci.yml`'s `app` paths-filter output was read by
+  nothing. `git log -S` proved it was never consumed *once in the file's entire history* — born dead
+  in KAN-37, sat through two milestones. Stronger than "unused": it *misled*, because KAN-584's card
+  described it as a filter that should have matched `Dockerfile`, when no job consulted it at all.
+- **KAN-592 — a non-vacuity proof sharing an input with what it proved.** `test_parity.py`
+  cross-checked a tool-name regex against a decorator count, but both derived from the same `mcp`
+  token, so a rename made it assert `0 == 0` and pass over an empty set. Now anchored on the
+  `mcp = MCPServer(...)` **binding line** — deliberately an *assertion, not an adaptation*, since
+  rebuilding the regexes from whatever variable was found would keep passing through the rename.
+
+**The cheap discriminator, worth running on the next file that copies this pattern:** *is the anchor a
+literal written in the test file, or a second computation over the same input?* `test_envelope_audit.py`
+and `test_schema.py` wrote literals and are sound; `test_parity.py` wrote a second regex and was blind.
+
+Two smaller traps, both caught by agents mutation-testing their own work:
+
+- **A mutation test can itself be vacuous.** `source.replace("@mcp.tool(", …)` against
+  already-renamed source is a no-op that passes for the wrong reason. Every mutation now asserts
+  `mutated != source` first.
+- **A guard's own explanatory comment can satisfy its own search.** KAN-596's new ci.yml comment
+  quotes `needs.changes.outputs.app`; without comment-stripping the guard goes *vacuously green* with
+  the defect restored. Measured both ways before committing.
+
+### Smaller friction
+
+- **`make worktree-db` is not clean on a recycled treehouse tree.** The port derives from the
+  worktree *path*, and treehouse recycles paths — so a pooled tree can inherit the previous
+  occupant's Postgres, data included.
+- **The repo's own `.mcp.json` poisons a from-source CLI run.** `find_mcp_json` walks up from the
+  CWD, and `pandan-cli/` sits inside the repo, so a run intended to have *no* board silently picks up
+  `PANDAN_BOARD_ID` and returns `422` where you expected `409`. Verifying board-resolution behaviour
+  needs a neutral CWD *and* an isolated `XDG_CONFIG_HOME`. The existing guidance warns about the
+  stale binary on `$PATH` but not about config leakage.
+- **`git apply` rejects a hand-written patch** — `@@` headers need real line numbers. The reliable
+  form of the non-destructive mutation rule is: edit in place, `git diff > mutation.patch`, then
+  `git apply -R`.
+- **`mergeStateStatus` flips to `DIRTY` with no notification** when a sibling PR lands, while
+  `gh pr checks` still shows all-green from the pre-conflict run. Check both, not just checks.
+- **`POST /auth/test-login` 500s on a reserved-TLD email** (`…@example.test` → uncaught pydantic
+  `ValidationError`). e2e-only route, nil blast radius, but a `422` would beat a stack trace.
+- **The SPA catch-all has no `/api` exclusion**, so an image predating a new endpoint answers it with
+  `200 text/html`. `curl -f` is perfectly happy. Any watcher polling a new endpoint must validate the
+  body's *shape*, never the status code — found while building KAN-595's watcher, and confirmed
+  against production before the deploy landed.
+
+### Takeaway
+
+Every guard this session added lives in `mcp/tests/`, which is **not a required status check** — so
+an admin merge bypasses all of them. That is a GitHub settings decision, not a file, and it is now
+the single highest-leverage change available: required contexts are `Lint (ruff)`, `Unit tests`,
+`Integration tests` and `Frontend build & type-check`, while `MCP server`, `Container images`,
+`Security scan`, `E2E`, `CLI` and `Pandan client` are all optional. Between them the non-required jobs
+run every guard from KAN-452, KAN-484, KAN-523, KAN-584, KAN-586, KAN-592, KAN-595 and KAN-596.
