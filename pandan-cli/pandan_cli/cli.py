@@ -85,6 +85,18 @@ Exit codes (for scripting) — **stable, never renumbered**:
     5  404 not found — including a KAN-/EPIC- ticket that resolves to nothing, so
        the code doesn't depend on whether you addressed the card by id or by ticket
     6  409 conflict — the resource state contradicts the request
+    7  ``warmup`` only: the origin refused the connection or did not resolve, so
+       retrying cannot help (KAN-613)
+
+``7`` is likewise an addition, and it exists for one reason: the documented CI pattern
+is ``until pandan warmup; do sleep 2; done``, and ``until`` retries on *any* non-zero
+code, so on a machine that never set ``PANDAN_API_URL`` it span forever against the
+``http://localhost:8000`` default. No exit code can break an ``until`` loop — that
+pattern had to change in the docs — but a bounded loop can now abort immediately on
+``7`` instead of sleeping out its whole ceiling for a cure that does not exist. It is
+scoped to ``warmup``: other verbs still report an unreachable origin as the generic
+``transport``/``1``, because for them it is one failure among many, whereas for
+``warmup`` "is the origin real" is the entire question being asked.
 
 ``6`` is an **addition**, not a renumbering (V51-era, KAN-831): it is the pandan half of
 a suite-wide decision taken on kaya's side (kaya KAN-724 / kaya ADR 0009), where a 409 is
@@ -123,6 +135,7 @@ from .config import (
     DEFAULT_MAX_TEXT_CHARS,
     Config,
     ConfigError,
+    api_url_is_default,
     config_file_path,
     find_mcp_json,
     load_config,
@@ -139,6 +152,9 @@ EXIT_AUTH = 3
 EXIT_FORBIDDEN = 4
 EXIT_NOT_FOUND = 5
 EXIT_CONFLICT = 6  # 409 — added in KAN-831; see the docstring's exit-code table.
+# `warmup` only — the origin refused the connection / did not resolve (KAN-613). Not in
+# ERROR_CODES: it is not an error row, it is a warmup *status* mapped to an exit code.
+EXIT_UNREACHABLE = 7
 
 # --- the error contract (V43, KAN-426 — AXI 6) -------------------------------
 # Every machine `code` maps to exactly one exit code. **Both are a published
@@ -897,17 +913,26 @@ def _notification_line(n: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS
 
 
 def _warmup_line(result: dict[str, Any]) -> str:
-    """One concise line for a warmup result: the status, plus any detail.
+    """One concise line for a warmup result: the status, the origin, and any detail.
 
-    ``ok`` → the API is awake; ``waking``/``error`` carry a ``detail`` explaining
-    what to do next (call again shortly / what failed). ``detail`` is flattened
-    (KAN-485): on the error path it is a stringified API error, which can carry a
-    response body, and this is a two-column row like any other."""
+    ``ok`` → the API is awake; ``waking``/``unreachable``/``error`` carry a ``detail``
+    explaining what to do next (call again shortly / fix the origin / what failed).
+
+    The **origin column is the point of KAN-613**: a warmup that fails without naming
+    the URL it tried withholds the one fact that distinguishes a cold start from a
+    machine that was never configured. It is printed on success too — confirming which
+    server you woke is worth a column, and a stable row shape is worth more than a
+    saved one.
+
+    Both cells are flattened (KAN-485): ``detail`` can be a stringified API error
+    carrying a response body, and an ``api_url`` is caller-supplied text."""
     status = str(result.get("status", "?"))
-    if status == "ok":
-        return "ok\tAPI is awake"
+    origin = _flatten(str(result.get("origin") or ""))
     detail = result.get("detail")
-    return f"{status}\t{_flatten(str(detail))}" if detail else status
+    text = _flatten(str(detail)) if detail else ("API is awake" if status == "ok" else "")
+    # ``origin``/``detail`` are guarded rather than assumed: the client always sends
+    # both, but this helper is also the renderer for any warmup-shaped dict.
+    return "\t".join(cell for cell in (status, origin, text) if cell)
 
 
 def _fmt_duration(seconds: float | None) -> str:
@@ -1981,11 +2006,30 @@ def _cmd_notify_read(client: PandanClient, config: Config, args: argparse.Namesp
 # --- ops handlers -----------------------------------------------------------
 
 
+# Appended to an `unreachable` detail when nothing configured the origin at all
+# (KAN-613). The wording is deliberate: it names the canonical env var and the verb
+# that persists it, and it does not claim the server is down, because on a fresh
+# install the far likelier truth is that there is no server at that address at all.
+_UNSET_ORIGIN_HINT = (
+    "Nothing set PANDAN_API_URL, so that is only the built-in local-dev default: on a "
+    "fresh install this is the bug. Point it at your board with "
+    "`pandan config set --api-url https://<your-host>`."
+)
+
+
 def _cmd_warmup(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     # The shared client's warmup() pings the public /api/health, rides a cold
     # start via the shared retry/timeout, and never throws — it returns a status
-    # dict the caller maps to an exit code (see run()).
-    return client.warmup()
+    # dict the caller maps to an exit code (see run()). Since KAN-613 that dict names
+    # the origin it tried and tells a refused connection from a slow wake.
+    result = client.warmup()
+    # The client knows the URL; only the CLI knows whether that URL was *chosen*.
+    # ADR 0005 keeps `pandan_client` a thin API adapter, so "was this merely the
+    # default?" is answered here, from the config chain, and only when it changes the
+    # advice — i.e. on the one status where a wrong origin is the likely cause.
+    if result.get("status") == "unreachable" and api_url_is_default():
+        result = {**result, "detail": f"{result.get('detail', '')} {_UNSET_ORIGIN_HINT}".strip()}
+    return result
 
 
 # --- board handlers ---------------------------------------------------------
@@ -2806,7 +2850,8 @@ def build_parser() -> argparse.ArgumentParser:
     # ``warmup`` pings the public /api/health to wake a scaled-to-zero Fly+Neon
     # deploy before a batch of work (handy as a CI pre-step). It needs no token
     # (require_token=False) and maps its non-throwing status to an exit code
-    # (is_warmup=True): 0 when awake, 1 while still waking / on error.
+    # (is_warmup=True): 0 when awake, 7 when the origin is unreachable (retrying
+    # cannot help), 1 while still waking / on any other error.
     p_warmup = sub.add_parser(
         "warmup",
         parents=[common],
@@ -3857,7 +3902,14 @@ def run(argv: Sequence[str] | None = None) -> int:
         return _print_error(exc, fmt=fmt)
     # warmup never throws (a still-waking/failed server is a status, not an
     # exception), so it maps that status to a scripting-friendly exit code:
-    # 0 when awake, 1 otherwise (retry the CI pre-step / investigate).
+    # 0 when awake, 7 when the origin is unreachable, 1 otherwise.
     if getattr(args, "is_warmup", False):
-        return EXIT_OK if result.get("status") == "ok" else EXIT_ERROR
+        status = result.get("status")
+        if status == "ok":
+            return EXIT_OK
+        # A refused/unresolvable origin is not a cold start, so it must not read like
+        # one to a script either: a retry loop that cannot succeed should stop, and
+        # only a distinct code lets it (KAN-613). Everything else stays 1 — waking is
+        # exactly the "call me again shortly" the loop is for.
+        return EXIT_UNREACHABLE if status == "unreachable" else EXIT_ERROR
     return EXIT_OK

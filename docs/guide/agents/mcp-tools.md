@@ -103,6 +103,10 @@ them; `dispatch` does not.
 `warmup` pings the unauthenticated health endpoint and needs no token. Call it first in a session to
 pay the cold start up front.
 
+Its result always names the `origin` it tried, and the `status` says whether waiting is worth
+anything: `waking` means call again shortly, `unreachable` means the connection was refused or the
+host did not resolve — check `PANDAN_API_URL` instead of retrying.
+
 ## Shaping the output
 
 Two arguments control how much a read returns, and they are the difference between a cheap read and one

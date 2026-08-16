@@ -443,26 +443,70 @@ def test_health_hits_unversioned_api_health_not_v1():
 def test_warmup_returns_ok_when_healthy():
     handler, _ = capture(httpx.Response(200, json={"status": "ok"}))
     out = make_client(handler).warmup()
-    assert out == {"status": "ok", "health": {"status": "ok"}}
+    assert out == {"status": "ok", "origin": "http://test", "health": {"status": "ok"}}
 
 
-def test_warmup_returns_waking_on_transport_error_without_raising():
-    # Two connection failures: the GET retries once then gives up; warmup swallows
-    # it into a soft "waking" status rather than raising (a cold, still-waking box).
+def test_origin_strips_the_api_v1_prefix_back_off():
+    """KAN-613: ``origin`` is the value ``PANDAN_API_URL`` was given, not the
+    ``…/api/v1`` base_url built from it — the former is the string a user has to fix."""
+    handler, _ = capture(httpx.Response(200, json={"status": "ok"}))
+    client = PandanClient(
+        "https://board.example.com:8443/", transport=httpx.MockTransport(handler)
+    )
+    assert client.origin() == "https://board.example.com:8443"
+
+
+def test_warmup_reports_a_refused_connection_as_unreachable_and_names_the_origin():
+    """KAN-613, the whole point of the card. A refused connection is NOT a cold start:
+    it gets its own status, and it names the URL that was tried."""
     handler, calls = flaky(
-        [httpx.ConnectError("still waking"), httpx.ConnectError("still waking")],
+        [httpx.ConnectError("[Errno 111] Connection refused")] * 2,
+        httpx.Response(200, json={"status": "ok"}),
+    )
+    out = retry_client(handler).warmup()
+    assert out["status"] == "unreachable"
+    assert out["origin"] == "http://test"
+    # In the human-readable detail too, not only in the machine field: someone reading
+    # one line of output is exactly who was missing it.
+    assert "http://test" in out["detail"]
+    assert "not a cold start" in out["detail"]
+    assert "retry shortly" not in out["detail"]
+    assert calls["count"] == 2  # original + one retry, then soft-return
+
+
+def test_warmup_still_reports_waking_for_a_slow_wake_and_names_the_origin():
+    """The other half of the split: a *timeout* is a genuine cold start and keeps its
+    retryable advice. ``ConnectTimeout`` sits on httpx's ``TimeoutException`` arm, not
+    under ``ConnectError``, so the unreachable branch above cannot swallow it."""
+    handler, _ = flaky(
+        [httpx.ConnectTimeout("too slow")] * 2,
         httpx.Response(200, json={"status": "ok"}),
     )
     out = retry_client(handler).warmup()
     assert out["status"] == "waking"
-    assert calls["count"] == 2  # original + one retry, then soft-return
+    assert out["origin"] == "http://test"
+    assert "retry shortly" in out["detail"]
 
 
-def test_warmup_returns_error_on_http_error_response():
+def test_warmup_treats_a_5xx_as_waking_because_something_answered():
+    """Reachable, answering, but not serving — a proxy in front of a machine that is
+    still booting. That is the cold start warmup exists for, so it stays retryable."""
     handler, _ = capture(httpx.Response(503, json={"detail": "unavailable"}))
     out = make_client(handler).warmup()
-    assert out["status"] == "error"
+    assert out["status"] == "waking"
+    assert out["origin"] == "http://test"
     assert "503" in out["detail"]
+    assert "retry shortly" in out["detail"]
+
+
+def test_warmup_returns_error_on_a_non_5xx_http_error_response():
+    """The third case: reachable, serving, and refusing — neither a cold start nor a
+    bad origin."""
+    handler, _ = capture(httpx.Response(404, json={"detail": "nope"}))
+    out = make_client(handler).warmup()
+    assert out["status"] == "error"
+    assert out["origin"] == "http://test"
+    assert "404" in out["detail"]
 
 
 # --- claim_card (KAN-38) ---------------------------------------------------
