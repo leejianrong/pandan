@@ -1616,7 +1616,20 @@ def _cmd_overview(client: PandanClient, config: Config, args: argparse.Namespace
     printed rows would be a number the reader can't reconcile). The page's
     ``next_cursor`` is carried through unchanged, so "there are more" is still said
     out loud. Without a board: the board list, because that is the content a caller
-    with no default board actually needs, and it costs the same single request."""
+    with no default board actually needs, and it costs the same single request.
+
+    **No ``--fields``, permanently (KAN-591).** Both shapes are recognised list
+    envelopes and ``_humanize`` already threads a projection through the banner, so
+    the flag would *work* — but which vocabulary it advertises depends on whether a
+    board resolves, which is ambient config rather than anything on the command line.
+    ``--fields ticket,title`` is a valid card projection against the first shape and
+    an ``unknown_field`` error against the second, for the same argv. A flag whose
+    accepted values move with the environment is worse than an absent one, and
+    argparse cannot declare it conditionally, so it is not declared at all: ask the
+    verb that owns the vocabulary (``pandan list --fields …`` / ``pandan board list
+    --fields …``), or take ``--json``. Pinned as an entry in ``FIELDS_EXEMPT``
+    (``pandan-cli/tests/test_envelope_audit.py``), whose staleness check fails the
+    day this stops being true."""
     _announce_wait(config)
     tool = _tool_identity(config)
     board = _resolve_board(args.board, config)
