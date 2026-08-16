@@ -2905,3 +2905,79 @@ the single highest-leverage change available: required contexts are `Lint (ruff)
 `Integration tests` and `Frontend build & type-check`, while `MCP server`, `Container images`,
 `Security scan`, `E2E`, `CLI` and `Pandan client` are all optional. Between them the non-required jobs
 run every guard from KAN-452, KAN-484, KAN-523, KAN-584, KAN-586, KAN-592, KAN-595 and KAN-596.
+
+### Same session, wave 3 — the CLI cluster, and a guard that caught a real one on day one
+
+The remaining three cards (**KAN-613, KAN-614, KAN-591**) all touch `pandan_cli/cli.py`, so they ran
+concurrently on a **pre-assigned version ladder** — `0.28.0`/`0.29.0`/`0.30.0` fixed to landing order,
+so every conflict on the version line resolves mechanically as "keep the higher one". The PM resolved
+the two conflicts rather than waking agents for a rebase (`uv.lock` taken from `main` and re-locked
+each time). The KAN-484 merge-base guard correctly recognised the bump across both merge commits.
+
+**The ladder handles textual conflicts. It does not handle semantic ones, and one showed up.**
+KAN-613 rewrote `_cmd_warmup` to build its result in a local and return it by name:
+
+```python
+result = client.warmup()
+if result.get("status") == "unreachable" and api_url_is_default():
+    result = {**result, "detail": f"… {_UNSET_ORIGIN_HINT}"}
+return result
+```
+
+That is exactly the shape KAN-591's *Mutation B* had fabricated hours earlier to prove the envelope
+scanner had a hole. Git found **no textual conflict in `cli.py` at all** — the two cards edited
+different regions — and KAN-591's meta-guard failed on the merge. Branch protection here runs
+`strict: false`, so nothing structural would have blocked it; the only reason it surfaced before
+landing is that the guard shipped in the same PR as the thing it guards. **Worth deciding: either
+`strict: true`, or a convention that guard PRs are re-run against `main` immediately before merge.**
+
+**The fix carried the session's sharpest lesson.** Teaching the scanner the "local variable" shape is
+the obvious move, and the obvious *implementation* —
+`isinstance(v, ast.Name) and v.id in locals → readable` — passes every test, passes CI, and silently
+reopens the hole for every `payload = dict(...)`. The correct implementation makes `_return_shape`
+**recursive**: a local is readable only if everything assigned to it is readable. The only thing that
+distinguishes the two implementations is a mutation placed *just outside the new boundary* — a local
+bound to a `dict()` constructor. Generalisable, and the best sentence to come out of the day:
+**when you widen a scanner, the mutation that matters is the one just outside the new boundary, not
+the one you just brought inside it.**
+
+### Findings that became follow-ups
+
+- **KAN-864 (filed).** `ci.yml`'s `mcp` and `cli` paths filters omit `pandan-client/**`, though both
+  adapters depend on it by path. A client-only PR runs only the `Pandan client` job, so a breaking
+  change to the shared client never runs either adapter's suite. The `mcp` filter's own inline
+  comments document this exact reasoning **four times** (KAN-452, KAN-484, KAN-584, KAN-586) and never
+  applied it to the shared dependency. Both cards this session that touched `pandan-client` also
+  touched `pandan-cli`, so the suites ran by luck.
+- **`EXIT_UNREACHABLE = 7`, added by KAN-613 — raised, not resolved.** KAN-831 established that same
+  morning that pandan's exit table is a **suite-wide contract kaya adopted verbatim**, and `6` was a
+  *coordinated* addition filed by kaya's PM precisely to keep the two in sync. `7` was added
+  unilaterally hours later for a meaning kaya does not have. It is carefully scoped (warmup-only,
+  deliberately out of `ERROR_CODES`, nothing renumbered), and its author was honest that **no exit
+  code can break an `until` loop** — `until` retries on any non-zero, so `7` does not fix the
+  documented pattern; the docs had to change instead. Whether kaya needs a matching row, or whether
+  `7` should be withdrawn, is a suite-level decision.
+- **`test_parity.py` has a third limitation, now documented in it.** It asserts parity *between the
+  two client surfaces*; neither direction has `/api/v1` as an input. Its CLI walk enumerates the real
+  parser's leaves, and **a verb that does not exist cannot be unclassified** — so it catches "tool
+  with no verb" and "verb with no tool", never "endpoint missing from both". That is why it never
+  flagged the missing `me`. The tempting guard (every public `PandanClient` method has a CLI route)
+  would *not* have caught it either, since the client had no `me()`; the real floor is `/api/v1`
+  itself, a cross-package input `pandan-cli` reads from nowhere.
+
+### Triage lessons
+
+- **Grep the client, not the router.** KAN-614 was sized "one verb over an existing client method".
+  There was no client method and no MCP tool — the reporter confirmed the *endpoint* existed and
+  inferred the adapter did.
+- **When a card names a gap, re-verify which LAYER the gap is at.** KAN-591 said the scanner "cannot
+  see `overview` at all". It could: `_payload_keys` (from KAN-583, a *later* card than the KAN-519
+  scanner the card blamed) already read in-handler dicts. The missing piece was a class guard over its
+  output. The blind spot had moved up a level without anyone re-filing it.
+- **Assertions on prose should pin a fragment chosen for stability** (a command name, a flag), never a
+  sentence. KAN-613's agent reworded a user-facing string after writing the assertion against the old
+  wording; the mutation caught its own test being vacuous.
+- **A foreign server squatting `:8000`** turned an "unconfigured" repro into a `404` rather than the
+  expected `ConnectError`. `unshare -rn` (loopback down → `ENETUNREACH`) is a clean, permission-free
+  way to mean "nothing is listening". Squeezing the *connect* timeout is not a valid cold-start
+  simulation — happy-eyeballs makes it a `ConnectError`; squeeze the *read* timeout instead.
