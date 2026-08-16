@@ -58,7 +58,10 @@ Priority = Literal["none", "low", "medium", "high", "urgent"]
 
 # The local name stays ``mcp`` on purpose: ``pandan-cli/tests/test_parity.py``
 # parses ``@mcp.tool(...)`` out of this file as TEXT (it must not import this
-# package — ADR 0005), so renaming the variable would silently empty its regex.
+# package — ADR 0005). Renaming the variable used to *silently* empty its regex;
+# since KAN-592 that test anchors on this binding line instead, so a rename fails
+# loudly and names the two regexes to update. Keep the binding on one line at
+# column 0, or the anchor stops finding it.
 mcp = MCPServer("pandan")
 
 _client: PandanClient | None = None
