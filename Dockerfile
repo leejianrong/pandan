@@ -95,6 +95,10 @@
 # Stamping the label now, with nothing asserting it, is precisely the
 # "labels that look maintained and aren't" that KAN-475 rejected. The health-
 # endpoint version is worth a card.
+#
+# THAT CARD WAS KAN-595 AND IT SHIPPED — see the build-provenance block just
+# above the CMD at the bottom of this file. The env-var route was taken; the
+# label question stays answered NO for the third time. Do not re-derive it.
 
 # ---- Stage 1: build the Svelte SPA ----
 FROM node:22-slim AS frontend
@@ -125,6 +129,29 @@ RUN uv sync --frozen --no-dev
 COPY backend/ ./
 # Built SPA -> the directory FastAPI serves (main.py reads STATIC_DIR).
 COPY --from=frontend /frontend/dist ./static
+
+# ---- Build provenance (KAN-595) ----
+# The git revision that produced this image, baked in as a runtime env var and
+# surfaced on `GET /api/health/version` (backend/app/main.py reads GIT_REVISION
+# once at import). deploy.yml passes it as
+# `flyctl deploy --build-arg GIT_REVISION=<head_sha>`; the default keeps a bare
+# `docker build -f Dockerfile .` working with no arguments, exactly as
+# mcp/Dockerfile's ARGs do.
+#
+# This is the env-var half of the KAN-584 note above, NOT the OCI labels it
+# declined. Labels were and remain the wrong tool here: Fly's API reports the
+# image ref/digest and not its labels, so nothing cheap can assert them. An env
+# var HAS an assert half — the KAN-586 drift watcher curls production and
+# compares what it says against main. Placed LAST on purpose so a new revision
+# invalidates only this trivial layer, never the dependency install or the SPA
+# build.
+#
+# What it does and does not prove: it reports the revision the BUILD ARG named,
+# which is not the same as proving the image was built from that tree. A wrong
+# --build-arg would be believed. Strictly smaller gap than inferring the
+# deployed commit from Actions history; not a closed one.
+ARG GIT_REVISION=unknown
+ENV GIT_REVISION=${GIT_REVISION}
 
 EXPOSE 8000
 # Apply migrations (incl. future seed) then start the server. Migrations are
