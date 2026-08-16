@@ -309,10 +309,14 @@ def test_the_non_vacuity_proof_survives_renaming_the_decorator_target():
     the mutated source really does defeat the regexes (0 names, 0 decorators), and the
     parse fails anyway — on the anchor, which is the only thing in this file that reads
     the decorator target out of ``server.py`` instead of hardcoding it."""
-    renamed = mcp_server_source().replace(
+    source = mcp_server_source()
+    renamed = source.replace(
         f"{DECORATOR_TARGET} = MCPServer(", "server = MCPServer("
     ).replace(f"@{DECORATOR_TARGET}.tool(", "@server.tool(")
 
+    # A mutation that mutated nothing would make this test as vacuous as the hole it
+    # pins — the same lesson, one level up.
+    assert renamed != source, "the rename mutation found nothing to rename"
     assert not _TOOL_RE.findall(renamed), "the mutation did not actually defeat the regex"
     assert not _DECORATOR_RE.findall(renamed), "the mutation did not zero the cross-check"
 
@@ -336,13 +340,15 @@ def test_a_reshaped_decorator_still_fails_the_cross_check():
     """The direction the original cross-check *did* cover, kept: a decorator the
     tool-name regex cannot read (here, reflowed across lines) is a mismatch, not a
     silent omission. This is the assertion the anchor above did not replace."""
-    source = mcp_server_source().replace(
+    source = mcp_server_source()
+    reshaped = source.replace(
         f"@{DECORATOR_TARGET}.tool()\ndef warmup(",
         f"@{DECORATOR_TARGET}.tool(\n)\ndef warmup(",
         1,
     )
+    assert reshaped != source, "the reshape mutation found nothing to reshape"
     with pytest.raises(AssertionError) as excinfo:
-        _parse_tool_names(source)
+        _parse_tool_names(reshaped)
     assert "the regex missed one" in str(excinfo.value)
 
 
