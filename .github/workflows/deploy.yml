@@ -269,7 +269,10 @@ jobs:
           echo "Asking production: $PROD_VERSION_URL"
           if ! body=$(curl -fsS --max-time 30 --retry 4 --retry-delay 5 \
                         --retry-connrefused --retry-all-errors "$PROD_VERSION_URL" 2>&1); then
-            echo "::error title=Deploy drift watcher could not observe production::GET $PROD_VERSION_URL failed after retries: ${body//$'\n'/ }. This job asserts what production is RUNNING, so it cannot pass without an answer — a watcher that shrugs when it cannot see is the failure mode this repo keeps rediscovering. For context, GitHub's last successful deploy was: $(diagnose)."
+            # Last line only: each retry restates the same error, and a five-times
+            # repeated sentence in an annotation is how an alarm stops being read.
+            why=$(printf '%s' "$body" | tail -n 1)
+            echo "::error title=Deploy drift watcher could not observe production::GET $PROD_VERSION_URL failed after retries: ${why:-no output from curl}. This job asserts what production is RUNNING, so it cannot pass without an answer — a watcher that shrugs when it cannot see is the failure mode this repo keeps rediscovering. For context, GitHub's last successful deploy was: $(diagnose)."
             exit 1
           fi
 

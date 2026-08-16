@@ -228,10 +228,21 @@ blindly":
   nothing goes red, and the drift self-heals on the next app-code merge. The watcher is the scheduled
   **`Deploy drift watcher`** job in `deploy.yml`, which fails loudly when `main` carries image-affecting
   commits production isn't running (`workflow_dispatch` runs it on demand; the deploy jobs are hard-gated
-  on `workflow_run`, so a manual dispatch cannot ship anything). **To check by hand, compare `main`
-  against the head SHA of the newest Deploy run whose `Deploy to Fly.io` *job* succeeded** — not the
-  newest run whose *workflow-level* conclusion was `success`, which reads `success` with that job
-  `skipped` on every docs-only merge. That distinction is the trap.
+  on `workflow_run`, so a manual dispatch cannot ship anything). **Since KAN-595 the watcher OBSERVES
+  production instead of inferring it**: the app image bakes its build commit in (`Dockerfile`
+  `ARG GIT_REVISION` → `ENV`, passed by `deploy.yml` as `flyctl deploy --build-arg`) and republishes it
+  at **`GET /api/health/version`**, so **to check by hand:
+  `curl -s https://simple-kanban-jian.fly.dev/api/health/version` and compare to
+  `git rev-parse origin/main`.** That catches what Actions history structurally cannot — a Fly-side
+  rollback, a machine that never restarted, a `flyctl deploy` from a laptop. Two things to know: the
+  endpoint reports the revision the *build arg* named, so a wrongly-passed arg would be believed (a
+  smaller gap than inference, not a closed one); and the **SPA catch-all is mounted as
+  `GET /{full_path:path}` with no `/api` exclusion**, so an image predating the endpoint answers **200
+  with `index.html`** — check the body's shape, never the status code. The old Actions-history walk
+  survives inside the watcher as a failure-path diagnostic; if you run it by hand, **compare against the
+  head SHA of the newest Deploy run whose `Deploy to Fly.io` *job* succeeded** — not the newest run whose
+  *workflow-level* conclusion was `success`, which reads `success` with that job `skipped` on every
+  docs-only merge. That distinction is the trap.
   **The watcher blinded itself once, and the shape is worth remembering** (2026-08-14): it is a job in
   `deploy.yml`, so its own cron runs *are* `Deploy` runs — eight a day, none able to contain a deploy
   job — and they evicted the real deploys from its fixed 40-run window. 39 of the last 45 Deploy runs
