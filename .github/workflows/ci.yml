@@ -96,17 +96,18 @@ jobs:
         with:
           # EVERY FILTER HERE MUST HAVE A CONSUMER. There is deliberately no
           # `app:` union filter (KAN-596): one existed from KAN-37 until now,
-          # declared as a job output and read by NOTHING — `needs.changes.
-          # outputs.app` never appeared in this file in its entire history. It
-          # was not merely unused, it MISLED: KAN-584's card cited it as "the app
-          # union" that should have matched `Dockerfile`, framing the gap as a
-          # filter missing an entry, when the truth was that the filter could
-          # never have caught anything because no job was gated on it. A
-          # classifier with no consumer reads as coverage and provides none —
-          # the same family as this milestone's recurring "guard with no
-          # watcher", one level out. deploy.yml has its own, separate `app`
-          # filter which IS consumed (by its `deploy` job's `if:`); job outputs
-          # are not visible across workflows, so the two never interacted.
+          # declared as a job output and read by NOTHING —
+          # `needs.changes.outputs.app` never appeared in this file in its
+          # entire history. It was not merely unused, it MISLED: KAN-584's card
+          # cited it as "the app union" that should have matched `Dockerfile`,
+          # framing the gap as a filter missing an entry, when the truth was
+          # that the filter could never have caught anything because no job was
+          # gated on it. A classifier with no consumer reads as coverage and
+          # provides none — the same family as this milestone's recurring
+          # "guard with no watcher", one level out. deploy.yml has its own,
+          # separate `app` filter which IS consumed (by its `deploy` job's
+          # `if:`); job outputs are not visible across workflows, so the two
+          # never interacted.
           # Pinned by mcp/tests/test_ci_filter_outputs.py.
           filters: |
             backend:
