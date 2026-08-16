@@ -1905,10 +1905,14 @@ def test_warmup_adds_the_unset_origin_hint_only_when_nothing_configured_a_url(
     assert "PANDAN_API_URL" in unconfigured
     assert "pandan config set --api-url" in unconfigured
 
-    monkeypatch.setenv("PANDAN_API_URL", "http://localhost:8000")
+    # Deliberately the default *string*, explicitly set: this is the case a
+    # `config.api_url == DEFAULT_API_URL` shortcut would get wrong.
+    monkeypatch.setenv("PANDAN_API_URL", config.DEFAULT_API_URL)
     _warmup(monkeypatch, status="unreachable", origin="http://localhost:8000", detail=detail)
     cli.run(["warmup"])
-    assert "PANDAN_API_URL is" not in capsys.readouterr().out
+    configured = capsys.readouterr().out
+    assert "pandan config set --api-url" not in configured
+    assert configured.strip().endswith(detail)
 
 
 def test_warmup_hint_is_not_added_for_a_half_migrated_kanban_env(monkeypatch, env, capsys):
