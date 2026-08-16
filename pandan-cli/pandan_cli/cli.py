@@ -84,6 +84,20 @@ Exit codes (for scripting) — **stable, never renumbered**:
     4  403 forbidden (board exists but isn't yours)
     5  404 not found — including a KAN-/EPIC- ticket that resolves to nothing, so
        the code doesn't depend on whether you addressed the card by id or by ticket
+    6  409 conflict — the resource state contradicts the request
+
+``6`` is an **addition**, not a renumbering (V51-era, KAN-831): it is the pandan half of
+a suite-wide decision taken on kaya's side (kaya KAN-724 / kaya ADR 0009), where a 409 is
+a designed, *retryable* outcome (a stale ``--if-updated-at`` precondition comes back with
+the attempted and stored notes so the caller can merge and retry). kaya adopted this exit
+table verbatim from pandan so an operator scripting both never has to remember which is
+which, so letting the same status exit ``6`` there and ``1`` here would reintroduce
+exactly the cost the shared table removes. **Be honest about what pandan gains**: its own
+two 409s — a duplicate board member, and a card write with no board to default to — are
+*terminal*, not retryable, so pandan gains the sameness rather than retry semantics. That
+is still worth having on its own: a caller can tell "already a member" from "the API is
+unreachable" without parsing stdout. Not ``2`` — ``2`` means the caller's *input* was
+rejected, and a 409 is well-formed input meeting an inconvenient world.
 
 The rule that decides 1 vs 2: **argparse rejected argv → 2; the CLI rejected a value
 at runtime → 1.** ``ERROR_CODES`` below is the whole vocabulary, and each machine
@@ -124,6 +138,7 @@ EXIT_USAGE = 2  # argparse's own convention; documented here for completeness.
 EXIT_AUTH = 3
 EXIT_FORBIDDEN = 4
 EXIT_NOT_FOUND = 5
+EXIT_CONFLICT = 6  # 409 — added in KAN-831; see the docstring's exit-code table.
 
 # --- the error contract (V43, KAN-426 — AXI 6) -------------------------------
 # Every machine `code` maps to exactly one exit code. **Both are a published
@@ -144,6 +159,7 @@ ERROR_CODES: dict[str, int] = {
     "unauthorized": EXIT_AUTH,            # 401
     "forbidden": EXIT_FORBIDDEN,          # 403
     "not_found": EXIT_NOT_FOUND,          # 404, or a ticket that resolves to nothing
+    "conflict": EXIT_CONFLICT,            # 409 — the stored state contradicts the request
     "api_error": EXIT_ERROR,              # any other non-2xx
     # The request never got an answer, or the CLI itself broke.
     "transport": EXIT_ERROR,
@@ -151,7 +167,7 @@ ERROR_CODES: dict[str, int] = {
 }
 
 # HTTP status → machine code. Anything else is "api_error" (exit 1).
-_STATUS_CODE = {401: "unauthorized", 403: "forbidden", 404: "not_found"}
+_STATUS_CODE = {401: "unauthorized", 403: "forbidden", 404: "not_found", 409: "conflict"}
 # Kept as a derived view (one source of truth) — status → exit code.
 _STATUS_EXIT = {status: ERROR_CODES[code] for status, code in _STATUS_CODE.items()}
 
