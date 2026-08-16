@@ -75,8 +75,8 @@ A few deliberate choices, which matter as much to a shell script as to an agent:
 **Errors go to stdout, machine-readable.** One tab-separated row, or an `{"error": {…}}` object under
 `--format json`. Nothing important is written to stderr, so a script never has to merge two streams.
 
-**Exit codes distinguish causes.** `3` for unauthorized, `4` for forbidden, `5` for not-found. See
-[errors and exit codes](errors-and-exit-codes.md).
+**Exit codes distinguish causes.** `3` for unauthorized, `4` for forbidden, `5` for not-found, `6` for
+conflict. See [errors and exit codes](errors-and-exit-codes.md).
 
 **Every list ends with a summary.** Counts come pre-computed with the rows, so asking "how many are in
 progress" never costs a second request.

@@ -18,10 +18,34 @@ can parse. Neither requires reading prose, and neither goes to stderr.
 | `3` | Unauthorized (`401`) | Token missing, malformed, or revoked |
 | `4` | Forbidden (`403`) | Valid token, but no access to that board |
 | `5` | Not found (`404`) | No such card, epic or board, including a ticket that matches nothing |
+| `6` | Conflict (`409`) | The stored state contradicts the request — e.g. that user is already a member of the board |
 
-The split between `3`, `4` and `5` is the point. A CI job can tell "my credentials are wrong" from
-"that board is not mine" from "that ticket does not exist", and react differently, without matching on
-message text.
+The split between `3`, `4`, `5` and `6` is the point. A CI job can tell "my credentials are wrong"
+from "that board is not mine" from "that ticket does not exist" from "the board already looks like
+that", and react differently, without matching on message text.
+
+The numbers are stable. Rows get **added**, never renumbered, so a script written against `3`/`4`/`5`
+keeps working.
+
+!!! note "Why `6` exists, and what it does and does not promise here"
+
+    `6` is shared with [kaya](https://github.com/leejianrong/kaya), pandan's notes sibling. kaya
+    adopted this exit table from pandan verbatim, on the ground that an operator scripting both tools
+    should never have to remember which is which. In kaya a `409` is a designed, **retryable**
+    outcome: `kaya note edit <ref> --if-updated-at <stale>` is refused with a body carrying the
+    attempted and the stored note, precisely so the caller can diff them and retry. Exit `1` there
+    means "kaya failed", which sends a script either to retry a stale precondition forever or to
+    abandon a conflict it could have merged. So kaya added `6`, and pandan added it too rather than
+    let the same HTTP status exit `6` from one tool and `1` from the other.
+
+    Be honest about the pandan side of that trade: pandan's own `409`s are **terminal, not
+    retryable**. A duplicate board member does not become addable on a re-read, and a card write with
+    no board to default to needs you to create a board, not to try again. pandan gains the sameness
+    more than it gains retry semantics — which is still worth having, because telling "already a
+    member" from "the API is unreachable" without parsing stdout is a real improvement on its own.
+
+    It is deliberately not `2`. `2` means *your input was rejected*; a `409` is well-formed input
+    meeting an inconvenient world.
 
 ## The error row
 
@@ -72,7 +96,7 @@ So branching is a one-liner:
 code=$(pandan get "$TICKET" --json | jq -r '.error.code // "ok"')
 ```
 
-The `code` values are stable: `not_found`, `unauthorized`, `forbidden`, `usage`, `error`.
+The `code` values are stable: `not_found`, `unauthorized`, `forbidden`, `conflict`, `usage`, `error`.
 
 ## Handling failure in a script
 
@@ -88,6 +112,7 @@ case $? in
   3) echo "token is bad, refresh it"; exit 1 ;;
   4) echo "that board is not ours, skipping"; exit 0 ;;
   5) echo "no such ticket, nothing to do"; exit 0 ;;
+  6) echo "already in that state, nothing to do"; exit 0 ;;
   *) echo "unexpected failure"; cat /tmp/card.txt; exit 1 ;;
 esac
 ```
@@ -120,7 +145,8 @@ printf %s "$PANDAN_TOKEN" | pandan login --token-stdin   # correct in CI
 
 ## Recap
 
-- Exit `3`, `4`, `5` for unauthorized, forbidden, not-found. `2` for usage, `1` for everything else.
+- Exit `3`, `4`, `5`, `6` for unauthorized, forbidden, not-found, conflict. `2` for usage, `1` for
+  everything else.
 - Errors are one tab-separated row on stdout, or `{"error": {…}}` under `--json`.
 - An empty result is exit `0`, not a failure.
 - Nothing prompts when stdin is not a terminal.

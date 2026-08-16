@@ -1167,6 +1167,7 @@ def test_missing_token_is_config_error(monkeypatch, capsys):
         (401, cli.EXIT_AUTH),
         (403, cli.EXIT_FORBIDDEN),
         (404, cli.EXIT_NOT_FOUND),
+        (409, cli.EXIT_CONFLICT),
         (500, cli.EXIT_ERROR),
     ],
 )
@@ -1175,9 +1176,12 @@ def test_api_error_maps_to_exit_code(monkeypatch, env, capsys, status, expected)
     code = cli.run(["get", "1"])
     assert code == expected
     err = read_error(capsys)
-    assert err.code == {401: "unauthorized", 403: "forbidden", 404: "not_found"}.get(
-        status, "api_error"
-    )
+    assert err.code == {
+        401: "unauthorized",
+        403: "forbidden",
+        404: "not_found",
+        409: "conflict",
+    }.get(status, "api_error")
     assert "boom" in err.message
 
 
@@ -3459,7 +3463,8 @@ def test_wrong_entity_ticket_is_rejected_up_front(monkeypatch, env, capsys, argv
 
 # --- V43 / KAN-426: the error contract (AXI 6) -------------------------------
 # Three things are pinned here, because all three are a published contract:
-#   1. the SIX exit codes and their meanings (scripts branch on them — never renumber),
+#   1. the SEVEN exit codes and their meanings (scripts branch on them — never renumber;
+#      6 was ADDED in KAN-831 without moving any of 0–5),
 #   2. the machine `code` vocabulary and its code→exit mapping,
 #   3. the *stream* and *shape*: one row on stdout, JSON under --json, human extras
 #      (argparse usage, the KANBAN_* notice) on stderr.
@@ -3475,8 +3480,11 @@ def test_exit_code_scheme_is_pinned_by_literal_numbers():
     assert cli.EXIT_AUTH == 3
     assert cli.EXIT_FORBIDDEN == 4
     assert cli.EXIT_NOT_FOUND == 5
+    # KAN-831: 6 is the suite-wide 409 row shared with kaya (kaya KAN-724 / kaya ADR
+    # 0009). Purely additive — every number above it is untouched.
+    assert cli.EXIT_CONFLICT == 6
     # HTTP status → exit code, the mapping verified against prod (401→3, 403→4, 404→5).
-    assert cli._STATUS_EXIT == {401: 3, 403: 4, 404: 5}
+    assert cli._STATUS_EXIT == {401: 3, 403: 4, 404: 5, 409: 6}
 
 
 def test_error_code_vocabulary_is_pinned():
@@ -3494,6 +3502,7 @@ def test_error_code_vocabulary_is_pinned():
         "unauthorized": 3,
         "forbidden": 4,
         "not_found": 5,
+        "conflict": 6,
         "api_error": 1,
         "transport": 1,
         "unexpected": 1,
@@ -3657,6 +3666,23 @@ def test_json_error_carries_code_message_arg_status_and_exit_code(monkeypatch, e
         "arg": None,
         "status": 403,
         "exit_code": 4,
+    }
+
+
+def test_a_real_409_exits_6_and_says_conflict(monkeypatch, env, capsys):
+    """KAN-831, pinned by the literal `6`. The detail is verbatim from the API's own
+    409 (backend/app/routers/boards.py `resolve_board_id`), so the human row and the
+    exit code agree: `conflict` is what a caller reads, `6` is what a script branches
+    on, and neither says "the request was malformed"."""
+    detail = "no board exists; create one first"
+    patch_client(monkeypatch, FakeClient(error=PandanApiError(409, detail)))
+    assert cli.run(["create", "x", "--json"]) == 6
+    assert read_json_error(capsys) == {
+        "code": "conflict",
+        "message": "409: no board exists; create one first",
+        "arg": None,
+        "status": 409,
+        "exit_code": 6,
     }
 
 
