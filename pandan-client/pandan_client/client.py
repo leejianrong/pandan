@@ -225,6 +225,16 @@ class PandanClient:
 
     # --- health / warmup ----------------------------------------------------
 
+    def origin(self) -> str:
+        """The origin this client reaches ``/api/health`` at — ``scheme://host[:port]``,
+        i.e. the value ``PANDAN_API_URL`` takes, with the ``/api/v1`` prefix removed.
+
+        Exists so a caller can **name the URL it tried** in an error (KAN-613). It is
+        derived the same way ``health()`` derives its URL (swap the whole path), so
+        the two cannot disagree about where the ping went.
+        """
+        return str(self._client.base_url.copy_with(raw_path=b"/")).rstrip("/")
+
     def health(self) -> dict[str, Any]:
         """GET the **unversioned** ``/api/health`` (it lives at the origin, not
         under ``/api/v1``). Rides a cold start via the shared retry/timeout and
@@ -241,22 +251,62 @@ class PandanClient:
         """Wake a scaled-to-zero server by pinging ``/api/health``.
 
         Rides the cold start via the shared retry/timeout (an idempotent GET is
-        retried once), but **does not throw** on a slow wake: a still-waking
-        server (transport error/timeout) returns ``{"status": "waking", ...}`` and
-        any other API error returns ``{"status": "error", ...}``, so an agent gets
-        a clear result to act on rather than an exception. A healthy server returns
-        ``{"status": "ok", "health": {...}}``.
+        retried once), but **does not throw** on a slow wake — the outcome is a
+        status the caller can act on. Every result carries ``origin``: the URL that
+        was actually tried, which is the one thing a failed warmup could never tell
+        you before (KAN-613).
+
+        Three failure statuses, because "it didn't answer" has three very different
+        cures:
+
+        - ``unreachable`` — the connection was refused, or the host did not resolve.
+          Nothing is listening there. **Retrying will not help**; the origin is
+          wrong, or the server is down. This is the case that used to be reported as
+          a cold start, which sent an unconfigured machine into an endless retry loop.
+        - ``waking`` — the origin answered, or at least held the connection, but
+          isn't serving yet: a timeout, a dropped handshake, or a ``5xx``. This is a
+          genuine cold start (the Fly free tier scales to zero) and "retry shortly"
+          is the right advice.
+        - ``error`` — any other API failure (a ``4xx``), which is neither.
+
+        A healthy server returns ``{"status": "ok", "origin": ..., "health": {...}}``.
         """
+        origin = self.origin()
         try:
             body = self.health()
+        except httpx.ConnectError as exc:
+            # ConnectError is refusal or DNS failure — the request provably never
+            # reached a server. (``_send_with_retry`` has already retried it once, so
+            # a momentary blip during a wake is absorbed before we get here.) It is
+            # NOT a TimeoutException, so this branch cannot swallow a slow wake:
+            # httpx keeps ``ConnectTimeout`` on a separate arm of the hierarchy, and
+            # that one falls through to ``waking`` below.
+            return {
+                "status": "unreachable",
+                "origin": origin,
+                "detail": (
+                    f"nothing is listening at {origin} ({exc.__class__.__name__}: {exc}). "
+                    "This is not a cold start — check the origin."
+                ),
+            }
         except httpx.TransportError as exc:
             return {
                 "status": "waking",
+                "origin": origin,
                 "detail": f"server not ready yet ({exc.__class__.__name__}); retry shortly",
             }
         except PandanApiError as exc:
-            return {"status": "error", "detail": str(exc)}
-        return {"status": "ok", "health": body}
+            if exc.status_code >= 500:
+                # Reachable, answering, but not serving — a proxy in front of a
+                # machine that is still booting. That is the cold start warmup exists
+                # for, so it retries like one rather than reporting a hard error.
+                return {
+                    "status": "waking",
+                    "origin": origin,
+                    "detail": f"server not ready yet ({exc}); retry shortly",
+                }
+            return {"status": "error", "origin": origin, "detail": str(exc)}
+        return {"status": "ok", "origin": origin, "health": body}
 
     # --- reads --------------------------------------------------------------
 

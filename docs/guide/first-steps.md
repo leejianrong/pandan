@@ -33,21 +33,27 @@ pandan config set --api-url https://simple-kanban-jian.fly.dev
 
     With no configuration the CLI targets `http://localhost:8000`, because that is where a
     development backend runs. If you skip this step, every command fails against a server that
-    isn't there, and `warmup` reports this:
+    isn't there, and `warmup` says so:
 
     ```console
     $ pandan warmup
-    waking	server not ready yet (ConnectError); retry shortly
+    unreachable	http://localhost:8000	nothing is listening at http://localhost:8000
+    (ConnectError: [Errno 111] Connection refused). This is not a cold start — check the
+    origin. Nothing set PANDAN_API_URL, so that is only the built-in local-dev default: on
+    a fresh install this is the bug. Point it at your board with `pandan config set
+    --api-url https://<your-host>`.
+    $ echo $?
+    7
     ```
 
-    That message describes a cold start, and it is misleading here. Nothing is waking up, because
-    nothing is listening. If you see it on a fresh install, you have not set `--api-url` yet.
+    `unreachable` is not `waking`. Waiting will not fix it, and exit `7` says exactly that — see
+    [errors and exit codes](cli/errors-and-exit-codes.md).
 
 Now wake the API:
 
 ```console
 $ pandan warmup
-ok	API is awake
+ok	https://simple-kanban-jian.fly.dev	API is awake
 ```
 
 The hosted board runs on infrastructure that scales to zero, so the first request after an idle

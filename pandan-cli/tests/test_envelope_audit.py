@@ -153,6 +153,7 @@ NON_ENVELOPE_KEYS = {
     "status": "warmup — `_warmup_line`",
     "health": "warmup's nested probe body, under `status`",
     "detail": "warmup's error branch, under `status`",
+    "origin": "KAN-613 — the URL warmup tried, a cell of `_warmup_line`, under `status`",
     "card_id": "list_dependencies — `_dep_block` (a card keys itself under `id`)",
     "blocked_by": "list_dependencies, beside `card_id`",
     "blocks": "list_dependencies, beside `card_id`",

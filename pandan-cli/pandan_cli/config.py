@@ -320,6 +320,25 @@ def load_config(*, require_token: bool = True) -> Config:
     )
 
 
+def api_url_is_default() -> bool:
+    """True when **no source** supplied ``api_url`` and the CLI fell back to
+    ``DEFAULT_API_URL`` (KAN-613).
+
+    This lives here, not in ``pandan_client``, because it is a question about *local
+    configuration*, not about the API: the client is a thin API adapter (ADR 0005),
+    handed a base URL it has no way to judge. Only the resolution chain knows whether
+    that URL was chosen or merely defaulted.
+
+    It re-asks the chain rather than comparing ``config.api_url == DEFAULT_API_URL``,
+    so someone deliberately pointing at a local dev backend is **not** told they
+    forgot to configure one — and so a half-migrated environment that sets only the
+    deprecated ``KANBAN_API_URL`` counts as configured, because the fallback resolved
+    it. Only called on a failure path, so the second pass over the sources is free
+    (and ``_warn_once`` keeps it from re-printing a deprecation notice).
+    """
+    return not resolve_values().get("api_url")
+
+
 def resolve_values() -> dict[str, str]:
     """Merge the sources with env > config-file > ``.mcp.json`` precedence,
     per value. Exposed (not just inlined in ``load_config``) so ``pandan config show``
