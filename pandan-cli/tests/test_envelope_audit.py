@@ -65,7 +65,7 @@ where envelopes came from the day KAN-519 chose it, and ``overview`` — which b
 counterexample. A guard that exists to *enumerate a class* had a member outside its
 reach, and that member was found by a different walk entirely.
 
-So section 5 scans the handlers. ``_payload_keys`` (section 4) already reads all three
+So section 5 scans the handlers. ``_payload_keys`` (section 4) already read three of the
 handler return shapes; what was missing is a **class** guard over its output — section 4
 keeps only the keys already in ``_LIST_ENVELOPES`` and discards the rest, so a brand-new
 ``return {"restored": rows}`` contributed nothing and nothing failed.
@@ -79,21 +79,39 @@ in a shape it cannot parse is silently reported as envelope-less — the same fa
 level down. The readable shapes are therefore enumerated and pinned, and a new one fails
 with the offending source line rather than being waved through.
 
-**What section 5 still cannot see**, stated plainly because a scanner that implies
-completeness is worse than one that doesn't:
+**It caught one within hours, and not a synthetic one.** KAN-613 landed on ``main`` while
+this was in review and rewrote ``_cmd_warmup`` to ``result = client.warmup()`` … ``result
+= {**result, "detail": …}`` … ``return result`` — a fourth return shape, the exact form
+this section's own mutation test had used as its counterexample. The merge was textually
+clean (branch protection here is ``strict: false``, so nothing else would have stopped
+it); the meta-guard was the only thing that noticed. It was resolved the way the guard's
+message recommends — teach ``_payload_keys`` the shape, do not reshape the product code —
+so ``local variable`` is now a readable shape and ``_cmd_warmup`` is its anchor.
 
-- **A ``**`` expansion of anything but a client call.** ``{"tool": …,
-  **client.list_boards()}`` is read; ``{"tool": …, **payload}`` would contribute nothing
-  and still count as a readable "dict literal". This is the nearest live hole.
-- **Non-constant keys.** ``{noun: rows}`` is dropped — there is no static key to read.
+**What section 5 still cannot see**, stated plainly because a scanner that implies
+completeness is worse than one that doesn't, and re-checked against the code on
+2026-08-16:
+
+- **Non-constant keys.** ``{noun: rows}`` or a dict comprehension's key is dropped —
+  there is no static string to read, and the enclosing dict still counts as a readable
+  shape, so nothing fails. **This is the nearest live hole**, and it is the one to close
+  next if a handler ever computes a key.
 - **Keys the renderer invents.** ``_humanize`` / ``_structured_payload`` reshape *after*
   the handler returns; only what a handler returns is scanned.
+- **Whatever section 0 cannot read.** A ``client.<method>()`` return is looked up in the
+  client-source scanner rather than re-derived, so this section inherits that scanner's
+  own limits exactly.
 - **The MCP server.** ``mcp/`` assembles its own payloads and is a separate surface with a
   separate contract; nothing here says anything about it.
 
-The first two are shapes no handler uses today (checked, 2026-08-16). The point of the
-shape guard is that the one you would reach for first instead — building the dict into a
-local and returning it by name — now fails loudly rather than reading as empty.
+Two things it deliberately over-reports, which is the safe direction: a local's keys are
+unioned across **every** assignment to it, so a key set only on a branch that cannot be
+taken still counts; and a self-referential spread (``result = {**result, …}``) is resolved
+by breaking the cycle rather than by ordering the assignments.
+
+What it no longer misses: a ``**`` spread of something unreadable, and a dict built into a
+local. Both used to read as "no envelope" in silence. Both now fail by name — the second
+one having done so for real.
 """
 from __future__ import annotations
 
@@ -475,6 +493,39 @@ def _cli_module_functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
     }
 
 
+def _local_assignments(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[dict[str, list[ast.expr]], dict[str, set[str]]]:
+    """``({local: [every value assigned to it]}, {local: keys set on it by subscript})``.
+
+    Every assignment is collected, not the last one, because a handler that rebinds a
+    name (``result = client.warmup()`` then ``result = {**result, "detail": …}``) can
+    return either shape depending on a branch — so the readable answer is the union.
+    ``AugAssign`` counts: ``result |= {"restored": rows}`` is the same move written
+    shorter, and would otherwise be a free way past the guard."""
+    values: dict[str, list[ast.expr]] = {}
+    subscripts: dict[str, set[str]] = {}
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign):
+            targets: list[ast.expr] = list(node.targets)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets = [node.target]
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                if node.value is not None:
+                    values.setdefault(target.id, []).append(node.value)
+            elif (
+                isinstance(target, ast.Subscript)
+                and isinstance(target.value, ast.Name)
+                and isinstance(target.slice, ast.Constant)
+                and isinstance(target.slice.value, str)
+            ):
+                subscripts.setdefault(target.value.id, set()).add(target.slice.value)
+    return values, subscripts
+
+
 def _payload_keys(
     name: str,
     funcs: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
@@ -483,7 +534,7 @@ def _payload_keys(
 ) -> set[str]:
     """Every top-level key the handler ``name`` can return, statically.
 
-    Three return shapes occur among the ``_cmd_*`` handlers and all three matter:
+    Four return shapes occur among the ``_cmd_*`` handlers and all four matter:
 
     1. ``return client.list_cards(...)`` — the client's own envelope, looked up in
        the section-0 scanner rather than re-derived.
@@ -492,20 +543,34 @@ def _payload_keys(
        a client-only scan, which is exactly how it survived KAN-519's audit.
     3. ``return _dep_facet(client.add_dependency(...), card_id)`` — reshaped through a
        module-level helper, so the walk recurses into it (``seen`` guards a cycle).
+    4. ``result = client.warmup()`` … ``result = {**result, "detail": …}`` …
+       ``return result`` — built into a local first, so the walk resolves the name
+       through **every** value assigned to it (plus any key set on it by subscript)
+       and unions the lot. ``_cmd_warmup`` (KAN-613) is the live instance; a
+       self-referential spread like the one above is why the resolution carries its
+       own cycle guard.
+
+    Shape 4 was **not** readable when this section shipped, and the meta-guard below
+    caught ``_cmd_warmup`` adopting it on ``main`` four hours later — the widening is
+    that catch, resolved the way the guard's own message recommends (teach the
+    scanner, don't reshape the product code).
 
     Anything else contributes nothing, which is the safe direction: an unrecognised
     return shape reports "no envelope", and a verb wrongly reported as envelope-less
-    can only make the guard below *miss*, never false-positive."""
+    can only make the guard below *miss*, never false-positive. It is also no longer
+    silent — ``test_every_handler_return_is_a_shape_the_scanner_can_read`` fails on a
+    return this function cannot read."""
     if name in seen or name not in funcs:
         return set()
     seen = seen | {name}
+    values, subscripts = _local_assignments(funcs[name])
 
-    def from_expr(node: ast.AST) -> set[str]:
+    def from_expr(node: ast.AST, locals_seen: frozenset[str] = frozenset()) -> set[str]:
         keys: set[str] = set()
         if isinstance(node, ast.Dict):
             for key, value in zip(node.keys, node.values):
                 if key is None:  # `**expr` — expand whatever it returns
-                    keys |= from_expr(value)
+                    keys |= from_expr(value, locals_seen)
                 elif isinstance(key, ast.Constant) and isinstance(key.value, str):
                     keys.add(key.value)
         elif isinstance(node, ast.Call):
@@ -518,6 +583,11 @@ def _payload_keys(
                 keys |= client_keys.get(func.attr, set())
             elif isinstance(func, ast.Name):
                 keys |= _payload_keys(func.id, funcs, client_keys, seen)
+        elif isinstance(node, ast.Name) and node.id not in locals_seen:
+            inner = locals_seen | {node.id}
+            for value in values.get(node.id, ()):
+                keys |= from_expr(value, inner)
+            keys |= subscripts.get(node.id, set())
         return keys
 
     return {
@@ -760,6 +830,9 @@ def test_the_handler_scanner_sees_what_the_client_scanner_cannot():
     assert keys["_cmd_overview"] == {"tool", "cards", "next_cursor", "boards"}
     assert keys["_cmd_list"] == {"cards", "next_cursor", "unresolved"}
     assert keys["_cmd_link_add"] == {"card_id", "links"}
+    # Shape 4, the one the meta-guard below caught `main` adopting: a local rebound
+    # through a self-referential spread, `client.warmup()` ∪ the `detail` KAN-613 adds.
+    assert keys["_cmd_warmup"] == {"status", "origin", "health", "detail"}
     # A `local_func` verb: no payload, and unreachable from `verb_audit`'s parser walk.
     assert keys["_cmd_config_show"] == set()
     # The blind spot itself, named as literals. `overview` — the known counterexample —
@@ -822,6 +895,7 @@ _READABLE_RETURN_SHAPES = frozenset({
     "client method call",    # `return client.list_cards(…)`
     "module-level helper",   # `return _link_facet(client.add_link(…), card_id)`
     "exit code",             # `return EXIT_OK` — a local verb that printed for itself
+    "local variable",        # `result = …` … `return result` — warmup (KAN-613)
 })
 
 # Names a handler may return that are an exit status rather than a payload.
@@ -829,11 +903,27 @@ _EXIT_NAMES = frozenset({"EXIT_OK", "EXIT_ERROR", "EXIT_USAGE"})
 
 
 def _return_shape(
-    value: ast.expr, funcs: dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
+    value: ast.expr,
+    funcs: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    values: dict[str, list[ast.expr]],
+    locals_seen: frozenset[str] = frozenset(),
 ) -> str | None:
     """Which of ``_payload_keys``' readable shapes this returned expression is, or
-    ``None`` when the scanner cannot read it."""
+    ``None`` when the scanner cannot read it.
+
+    **Recursive, and that is the point.** A local is only readable if everything
+    assigned to it is readable too: ``payload = dict(restored=rows)`` … ``return
+    payload`` is a ``Name`` bound to a call ``_payload_keys`` cannot see through, so
+    answering "local variable — fine" would restore the blind spot one level down,
+    which is precisely the mistake this guard exists to prevent. A ``**`` spread is
+    checked the same way; its sibling *values* are not, because only keys are read."""
     if isinstance(value, ast.Dict):
+        spreads = [v for k, v in zip(value.keys, value.values) if k is None]
+        if any(
+            _return_shape(spread, funcs, values, locals_seen) is None
+            for spread in spreads
+        ):
+            return None
         return "dict literal"
     if isinstance(value, ast.Call):
         func = value.func
@@ -845,8 +935,18 @@ def _return_shape(
             return "client method call"
         if isinstance(func, ast.Name) and func.id in funcs:
             return "module-level helper"
-    if isinstance(value, ast.Name) and value.id in _EXIT_NAMES:
-        return "exit code"
+    if isinstance(value, ast.Name):
+        if value.id in _EXIT_NAMES:
+            return "exit code"
+        if value.id in locals_seen:  # self-referential spread — already being checked
+            return "local variable"
+        if value.id in values:
+            inner = locals_seen | {value.id}
+            if all(
+                _return_shape(assigned, funcs, values, inner) is not None
+                for assigned in values[value.id]
+            ):
+                return "local variable"
     return None
 
 
@@ -858,7 +958,9 @@ def handler_returns() -> list[tuple[str, str, str | None]]:
         (
             name,
             "return" if node.value is None else ast.unparse(node.value),
-            None if node.value is None else _return_shape(node.value, funcs),
+            None
+            if node.value is None
+            else _return_shape(node.value, funcs, _local_assignments(fn)[0]),
         )
         for name, fn in funcs.items()
         if name.startswith("_cmd_")
@@ -907,6 +1009,7 @@ def test_every_handler_return_is_a_shape_the_scanner_can_read():
     assert shapes["_cmd_list"] == {"client method call"}
     assert shapes["_cmd_link_add"] == {"module-level helper"}
     assert shapes["_cmd_config_show"] == {"exit code"}
+    assert shapes["_cmd_warmup"] == {"local variable"}
     assert {shape for _n, _s, shape in returns} == set(_READABLE_RETURN_SHAPES), (
         "an allow-listed return shape no handler uses — it is waving through a shape "
         "nobody writes, which is how an allow-list stops describing the code"
