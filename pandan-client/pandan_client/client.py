@@ -169,6 +169,22 @@ class PandanClient:
             time.sleep(self._retry_backoff)
         return self._client.request(method, path, **kwargs)
 
+    # --- identity (KAN-530 API / KAN-614 adapter) ---------------------------
+
+    def me(self) -> dict[str, Any]:
+        """GET ``/api/v1/me`` — who this credential authenticates as (``id`` + ``email``).
+
+        The one ``/api/v1`` route with **no board** (KAN-530, issue #253), which is
+        exactly why it answers the question a caller has *before* picking one: did my
+        token work, and whose is it? There is nothing to authorize against, so the only
+        outcomes are **200** and the resolver's **401** — never a 403.
+
+        Returns the API's own body unchanged. It is deliberately the minimum (id +
+        email) because it is a cross-app contract — kaya delegates identity here and
+        mirrors the returned UUID — so this adapter neither reshapes nor wraps it.
+        """
+        return self._request("GET", "/me").json()
+
     # --- boards (discovery — V10) -------------------------------------------
 
     def list_boards(self) -> dict[str, Any]:

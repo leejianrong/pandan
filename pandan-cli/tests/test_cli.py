@@ -228,6 +228,9 @@ class FakeClient:
     def list_comments(self, card_id):
         return self._call("list_comments", card_id=card_id)
 
+    def me(self):
+        return self._call("me")
+
 
 @pytest.fixture(autouse=True)
 def isolate_config(monkeypatch, tmp_path):
@@ -858,6 +861,72 @@ def test_notify_read_marks_by_id(monkeypatch, env, capsys):
     assert cli.run(["notify", "read", "2"]) == 0
     assert fake.calls == [("mark_notification_read", {"notification_id": 2})]
     assert "needs_human" in capsys.readouterr().out
+
+
+# --- `me` — who does this token authenticate as? (KAN-614) ------------------
+# Found in an onboarding dogfooding run: `pandan me` was the first thing reached for
+# to answer "did my token work, and who am I?", and it did not exist. `config show`
+# answers a different question (what this machine resolved) and `board list` proves
+# auth without saying whose it is.
+
+PRINCIPAL = {"id": "9f1d-not-a-card-id", "email": "you@example.test"}
+
+
+def test_me_calls_the_client_with_no_arguments(monkeypatch, env):
+    """One client call, nothing to resolve first: `GET /api/v1/me` is the one
+    `/api/v1` route with no board, so there is no `--board` to thread through."""
+    fake = patch_client(monkeypatch, FakeClient(result=PRINCIPAL))
+    assert cli.run(["me"]) == cli.EXIT_OK
+    assert fake.calls == [("me", {})]
+
+
+def test_me_human_row_is_id_then_email_and_nothing_else(monkeypatch, env, capsys):
+    """The row contract: exactly one tab-separated line, id first (so `cut -f1` is the
+    handle everywhere in this CLI), and no aggregate — two fields are not a list."""
+    patch_client(monkeypatch, FakeClient(result=PRINCIPAL))
+    assert cli.run(["me"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "9f1d-not-a-card-id\tyou@example.test\n"
+
+
+def test_me_json_is_the_api_body_verbatim(monkeypatch, env, capsys):
+    """`{id, email}` is the deliberate minimum of a cross-app contract (KAN-530), so
+    the CLI neither wraps it in an envelope nor adds a `summary` to it."""
+    patch_client(monkeypatch, FakeClient(result=PRINCIPAL))
+    assert cli.run(["me", "--json"]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out) == PRINCIPAL
+
+
+def test_me_never_reaches_the_json_dumps_fallback(monkeypatch, env, capsys):
+    """The KAN-287/478/519 family, asserted directly: a principal has no `name` and no
+    `ticket_number`, so without its own `_humanize` branch it would print indented JSON
+    with no `--json` asked for. Not-parseable-as-JSON is the assertion that fails for
+    the right reason."""
+    patch_client(monkeypatch, FakeClient(result=PRINCIPAL))
+    assert cli.run(["me"]) == cli.EXIT_OK
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(capsys.readouterr().out)
+
+
+def test_a_bad_token_makes_me_exit_three(monkeypatch, env, capsys):
+    """**The question the card is really about.** A revoked or mistyped PAT is a 401,
+    which is `unauthorized` → exit 3 — distinguishable from exit 4 (a board that isn't
+    yours), which is precisely what `board list` cannot tell you."""
+    patch_client(monkeypatch, FakeClient(error=PandanApiError(401, "Not authenticated")))
+    assert cli.run(["me"]) == cli.EXIT_AUTH
+    err = read_error(capsys)
+    assert err.code == "unauthorized"
+
+
+def test_me_needs_a_token_at_all(monkeypatch, capsys):
+    """No token configured is the shared config error (exit 1), not a network call —
+    `me` sets no `require_token=False`, unlike `warmup`."""
+    def boom(*a, **k):  # pragma: no cover - must never be reached
+        raise AssertionError("me must not build a client without a token")
+
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    monkeypatch.setattr(cli, "PandanClient", boom)
+    assert cli.run(["me"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "config"
 
 
 def test_resolve(monkeypatch, env):

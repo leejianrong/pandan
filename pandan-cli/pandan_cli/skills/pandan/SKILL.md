@@ -115,7 +115,10 @@ uv tool install "git+https://github.com/leejianrong/pandan.git#subdirectory=pand
 > memory: `ln -sf ~/.local/bin/pandan ~/.local/bin/kan` — which also guarantees the old name
 > isn't a stale pre-rebrand build sitting on your `PATH`.
 
-Confirm it works: `pandan --version`, `pandan warmup` (should print `ok`), then `pandan board list`.
+Confirm it works: `pandan --version`, `pandan warmup` (should print `ok`), then `pandan me` — one row
+of `<user_id>	<email>` when the token is good, and exit **3** when it isn't (no board is involved, so
+`4` is not reachable and a failure can only mean the credential). Then `pandan board list` for the
+board ids.
 
 `--version` prints **build provenance**, not just a number (V50, KAN-435) — `pandan 0.7.0 (bd28cf0)`
 for a release build, or an explicit `pandan 0.7.0 (source checkout, not a released build)` when run

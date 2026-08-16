@@ -642,6 +642,14 @@ def _humanize(
     # does) + ``body``; matched before the generic branches below.
     if isinstance(result, dict) and "kind" in result and "body" in result:
         return _notification_line(result, limit=limit)
+    # The `me` principal (KAN-614): `{id, email}` and nothing else. `email` is the
+    # distinctive key — no other payload this CLI renders carries one — and it is
+    # matched here rather than at the end because the generic single-entity branches
+    # below key off `name`/`ticket_number`, neither of which a principal has, so it
+    # would otherwise fall through to the `json.dumps` catch-all (the KAN-287/478/519
+    # family).
+    if isinstance(result, dict) and "email" in result and "id" in result:
+        return _me_line(result)
     if isinstance(result, dict) and "card" in result:  # dispatch / next (peek/claim)
         card = result["card"]
         return _card_block(card, limit=limit) if card else "(no card ready)"
@@ -783,6 +791,21 @@ def _epic_block(epic: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS) ->
 def _board_line(board: dict[str, Any]) -> str:
     """One concise line for a board: id, name (tab-separated)."""
     return "\t".join((str(board.get("id", "?")), _flatten(str(board.get("name", "")))))
+
+
+def _me_line(principal: dict[str, Any]) -> str:
+    """One concise line for the authenticated principal: id, email (tab-separated).
+
+    Two columns because ``GET /api/v1/me`` returns exactly two fields, and that
+    minimum is deliberate (KAN-530 — it is a cross-app contract, so pandan does not
+    grow it). Id first, like every other row here, so ``cut -f1`` is always the
+    handle and ``cut -f2`` the part a human reads."""
+    return "\t".join(
+        (
+            str(principal.get("id", "?")),
+            _flatten(str(principal.get("email") or "-")),
+        )
+    )
 
 
 def _label_line(label: dict[str, Any]) -> str:
@@ -2389,6 +2412,25 @@ def _cmd_comment_list(client: PandanClient, config: Config, args: argparse.Names
     return client.list_comments(_resolve_card_id(client, args.card_id))
 
 
+# --- who am I (KAN-614) -----------------------------------------------------
+# Sits beside the config handlers below because it answers the same onboarding
+# question, but it is emphatically NOT one of them: `config show` reports what the
+# CLI *resolved*, which is a statement about this machine's files and environment.
+# Only a round trip can say whether the API accepted any of it.
+
+
+def _cmd_me(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """``GET /api/v1/me`` — no arguments, no board, nothing to resolve first.
+
+    The verb is one client call on purpose. Its value is the *exit code* as much as
+    the row: 0 with an identity means the credential works, and a bad or revoked PAT
+    is the shared 401 → ``unauthorized`` → exit 3 every other verb already maps. 403
+    is not reachable here (there is no board to be denied), so the verb separates
+    "your token is wrong" from "that board isn't yours" — which `board list`, the
+    workaround people reach for today, cannot do."""
+    return client.me()
+
+
 # --- config handlers (local: no client, no network) -------------------------
 # These operate on local config only, so ``run()`` dispatches them via
 # ``local_func`` before building a PandanClient (and before any token is required).
@@ -3444,6 +3486,25 @@ def build_parser() -> argparse.ArgumentParser:
     # ``noun="template"``, which only names the *single*-entity render it never hits.
     _add_fields_arg(p_template_apply, "ticket,title,column")
     p_template_apply.set_defaults(func=_cmd_template_apply, noun="template")
+
+    # --- me (KAN-614): the identity behind the token -------------------------
+    # Placed with `login`/`config` because it belongs to the same onboarding moment —
+    # "did my token work, and who am I?" — and deliberately ABOVE their section
+    # header, because unlike those it is a real API call that needs a token and the
+    # network. That is the whole point: `config show` can only report what this
+    # machine resolved.
+    #
+    # No `--board` (`GET /api/v1/me` is the one `/api/v1` route with no board), no
+    # `--fields` (two fields are not a list envelope — `tests/test_envelope_audit.py`
+    # asserts the flag and the payload agree), and no `help[]` hints: after `me` the
+    # next step is whatever the caller was already doing, which is the case the
+    # `_HINTS` table exists to stay out of.
+    p_me = sub.add_parser(
+        "me",
+        parents=[common],
+        help="who your token authenticates as (id + email; exit 3 if it doesn't)",
+    )
+    p_me.set_defaults(func=_cmd_me)
 
     # --- login / config (local: no token, no network) ------------------------
     # ``login`` saves a PAT to ~/.config/pandan/config.toml without it touching argv:

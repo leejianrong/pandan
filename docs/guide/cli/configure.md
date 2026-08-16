@@ -76,6 +76,31 @@ mcp_json	None
 `config show` prints what actually resolved, from wherever it came, with the token reduced to its last
 four characters. When a command behaves unexpectedly, start here.
 
+## Checking that the token works
+
+`config show` reports what this machine resolved. Only a round trip can tell you whether the server
+accepts it, and whose it is:
+
+```console
+$ pandan me
+2b1c7f0e-…-9a41	you@example.com
+```
+
+Two columns: your user id and your email. Nothing else — the endpoint behind it
+(`GET /api/v1/me`) is deliberately minimal, and it is the one API route with no board involved.
+
+That makes the exit code the useful half. `me` either identifies you or fails with `3`:
+
+| Output | Exit | Meaning |
+| --- | --- | --- |
+| `<id>	<email>` | `0` | The token is valid, and that is who it belongs to. |
+| `error	unauthorized	…` | `3` | The token is missing, mistyped, or revoked. |
+
+There is no `4` here, because there is no board to be denied access to. That is the difference from
+`board list`, the older way of testing a token: a `4` from `board list` means the token was fine and
+the *board* was not, and a `0` from it never tells you which account you are on — which matters when
+you keep more than one PAT around.
+
 ```bash
 pandan config path                                    # just the file path
 pandan config set --api-url https://board.example.com # write one value

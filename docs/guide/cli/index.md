@@ -42,6 +42,12 @@ pandan config show
 pandan context status
 ```
 
+One more top-level verb sits outside both groups, because it is about you rather than about a board:
+
+```bash
+pandan me                    # who your token authenticates as
+```
+
 Run `pandan --help` for the full list, or `pandan <group> --help` for one group.
 
 ## The full command map
@@ -58,6 +64,7 @@ Run `pandan --help` for the full list, or `pandan <group> --help` for one group.
 | Reporting | `overview`, `metrics`, `activity` | [Reading](reading.md) |
 | Inbox | `notify list/read` | [Reading](reading.md) |
 | Setup | `login`, `config`, `context`, `warmup` | [Configuration](configure.md) |
+| Identity | `me` | [Configuration](configure.md) |
 
 ## Two flags on every verb
 

@@ -35,6 +35,33 @@ def capture(response):
     return handler, seen
 
 
+# --- identity (KAN-614) ----------------------------------------------------
+
+
+def test_me_hits_the_board_less_me_route_and_returns_the_body_unchanged():
+    handler, seen = capture(
+        httpx.Response(200, json={"id": "2b1c-uuid", "email": "you@example.test"})
+    )
+    out = make_client(handler, token="pandan_pat_test").me()
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/me"
+    assert seen["params"] == {}  # no board, no filters — there is nothing to scope
+    assert seen["headers"]["authorization"] == "Bearer pandan_pat_test"
+    # Returned verbatim: it is a cross-app contract (kaya mirrors the UUID), so this
+    # adapter must not wrap it in an envelope or rename its keys.
+    assert out == {"id": "2b1c-uuid", "email": "you@example.test"}
+
+
+def test_me_maps_a_401_to_the_shared_api_error():
+    """The whole reason the verb exists: a bad credential comes back 401, which the
+    CLI turns into exit 3 — the "did my token work?" answer."""
+    handler, _ = capture(httpx.Response(401, json={"detail": "Not authenticated"}))
+    with pytest.raises(PandanApiError) as excinfo:
+        make_client(handler, token="pandan_pat_nope").me()
+    assert excinfo.value.status_code == 401
+    assert excinfo.value.detail == "Not authenticated"
+
+
 # --- boards (V10) ----------------------------------------------------------
 
 
