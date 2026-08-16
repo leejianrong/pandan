@@ -22,8 +22,10 @@ Three things, and they are the whole contract:
    **empty**; before this slice it would have held ``update_board``, ``delete_board``,
    ``claim_card`` and ``create_cards``.
 2. **CLI ⊆ MCP** — every leaf verb the parser accepts is either a mapped twin or an
-   explicitly classified ``CLI_ONLY`` local verb (config/login/context/overview, which
-   are about the CLI's own installation and have no board API behind them).
+   explicitly classified ``CLI_ONLY`` verb. That dict carries **two** reasons, spelled
+   out at its definition: a verb about the CLI's own installation (config/login/
+   context/overview), or a board-API verb deliberately left out of the ADR-0019-frozen
+   MCP surface (``me``, since KAN-614).
 3. **The mapping names verbs that exist** — each argv path is resolved against the real
    ``build_parser()``, so an entry cannot describe a verb nobody implemented.
 
@@ -42,6 +44,17 @@ first and forces the ADR amendment in which the CLI-parity question gets asked. 
 guards compose; neither alone is sufficient, and this docstring is the place that says so.
 Adding ``mcp/pandan_mcp/server.py`` to the ``cli`` paths filter would close it directly
 and is left as a follow-up (it is a ``.github/`` change).
+
+**A third limitation, found by KAN-614 and worth naming because the card assumed
+otherwise:** "parity in both directions" here means *between the two client surfaces*.
+Neither direction can see an API endpoint that **neither** surface exposes.
+``GET /api/v1/me`` shipped in KAN-530 and no CLI verb wrapped it for months; this file
+stayed green throughout, and had to — ``cli_leaf_paths()`` enumerates verbs that exist,
+so a verb that was never written is not an unclassified one. Section 1 catches a tool
+with no verb; section 2 catches a verb with no tool; **nothing here reads
+``/api/v1``**. Closing that would take a third input (the OpenAPI schema, or
+``PandanClient``'s public methods) — see the KAN-614 PR body for a sketch and why it
+was reported rather than built inside a one-verb card.
 
 Parity is about **capability, not spelling**. ``dispatch`` and ``next`` both map to
 ``pandan next`` (one flag apart), and ``claim_card`` maps to ``pandan claim`` — a
@@ -176,13 +189,39 @@ MCP_TO_CLI: dict[str, tuple[str, ...]] = {
 # surface" (option (b)) from being reconsidered.
 MCP_ONLY: dict[str, str] = {}
 
-# CLI verbs with no MCP twin, each because it touches the *local installation* rather
-# than the board API — there is nothing on ``/api/v1`` for an MCP tool to wrap. This is
-# not a parity gap in the direction ADR 0005 cares about (the API is still the only way
-# to change board state); it is the CLI having a front door and a config file.
+# CLI verbs with no MCP twin. **Two distinct reasons live here and each entry has to
+# say which**, because a classification whose stated rationale does not describe its
+# contents is the same defect family section 0 above exists to prevent — an exemption
+# that reads as covered when it is merely filed:
+#
+# 1. **Local installation.** The verb touches this machine's files — a config file, the
+#    packaged skill, the CLI's own front door — so there is nothing on ``/api/v1`` for
+#    an MCP tool to wrap. Not a parity gap in the direction ADR 0005 cares about (the
+#    API is still the only way to change board state); it is the CLI having a front
+#    door and a config file.
+# 2. **A board-API call deliberately out of scope for the frozen MCP surface.** A tool
+#    *could* wrap it, and one is not being added: ADR 0019 froze the surface at 49
+#    tools and ``mcp/tests/test_schema.py`` pins that by name **and** by count, so
+#    adding one is an ADR amendment rather than a side effect of a CLI card. An entry
+#    of this kind is a recorded *decision*, not an absence, and must say so — otherwise
+#    it is indistinguishable from the parity gap ``MCP_ONLY`` is asserted empty to
+#    forbid, only pointing the other way.
+#
+# Until KAN-614 this dict held nothing but reason 1, and the comment said so. ``me`` is
+# the first reason-2 entry, so the rationale was widened in the same diff rather than
+# slipping an entry in under a sentence that did not describe it.
 CLI_ONLY: dict[tuple[str, ...], str] = {
     ("overview",): "the CLI's content-first bare invocation (V46) — board state, no new capability",
     ("login",): "writes the local config file; a PAT never travels over MCP",
+    # Reason 2 — the only one, so far.
+    ("me",): (
+        "reason 2 (KAN-614): `GET /api/v1/me` IS a board API call, so this is a "
+        "declined tool and not a missing one. No `me` tool is added because ADR 0019 "
+        "freezes the MCP surface at 49; an MCP client also never needs it, since every "
+        "other `/api/v1` route already knows the caller and the CLI is where the "
+        "question is asked (a human or an agent checking `did my token work?`). "
+        "Re-opening this is an ADR 0019 amendment, not an edit here."
+    ),
     ("config", "set"): "local config file",
     ("config", "unset"): "local config file (issue #277)",
     ("config", "show"): "local config file",

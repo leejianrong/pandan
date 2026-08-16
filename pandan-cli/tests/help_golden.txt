@@ -32,6 +32,8 @@ positional arguments:
     batch-update  atomically PATCH several cards (JSON array of {id,
                   ...fields})
     template      manage card templates (list / create / delete / apply)
+    me            who your token authenticates as (id + email; exit 3 if it
+                  doesn't)
     login         save your PAT to the config file (prompts; never on the
                   command line)
     config        inspect / set the config file (set / unset / show / path)

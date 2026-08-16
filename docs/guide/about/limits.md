@@ -68,7 +68,8 @@ API rejects `--cursor` alongside `--sort`, a full-text `--q`, or `--refs`.
 config show` to confirm your configuration, or `pandan board list` to confirm your token works.
 
 **A fresh install points at `localhost:8000`.** With no configuration, commands fail against a server that
-is not there, and `warmup` reports it as a cold start rather than a missing origin. Set `--api-url` first.
+is not there. `warmup` names the origin it tried and exits `7` rather than calling it a cold start, but
+every other verb still reports a plain transport failure. Set `--api-url` first.
 
 ## Operations
 

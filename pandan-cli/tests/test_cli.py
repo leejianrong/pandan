@@ -228,6 +228,9 @@ class FakeClient:
     def list_comments(self, card_id):
         return self._call("list_comments", card_id=card_id)
 
+    def me(self):
+        return self._call("me")
+
 
 @pytest.fixture(autouse=True)
 def isolate_config(monkeypatch, tmp_path):
@@ -858,6 +861,72 @@ def test_notify_read_marks_by_id(monkeypatch, env, capsys):
     assert cli.run(["notify", "read", "2"]) == 0
     assert fake.calls == [("mark_notification_read", {"notification_id": 2})]
     assert "needs_human" in capsys.readouterr().out
+
+
+# --- `me` — who does this token authenticate as? (KAN-614) ------------------
+# Found in an onboarding dogfooding run: `pandan me` was the first thing reached for
+# to answer "did my token work, and who am I?", and it did not exist. `config show`
+# answers a different question (what this machine resolved) and `board list` proves
+# auth without saying whose it is.
+
+PRINCIPAL = {"id": "9f1d-not-a-card-id", "email": "you@example.test"}
+
+
+def test_me_calls_the_client_with_no_arguments(monkeypatch, env):
+    """One client call, nothing to resolve first: `GET /api/v1/me` is the one
+    `/api/v1` route with no board, so there is no `--board` to thread through."""
+    fake = patch_client(monkeypatch, FakeClient(result=PRINCIPAL))
+    assert cli.run(["me"]) == cli.EXIT_OK
+    assert fake.calls == [("me", {})]
+
+
+def test_me_human_row_is_id_then_email_and_nothing_else(monkeypatch, env, capsys):
+    """The row contract: exactly one tab-separated line, id first (so `cut -f1` is the
+    handle everywhere in this CLI), and no aggregate — two fields are not a list."""
+    patch_client(monkeypatch, FakeClient(result=PRINCIPAL))
+    assert cli.run(["me"]) == cli.EXIT_OK
+    assert capsys.readouterr().out == "9f1d-not-a-card-id\tyou@example.test\n"
+
+
+def test_me_json_is_the_api_body_verbatim(monkeypatch, env, capsys):
+    """`{id, email}` is the deliberate minimum of a cross-app contract (KAN-530), so
+    the CLI neither wraps it in an envelope nor adds a `summary` to it."""
+    patch_client(monkeypatch, FakeClient(result=PRINCIPAL))
+    assert cli.run(["me", "--json"]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out) == PRINCIPAL
+
+
+def test_me_never_reaches_the_json_dumps_fallback(monkeypatch, env, capsys):
+    """The KAN-287/478/519 family, asserted directly: a principal has no `name` and no
+    `ticket_number`, so without its own `_humanize` branch it would print indented JSON
+    with no `--json` asked for. Not-parseable-as-JSON is the assertion that fails for
+    the right reason."""
+    patch_client(monkeypatch, FakeClient(result=PRINCIPAL))
+    assert cli.run(["me"]) == cli.EXIT_OK
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(capsys.readouterr().out)
+
+
+def test_a_bad_token_makes_me_exit_three(monkeypatch, env, capsys):
+    """**The question the card is really about.** A revoked or mistyped PAT is a 401,
+    which is `unauthorized` → exit 3 — distinguishable from exit 4 (a board that isn't
+    yours), which is precisely what `board list` cannot tell you."""
+    patch_client(monkeypatch, FakeClient(error=PandanApiError(401, "Not authenticated")))
+    assert cli.run(["me"]) == cli.EXIT_AUTH
+    err = read_error(capsys)
+    assert err.code == "unauthorized"
+
+
+def test_me_needs_a_token_at_all(monkeypatch, capsys):
+    """No token configured is the shared config error (exit 1), not a network call —
+    `me` sets no `require_token=False`, unlike `warmup`."""
+    def boom(*a, **k):  # pragma: no cover - must never be reached
+        raise AssertionError("me must not build a client without a token")
+
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    monkeypatch.setattr(cli, "PandanClient", boom)
+    assert cli.run(["me"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "config"
 
 
 def test_resolve(monkeypatch, env):
@@ -1856,6 +1925,105 @@ def test_warmup_ok_exits_zero(monkeypatch, env):
 def test_warmup_not_ok_exits_nonzero(monkeypatch, env, status):
     patch_client(monkeypatch, FakeClient(result={"status": status, "detail": "not yet"}))
     assert cli.run(["warmup"]) == cli.EXIT_ERROR
+
+
+# --- warmup: origin + the unreachable/waking split (KAN-613) -----------------
+
+
+def _warmup(monkeypatch, **result):
+    patch_client(monkeypatch, FakeClient(result=result))
+
+
+def test_warmup_names_the_origin_it_tried_on_every_status(monkeypatch, env, capsys):
+    """The card's core ask: the row that reports a failure has to say *where* it failed.
+    Asserted on the failure path and the success path, because the column only stays
+    trustworthy if it is always there."""
+    _warmup(monkeypatch, status="waking", origin="https://board.example", detail="not yet")
+    cli.run(["warmup"])
+    assert capsys.readouterr().out.strip() == (
+        "waking\thttps://board.example\tnot yet"
+    )
+    _warmup(monkeypatch, status="ok", origin="https://board.example", health={})
+    cli.run(["warmup"])
+    assert capsys.readouterr().out.strip() == "ok\thttps://board.example\tAPI is awake"
+
+
+def test_warmup_unreachable_exits_seven_so_a_retry_loop_can_stop(monkeypatch, env):
+    """A refused origin cannot be cured by waiting, so it must not look to a script
+    like the "call me again shortly" that ``waking`` is. ``until pandan warmup`` retries
+    on *any* non-zero code — no exit code can break that loop, which is why the docs'
+    pattern changed too — but a bounded loop can now abort on 7 instead of sleeping out
+    its whole ceiling."""
+    _warmup(monkeypatch, status="unreachable", origin="http://localhost:8000", detail="no")
+    assert cli.run(["warmup"]) == cli.EXIT_UNREACHABLE
+    # …and the retryable case keeps the code a retry loop is written against.
+    _warmup(monkeypatch, status="waking", origin="http://localhost:8000", detail="soon")
+    assert cli.run(["warmup"]) == cli.EXIT_ERROR
+
+
+def test_warmup_adds_the_unset_origin_hint_only_when_nothing_configured_a_url(
+    monkeypatch, env, capsys
+):
+    """The "is this origin default-valued?" signal lives in the CLI's config chain, not
+    in the client (ADR 0005). Someone deliberately pointing at a local dev backend gets
+    the plain unreachable message; someone who never configured anything is told so."""
+    detail = "nothing is listening at http://localhost:8000."
+    _warmup(monkeypatch, status="unreachable", origin="http://localhost:8000", detail=detail)
+    cli.run(["warmup"])  # `env` unsets PANDAN_API_URL → the URL was merely defaulted
+    unconfigured = capsys.readouterr().out
+    assert "PANDAN_API_URL" in unconfigured
+    assert "pandan config set --api-url" in unconfigured
+
+    # Deliberately the default *string*, explicitly set: this is the case a
+    # `config.api_url == DEFAULT_API_URL` shortcut would get wrong.
+    monkeypatch.setenv("PANDAN_API_URL", config.DEFAULT_API_URL)
+    _warmup(monkeypatch, status="unreachable", origin="http://localhost:8000", detail=detail)
+    cli.run(["warmup"])
+    configured = capsys.readouterr().out
+    assert "pandan config set --api-url" not in configured
+    assert configured.strip().endswith(detail)
+
+
+def test_warmup_hint_is_not_added_for_a_half_migrated_kanban_env(monkeypatch, env, capsys):
+    """A machine still on the deprecated ``KANBAN_API_URL`` (ADR 0018) *is* configured —
+    the fallback resolved its origin — so telling it to go set one would be a lie."""
+    monkeypatch.setenv("KANBAN_API_URL", "https://board.example")
+    _warmup(monkeypatch, status="unreachable", origin="https://board.example", detail="no")
+    cli.run(["warmup"])
+    assert "pandan config set --api-url" not in capsys.readouterr().out
+
+
+def test_warmup_hint_never_reaches_a_healthy_or_waking_result(monkeypatch, env, capsys):
+    """The hint is advice about a *wrong origin*. On a genuine cold start the origin is
+    right by definition, so appending it there would be the mirror of the original bug."""
+    _warmup(monkeypatch, status="waking", origin="http://localhost:8000", detail="soon")
+    cli.run(["warmup"])
+    assert "pandan config set --api-url" not in capsys.readouterr().out
+
+
+def test_warmup_json_carries_the_origin_as_a_field(monkeypatch, env, capsys):
+    """A machine caller branches on the field, not on the prose."""
+    _warmup(monkeypatch, status="unreachable", origin="http://localhost:8000", detail="no")
+    assert cli.run(["warmup", "--json"]) == cli.EXIT_UNREACHABLE
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "unreachable"
+    assert payload["origin"] == "http://localhost:8000"
+
+
+def test_api_url_is_default_asks_the_chain_not_the_string(monkeypatch, tmp_path):
+    """It must answer "did any source supply one?", not "does it equal the default?" —
+    otherwise a deliberate ``--api-url http://localhost:8000`` is misreported as
+    unconfigured, which is precisely the confusion KAN-613 is removing."""
+    assert config.api_url_is_default() is True
+    monkeypatch.setenv("PANDAN_API_URL", config.DEFAULT_API_URL)
+    assert config.api_url_is_default() is False
+    monkeypatch.delenv("PANDAN_API_URL")
+    # …and the config file counts as a source, same as the env.
+    (tmp_path / "xdg" / "pandan").mkdir(parents=True)
+    (tmp_path / "xdg" / "pandan" / "config.toml").write_text(
+        f'[pandan]\napi_url = "{config.DEFAULT_API_URL}"\n', encoding="utf-8"
+    )
+    assert config.api_url_is_default() is False
 
 
 def test_warmup_needs_no_token(monkeypatch, capsys):
@@ -3483,6 +3651,11 @@ def test_exit_code_scheme_is_pinned_by_literal_numbers():
     # KAN-831: 6 is the suite-wide 409 row shared with kaya (kaya KAN-724 / kaya ADR
     # 0009). Purely additive — every number above it is untouched.
     assert cli.EXIT_CONFLICT == 6
+    # KAN-613: 7 is `warmup`'s "the origin is unreachable, retrying cannot help". Also
+    # purely additive, and deliberately NOT in ERROR_CODES — it is a warmup *status*
+    # mapped to an exit code, not an error row.
+    assert cli.EXIT_UNREACHABLE == 7
+    assert 7 not in cli.ERROR_CODES.values()
     # HTTP status → exit code, the mapping verified against prod (401→3, 403→4, 404→5).
     assert cli._STATUS_EXIT == {401: 3, 403: 4, 404: 5, 409: 6}
 

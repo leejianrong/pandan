@@ -138,12 +138,24 @@ still work unchanged. (Label ids are numeric only — labels have no ticket numb
 deploy (the first request after idle is slow — a documented cold start), riding it
 out via the shared client's cold-start retry/timeout. Handy as a **CI pre-step**
 before a batch of `pandan` calls so the wake cost is paid once. It needs **no
-`PANDAN_TOKEN`** (health is unauthenticated) and exits `0` once the API is awake,
-`1` while it's still waking or on error — so a CI step can loop until it succeeds:
+`PANDAN_TOKEN`** (health is unauthenticated). Every row names the **origin it tried**
+(KAN-613), and the exit code splits the two failures apart: `0` once awake, `7` when the
+origin refused the connection or didn't resolve (`unreachable` — retrying cannot help),
+`1` while it's still waking or on any other error. So a CI step loops with a ceiling and
+stops on `7`:
 
 ```bash
-until pandan warmup; do sleep 2; done   # block until the API is awake
+for i in $(seq 1 30); do
+  pandan warmup && break
+  [ $? -eq 7 ] && { echo "PANDAN_API_URL is wrong, not cold"; exit 1; }
+  sleep 2
+done
 ```
+
+> A bare `until pandan warmup; do sleep 2; done` was the documented pattern and is now
+> **wrong**: `until` retries on any non-zero code, so an unconfigured machine (which
+> falls back to `http://localhost:8000`) looped forever with no diagnostic. No exit code
+> can break an `until` loop — that is why the pattern changed as well as the message.
 
 ### Bare `pandan` shows you the board (V46, KAN-429)
 
@@ -328,7 +340,7 @@ varies by verb, so pick the right key from this table:
 | `dep add` / `dep rm` / `dep list` | `{"card_id": <int>, "blocked_by": [<id>, …], "blocks": [<id>, …]}` |
 | `link add` / `link rm` | `{"card_id": <int>, "links": [<link>, …]}` |
 | `delete`, `epic delete`, `label delete`, `view delete`, `template delete`, `cycle delete` | `{"deleted": <id>}` |
-| `warmup` | `{"status": "ok"\|"waking"\|"error", …}` |
+| `warmup` | `{"status": "ok"\|"waking"\|"unreachable"\|"error", "origin": "<url tried>", …}` |
 | **single-entity verbs** — `get`, `create`, `update`, `move`, `needs-human`, `resolve`, `comment add`, `notify read`, `board create`, `epic create`, `epic update`, `label create`, `view create`, `template create`, `cycle create` | the **bare entity object** (`{"id": …, "ticket_number": "KAN-7", …}`) — no envelope |
 | `metrics`, `cycle metrics` | the **bare metrics object** (`board_id`, `throughput`, `cycle_time`, `aging_wip`, `by_assignee`; the cycle one is `committed`/`completed`/`velocity`/`burndown`) |
 | `config show` | the bare local-config object (`api_url`, `token` *(redacted)*, `board_id`, `max_text_chars`, `config_file`, `mcp_json`) |
@@ -658,6 +670,7 @@ against the deployed API.
 | `4` | `403` forbidden — the board **exists but isn't yours** (verified against a real foreign board; a board id that doesn't exist is `5`, not `4`) |
 | `5` | `404` not found — **including** a `KAN-`/`EPIC-` ticket that matches nothing |
 | `6` | `409` conflict — the stored state contradicts the request |
+| `7` | `warmup` only — the origin is unreachable (refused / no DNS); retrying will not help |
 
 > **Why `6` exists (KAN-831).** It is shared with **kaya**, pandan's notes sibling, which
 > adopted this exit table from pandan verbatim so an operator scripting both never has to
@@ -690,9 +703,12 @@ value at runtime → `1`.**
 > on the code. Every verb that resolves a ticket now returns `5` for "no such card /
 > epic", and a test asserts the two forms agree.
 
-> **One nonzero exit is not an error:** `pandan warmup` prints `waking  <detail>` and
-> exits `1` while the API is still waking, by design (`until pandan warmup; do sleep 2;
-> done`). It is a *status*, so it has no `error` row.
+> **Two nonzero exits are not errors:** `pandan warmup` prints
+> `waking	<origin>	<detail>` and exits `1` while the API is still waking, by design —
+> a bounded retry loop is the intended response. It prints
+> `unreachable	<origin>	<detail>` and exits `7` when the origin refused the connection
+> or didn't resolve, which retrying will **not** fix (KAN-613). Both are *statuses*, so
+> neither has an `error` row.
 
 ## Configuration
 

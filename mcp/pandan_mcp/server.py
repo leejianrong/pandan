@@ -101,10 +101,12 @@ def _require_board(board_id: int | None) -> int:
 def warmup() -> dict[str, Any]:
     """Wake the API if it has scaled to zero (Fly free tier). Pings the health
     endpoint using the shared cold-start retry/timeout and returns a status
-    without throwing: ``{"status": "ok", ...}`` once healthy, ``{"status":
-    "waking", ...}`` if it's still coming up (call again shortly), or ``{"status":
-    "error", ...}``. Call this before a burst of work to absorb the cold start in
-    one place instead of on your first real tool call.
+    without throwing, always naming the ``origin`` it tried: ``ok`` once healthy;
+    ``waking`` if it's still coming up (call again shortly); ``unreachable`` if the
+    connection was refused or the host didn't resolve, which retrying will NOT fix
+    (check PANDAN_API_URL); ``error`` for any other API failure. Call this before a
+    burst of work to absorb the cold start in one place instead of on your first
+    real tool call.
     """
     return _client_instance().warmup()
 

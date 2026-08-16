@@ -13,12 +13,13 @@ can parse. Neither requires reading prose, and neither goes to stderr.
 | Code | Meaning | Typical cause |
 | --- | --- | --- |
 | `0` | Success | |
-| `1` | Generic error | Network failure, unreachable origin, a server `5xx` |
+| `1` | Generic error | Network failure, a server `5xx`, a `warmup` still waking |
 | `2` | Usage error | Unknown verb, missing required flag, bad enum value |
 | `3` | Unauthorized (`401`) | Token missing, malformed, or revoked |
 | `4` | Forbidden (`403`) | Valid token, but no access to that board |
 | `5` | Not found (`404`) | No such card, epic or board, including a ticket that matches nothing |
 | `6` | Conflict (`409`) | The stored state contradicts the request — e.g. that user is already a member of the board |
+| `7` | Unreachable origin (`warmup` only) | The connection was refused or the host did not resolve — retrying will not help |
 
 The split between `3`, `4`, `5` and `6` is the point. A CI job can tell "my credentials are wrong"
 from "that board is not mine" from "that ticket does not exist" from "the board already looks like
@@ -26,6 +27,23 @@ that", and react differently, without matching on message text.
 
 The numbers are stable. Rows get **added**, never renumbered, so a script written against `3`/`4`/`5`
 keeps working.
+
+!!! note "Why `7` is scoped to `warmup`"
+
+    `warmup` asks one question — *is the API there and serving?* — so "the origin is not real" is a
+    distinct answer to it, not one failure among many. Every other verb reports an unreachable origin
+    as the generic `1`, because for them it is one of a dozen ways a request can fail and a caller
+    already has the error row's `code` to read.
+
+    It earns its own number because of what `1` costs in a retry loop. `until pandan warmup; do sleep
+    2; done` — which this guide used to recommend — retries on **any** non-zero code, so a runner
+    that never set `PANDAN_API_URL` looped against `http://localhost:8000` forever. No exit code can
+    break an `until` loop; the pattern in [in CI](ci.md) is a bounded loop for that reason. What `7`
+    buys is that the bounded loop can stop *immediately* instead of sleeping out its ceiling waiting
+    for a cure that does not exist.
+
+    `warmup` is also the one verb that prints on success, and its row always names the origin it
+    tried: `ok\t<origin>\tAPI is awake`.
 
 !!! note "Why `6` exists, and what it does and does not promise here"
 
@@ -145,8 +163,8 @@ printf %s "$PANDAN_TOKEN" | pandan login --token-stdin   # correct in CI
 
 ## Recap
 
-- Exit `3`, `4`, `5`, `6` for unauthorized, forbidden, not-found, conflict. `2` for usage, `1` for
-  everything else.
+- Exit `3`, `4`, `5`, `6` for unauthorized, forbidden, not-found, conflict, and `7` for a `warmup`
+  whose origin is unreachable. `2` for usage, `1` for everything else.
 - Errors are one tab-separated row on stdout, or `{"error": {…}}` under `--json`.
 - An empty result is exit `0`, not a failure.
 - Nothing prompts when stdin is not a terminal.
