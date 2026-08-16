@@ -60,8 +60,9 @@ use [activity](../tutorial/collaboration.md#activity).
 
 ## The CLI
 
-**`pandan list` cannot resume its own pagination.** It prints a `next_cursor` under `--limit` but has no
-`--cursor` flag to pass it back. Only `activity` paginates properly. Narrow with filters instead.
+**A cursor does not carry your filters.** `pandan list --cursor …` resumes a position in the result, not
+a saved query, so every page has to re-send the same filters. It also needs the default ordering: the
+API rejects `--cursor` alongside `--sort`, a full-text `--q`, or `--refs`.
 
 **There is no `pandan me`.** The API has `GET /api/v1/me`, and the CLI has no verb for it. Use `pandan
 config show` to confirm your configuration, or `pandan board list` to confirm your token works.

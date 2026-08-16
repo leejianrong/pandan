@@ -1790,7 +1790,9 @@ def _resolve_epic_opt(client: PandanClient, raw: str | int | None) -> int | None
 def _cmd_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     # --refs takes one mixed list of ids and/or tickets (issue #254); the shared
     # splitter puts each in the API's ids=/refs= bucket. A batch read is bounded by
-    # the server's selector cap, so --limit is refused there rather than truncating.
+    # the server's selector cap, so --limit (and, since KAN-615, --cursor) is refused
+    # *there* rather than truncating — the CLI deliberately grows no second copy of
+    # that rule, so the one authority on which parameters compose stays the API.
     ids = refs = None
     if getattr(args, "refs", None):
         ids, refs = split_card_selectors(args.refs)
@@ -1810,6 +1812,7 @@ def _cmd_list(client: PandanClient, config: Config, args: argparse.Namespace) ->
         q=args.q,
         sort=args.sort,
         limit=args.limit,
+        cursor=args.cursor,
     )
 
 
@@ -2777,7 +2780,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "read a known set of cards in ONE request: a comma-separated list of ids "
             "and/or tickets (e.g. 'KAN-12,45,KAN-9'). Selectors that match nothing are "
-            "omitted and listed under `unresolved`. Max 100; not combinable with --limit"
+            "omitted and listed under `unresolved`. Max 100; not combinable with "
+            "--limit or --cursor"
         ),
     )
     p_list.add_argument("--column", choices=COLUMNS, help="filter by column")
@@ -2821,6 +2825,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_list.add_argument("--limit", type=int, help="max cards to return")
+    # KAN-615: `list` printed `(more — next cursor: …)` under --limit and then had no
+    # flag to hand that value back, so cards could not be paginated from the CLI at
+    # all — the line advertised a continuation that did not exist. Mirrors
+    # `activity --cursor` (the same keyset value, the same round trip); the client
+    # method already took `cursor=`, so only this surface was missing.
+    p_list.add_argument(
+        "--cursor",
+        help=(
+            "pagination cursor from a previous page's next-cursor line. Keyset order "
+            "only, so the API rejects it alongside --sort/--q or --refs"
+        ),
+    )
     _add_fields_arg(p_list, "ticket,title,assignee,priority")
     p_list.set_defaults(func=_cmd_list, hints=_HINTS["list"])
 
