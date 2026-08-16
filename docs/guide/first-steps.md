@@ -130,9 +130,22 @@ config_file	/home/you/.config/pandan/config.toml
 mcp_json	None
 ```
 
+## Check the token
+
+One call, no board needed:
+
+```console
+$ pandan me
+2b1c7f0e-…-9a41	you@example.com
+```
+
+Your user id and your email. If the token is missing, mistyped, or revoked you get an error row and
+exit `3` instead. Nothing else can go wrong here — there is no board involved, so a `4` (forbidden)
+is not reachable, which is what makes `me` the clean answer to "did my token work?".
+
 ## Pick a default board
 
-List what you can reach. This is also the check that your token works.
+Now list what you can reach.
 
 ```console
 $ pandan board list

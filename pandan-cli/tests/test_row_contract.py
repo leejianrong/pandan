@@ -160,6 +160,13 @@ def without_hints(out: str) -> list[str]:
             "EPIC-7\tSharpen\t60% (3/5)",
         ),
         ("_board_line", {"id": 5, "name": "Pandan Roadmap"}, "5\tPandan Roadmap"),
+        # KAN-614. A principal's id is a UUID, not an int — the row is still id-first,
+        # tab-separated, one line.
+        (
+            "_me_line",
+            {"id": "9f1d-not-a-card-id", "email": "you@example.test"},
+            "9f1d-not-a-card-id\tyou@example.test",
+        ),
         ("_label_line", {"id": 1, "name": "bug", "color": "#f00"}, "1\tbug\t#f00"),
         (
             "_view_line",
