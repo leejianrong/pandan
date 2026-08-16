@@ -633,6 +633,7 @@ renamed and never remapped to a different exit code.
 | `unauthorized` | `3` | `401` — bad or missing PAT |
 | `forbidden` | `4` | `403` — the board exists but isn't yours |
 | `not_found` | `5` | `404`, **or** a `KAN-`/`EPIC-` ticket that resolves to nothing |
+| `conflict` | `6` | `409` — the stored state contradicts the request (already a member; no board to default to) |
 | `api_error` | `1` | any other non-2xx |
 | `transport` | `1` | the request got no answer (timeout, DNS, connection refused) |
 | `unexpected` | `1` | a bug in the CLI — please report it |
@@ -644,9 +645,9 @@ prompt nobody can answer.
 
 ### Exit codes (for scripting)
 
-**Stable — these numbers are a contract and are never renumbered.** Pinned by tests
-(`test_exit_code_scheme_is_pinned_by_literal_numbers`) and all six verified against the
-deployed API.
+**Stable — these numbers are a contract. Rows are ADDED, never renumbered.** Pinned by
+tests (`test_exit_code_scheme_is_pinned_by_literal_numbers`), and `0`–`5` were verified
+against the deployed API.
 
 | Code | Meaning |
 |------|---------|
@@ -656,6 +657,29 @@ deployed API.
 | `3` | `401` unauthorized (bad/missing token) |
 | `4` | `403` forbidden — the board **exists but isn't yours** (verified against a real foreign board; a board id that doesn't exist is `5`, not `4`) |
 | `5` | `404` not found — **including** a `KAN-`/`EPIC-` ticket that matches nothing |
+| `6` | `409` conflict — the stored state contradicts the request |
+
+> **Why `6` exists (KAN-831).** It is shared with **kaya**, pandan's notes sibling, which
+> adopted this exit table from pandan verbatim so an operator scripting both never has to
+> remember which is which. In kaya a `409` is a *designed, retryable* outcome — a stale
+> `--if-updated-at` precondition comes back with the attempted and the stored note so the
+> caller can merge and retry — and exit `1` sends a script either to retry forever or to
+> abandon a conflict it could have merged (kaya KAN-724, kaya ADR 0009). kaya added the
+> row; pandan added it too rather than let one status exit `6` there and `1` here.
+>
+> **pandan gains less from it, and the docs should say so.** pandan's own two `409`s are
+> **terminal, not retryable**: a duplicate board member does not become addable on a
+> re-read (`backend/app/routers/members.py`), and "no board exists; create one first"
+> (`resolve_board_id` in `backend/app/routers/boards.py`) wants a board created, not a
+> retry. What pandan gains is the sameness, plus the standalone win that a caller can
+> tell "already a member" from "the API is unreachable" without parsing stdout.
+> Deliberately **not** `2`: `2` means the caller's *input* was rejected, and a `409` is
+> well-formed input meeting an inconvenient world.
+>
+> Neither of those two sites is reachable through a CLI verb today — the CLI has no
+> `member` verb, and `resolve_board_id`'s `409` needs a database with no boards at all —
+> so the row is currently a forward-looking contract, exercised against a real `409` over
+> real HTTP rather than against prod.
 
 The rule that decides `1` vs `2`: **argparse rejected argv → `2`; the CLI rejected a
 value at runtime → `1`.**

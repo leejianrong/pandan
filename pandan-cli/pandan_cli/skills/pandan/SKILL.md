@@ -289,9 +289,12 @@ Ops:
 ### Errors and exit codes (the machine contract, V43/KAN-426)
 
 Exit codes: `0` success, `1` generic/runtime error, `2` usage (argparse rejected argv), `3`
-unauthorised (401), `4` forbidden (403), `5` not found (404). So a script tells "bad token" from
-"not your board" from "gone" without parsing text. The rule behind 1-vs-2: **argparse rejected argv →
-2; the CLI rejected a runtime value → 1.**
+unauthorised (401), `4` forbidden (403), `5` not found (404), `6` conflict (409). So a script tells
+"bad token" from "not your board" from "gone" from "already like that" without parsing text. The rule
+behind 1-vs-2: **argparse rejected argv → 2; the CLI rejected a runtime value → 1.** Rows are ADDED,
+never renumbered — `6` arrived in KAN-831 to match kaya's identical table, where a 409 is a
+*retryable* stale-precondition refusal. pandan's own 409s are terminal, so pandan gains the sameness
+rather than retry semantics.
 
 **Errors go to stdout, structured** — not stderr as prose:
 
@@ -302,7 +305,7 @@ error	not_found	no card found with ticket KAN-999999	KAN-999999      # exit 5
 
 Tab-separated `error <code> <message> <arg>`, or under `--json` an
 `{"error": {code, message, arg, status, exit_code}}` object with all five keys always present. Branch
-on the stable `code` (`not_found`, `unauthorized`, `forbidden`, `config`, `unknown_field`,
+on the stable `code` (`not_found`, `unauthorized`, `forbidden`, `conflict`, `config`, `unknown_field`,
 `confirmation_required`, `invalid_ref`, `transport`, …), never on message text. Human `usage:` text
 still goes to stderr.
 
