@@ -143,9 +143,22 @@ and cookies cannot reach a log line. Sentry runs with PII sending disabled for t
 | --- | --- | --- |
 | `GET /api/health` | Readiness | Cheap `SELECT 1`. Returns `503` when the database is unreachable, otherwise `200`. |
 | `GET /api/health/live` | Liveness | Always `200` while the process is serving. |
+| `GET /api/health/version` | Provenance | `{"revision": "<git sha>"}` — the commit the image was built from, or `"unknown"` when the build passed no `GIT_REVISION` build argument. |
 
 Point an orchestrator's readiness probe at the first and its liveness probe at the second. Using the
 readiness probe for liveness will restart a healthy process whenever the database blips.
+
+The third is build provenance, and it is opt-in at build time:
+
+```bash
+docker build --build-arg GIT_REVISION=$(git rev-parse HEAD) -t pandan .
+```
+
+Without the argument the image still builds and reports `"unknown"`. Passing it lets anything outside
+your deploy pipeline — a monitor, a support ticket, you with `curl` — read back which commit a running
+instance is actually serving, instead of inferring it from what the pipeline last tried to ship. It
+reports the revision the build argument named, so it will believe a wrong one; that is a smaller gap
+than inference, not a closed one.
 
 ## Security headers
 

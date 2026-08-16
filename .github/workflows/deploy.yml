@@ -140,9 +140,16 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Deploy
-        run: flyctl deploy --remote-only
+        # --build-arg GIT_REVISION bakes the shipping commit into the image
+        # (Dockerfile ARG -> ENV), and the app re-publishes it on
+        # GET /api/health/version. That is what lets the `drift` job below
+        # OBSERVE production instead of inferring it from this workflow's own
+        # run history (KAN-595). It must be the SAME sha the checkout above
+        # used, or the endpoint would confidently report the wrong commit.
+        run: flyctl deploy --remote-only --build-arg GIT_REVISION="$GIT_REVISION"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          GIT_REVISION: ${{ github.event.workflow_run.head_sha }}
 
   # ---------------------------------------------------------------------------
   # The watcher (KAN-586). Answers the one question no structural signal answers:
@@ -158,13 +165,38 @@ jobs:
   # the cron. Neither applies to a repo merging daily, but both are real.
   #
   # It deliberately does not ask Fly. `flyctl deploy --remote-only` tags the image
-  # `deployment-<id>` and the image carries no git revision, so Fly cannot say
-  # which commit it is running. The GitHub-side equivalent — the head SHA of the
-  # most recent Deploy run whose `Deploy to Fly.io` job actually SUCCEEDED (not
-  # skipped; a docs-only Deploy run reports workflow-level `success` with that job
-  # skipped, which is the trap) — is exact. Adding an
-  # `org.opencontainers.image.revision` label to the app image and reading it back
-  # over the API would be strictly better and is KAN-584's territory.
+  # `deployment-<id>`, and Fly's API reports the image ref/digest but not its
+  # labels, so Fly cannot say which commit it is running.
+  #
+  # ---------------------------------------------------------------------------
+  # KAN-595: THE WATCHER NOW OBSERVES PRODUCTION INSTEAD OF INFERRING IT
+  # ---------------------------------------------------------------------------
+  # Until KAN-595 this job answered the question by walking THIS WORKFLOW'S OWN
+  # history: the head SHA of the most recent Deploy run whose `Deploy to Fly.io`
+  # job actually SUCCEEDED (not skipped — a docs-only Deploy run reports
+  # workflow-level `success` with that job skipped, which is the trap). That is
+  # exact about what GitHub last TRIED to ship, and it worked. But it is an
+  # INFERENCE about production, and every way it can be wrong is silent: a
+  # Fly-side rollback, a machine that never restarted onto the new image, or a
+  # `flyctl deploy` from a laptop that Actions never saw at all.
+  #
+  # The app image now bakes its own revision in (Dockerfile `ARG GIT_REVISION` ->
+  # `ENV`, passed by the deploy step above) and republishes it on
+  # `GET /api/health/version`. So the watcher curls production and asks it
+  # directly. No GitHub API in the happy path, no registry auth, and it catches
+  # the three cases above that the history walk structurally cannot.
+  #
+  # The history walk is KEPT, demoted to a DIAGNOSTIC: it runs only on a failure
+  # path, to say whether GitHub even tried. "Production is behind and no deploy
+  # ran" (a merge that never triggered a deploy — the KAN-586 case) and
+  # "production is behind although a deploy ran and succeeded" (rollback, or a
+  # machine still on the old image) are different incidents with different fixes,
+  # and the difference is worth one API call at the moment you are already red.
+  #
+  # WHAT THIS STILL DOES NOT PROVE, stated plainly so nobody overclaims from it:
+  # the endpoint reports the revision the BUILD ARG named. A wrongly-passed
+  # --build-arg would be believed. That is a strictly smaller gap than the
+  # inference it replaces, not a closed one.
   drift:
     name: Deploy drift watcher
     if: github.event_name != 'workflow_run'
@@ -182,11 +214,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          PROD_VERSION_URL: ${{ vars.PROD_VERSION_URL || 'https://simple-kanban-jian.fly.dev/api/health/version' }}
         run: |
           set -euo pipefail
           main_sha=$(git rev-parse HEAD)
+          echo "main is at: $main_sha"
 
+          # --- The old inference, kept as a DIAGNOSTIC (KAN-595) --------------
           # Walk Deploy runs newest-first for the first one that really deployed.
+          # This no longer decides anything; it only enriches a failure message
+          # with "…and GitHub did / did not think it shipped", which is what
+          # separates "the merge never triggered a deploy" from "the deploy ran
+          # and production is still on the old image".
           #
           # `event=workflow_run` is LOAD-BEARING, not a tidy-up. This watcher is
           # itself a job in deploy.yml, so every one of its own scheduled runs is a
@@ -201,43 +240,76 @@ jobs:
           # heartbeat is worse than no watcher — it trains you to ignore the alarm
           # that matters. Filtering to `workflow_run` makes the window mean what it
           # says: the last 40 times a merge to main could have shipped.
-          deployed=""
-          for run_id in $(gh api "repos/$REPO/actions/workflows/deploy.yml/runs?per_page=40&event=workflow_run" \
-                            --jq '.workflow_runs[].id'); do
-            shipped=$(gh api "repos/$REPO/actions/runs/$run_id/jobs" \
-                        --jq '[.jobs[] | select(.name == "Deploy to Fly.io" and .conclusion == "success")] | length')
-            if [ "$shipped" != "0" ]; then
-              deployed=$(gh api "repos/$REPO/actions/runs/$run_id" --jq '.head_sha')
-              echo "Last successful deploy: run $run_id -> $deployed"
-              break
-            fi
-          done
+          last_actions_deploy() {
+            local run_id shipped run_ids
+            # A failed API call must not masquerade as "nothing has deployed" —
+            # that is a different incident and would point the reader at the
+            # wrong one.
+            run_ids=$(gh api "repos/$REPO/actions/workflows/deploy.yml/runs?per_page=40&event=workflow_run" \
+                        --jq '.workflow_runs[].id') || {
+              echo "unavailable (GitHub API call failed)"
+              return 0
+            }
+            for run_id in $run_ids; do
+              shipped=$(gh api "repos/$REPO/actions/runs/$run_id/jobs" \
+                          --jq '[.jobs[] | select(.name == "Deploy to Fly.io" and .conclusion == "success")] | length')
+              if [ "$shipped" != "0" ]; then
+                gh api "repos/$REPO/actions/runs/$run_id" --jq '.head_sha'
+                return 0
+              fi
+            done
+            echo "no successful 'Deploy to Fly.io' job in the last 40 workflow_run Deploy runs"
+          }
+          diagnose() { last_actions_deploy 2>/dev/null || echo "unavailable (GitHub API call failed)"; }
 
-          # Inconclusive fails LOUD. A watcher that shrugs is the thing this card
-          # is about; a false alarm here costs one look at the Actions tab.
-          if [ -z "$deployed" ]; then
-            echo "::error title=Deploy drift watcher inconclusive::No Deploy run in the last 40 has a successful 'Deploy to Fly.io' job. Either nothing has deployed in a long time, or the job was renamed and this watcher is now blind (KAN-586)."
+          # --- Observe production directly (KAN-595) -------------------------
+          # Retries because fly.toml sets min_machines_running = 0: the first hit
+          # may be waking a cold machine, and Fly's proxy answers 502/503 while it
+          # boots — hence --retry-all-errors, not just --retry-connrefused.
+          echo "Asking production: $PROD_VERSION_URL"
+          if ! body=$(curl -fsS --max-time 30 --retry 4 --retry-delay 5 \
+                        --retry-connrefused --retry-all-errors "$PROD_VERSION_URL" 2>&1); then
+            # Last line only: each retry restates the same error, and a five-times
+            # repeated sentence in an annotation is how an alarm stops being read.
+            why=$(printf '%s' "$body" | tail -n 1)
+            echo "::error title=Deploy drift watcher could not observe production::GET $PROD_VERSION_URL failed after retries: ${why:-no output from curl}. This job asserts what production is RUNNING, so it cannot pass without an answer — a watcher that shrugs when it cannot see is the failure mode this repo keeps rediscovering. For context, GitHub's last successful deploy was: $(diagnose)."
             exit 1
           fi
 
-          echo "main is at: $main_sha"
-          if [ "$deployed" = "$main_sha" ]; then
+          # Parse strictly, and do NOT trust the status code. backend/app/main.py
+          # mounts the SPA catch-all as GET /{full_path:path} with no /api
+          # exclusion, so an image that predates this endpoint answers
+          # /api/health/version with 200 and index.html. `curl -f` is happy; only
+          # the SHAPE of the body distinguishes "old image" from "real answer".
+          revision=$(printf '%s' "$body" | jq -r '.revision // empty' 2>/dev/null || true)
+          if ! printf '%s' "$revision" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error title=Production did not report a git revision::$PROD_VERSION_URL answered without a usable 40-char revision (got '${revision:-<none>}'). Expected on exactly one occasion: the very first run after KAN-595 merges but before its deploy lands, because the image running then predates the endpoint and the SPA catch-all serves index.html for it. Anything later means the endpoint, the Dockerfile ARG, or the deploy's --build-arg regressed. Failing rather than falling back, on purpose: the fallback is the inference this card replaced. GitHub's last successful deploy was: $(diagnose)."
+            exit 1
+          fi
+          echo "Production reports revision: $revision"
+
+          if ! git cat-file -e "${revision}^{commit}" 2>/dev/null; then
+            echo "::error title=Production reports an unknown commit::Production says it is running $revision, which this repository does not contain. Either the deploy passed a bogus --build-arg, or main's history was rewritten. GitHub's last successful deploy was: $(diagnose)."
+            exit 1
+          fi
+
+          if [ "$revision" = "$main_sha" ]; then
             echo "Production is running main's tip. In step."
             exit 0
           fi
 
-          if ! git merge-base --is-ancestor "$deployed" "$main_sha"; then
-            echo "::error title=Production is not on main::Deployed commit $deployed is not an ancestor of main ($main_sha) — production is running something main does not contain."
+          if ! git merge-base --is-ancestor "$revision" "$main_sha"; then
+            echo "::error title=Production is not on main::Production is running $revision, which is not an ancestor of main ($main_sha) — production is running something main does not contain. GitHub's last successful deploy was: $(diagnose)."
             exit 1
           fi
 
-          changed=$(git diff --name-only "$deployed" "$main_sha")
-          echo "Changed since the last deploy:"
+          changed=$(git diff --name-only "$revision" "$main_sha")
+          echo "Changed since the commit production is running:"
           echo "$changed"
 
           if echo "$changed" | grep -qE "$IMAGE_PATHS"; then
-            echo "::error title=DEPLOY DRIFT::main contains image-affecting changes that production is NOT running. Deployed $deployed, main $main_sha. Something merged to main without deploying — check whether its CI run on main exists and succeeded (a GITHUB_TOKEN merge fires none at all; see KAN-586). This self-heals on the next app-code merge, which is what makes it invisible."
+            echo "::error title=DEPLOY DRIFT::main contains image-affecting changes that production is NOT running. Production is on $revision, main is $main_sha. GitHub's last successful deploy was: $(diagnose) — if that equals main, the deploy ran and production did not take it (rollback, or a machine that never restarted); if it is behind main, something merged without deploying (a GITHUB_TOKEN merge fires no runs at all; see KAN-586). This self-heals on the next app-code merge, which is what makes it invisible."
             exit 1
           fi
 
-          echo "Only non-image paths changed since the last deploy — production is current."
+          echo "Only non-image paths changed since production's commit — production is current."

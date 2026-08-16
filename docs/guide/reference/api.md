@@ -196,6 +196,7 @@ ever returned.
 | `POST` | `/api/v1/webhooks/github` | HMAC signature, not a token |
 | `GET` | `/api/health` | None. Readiness, checks the database. |
 | `GET` | `/api/health/live` | None. Liveness. |
+| `GET` | `/api/health/version` | None. The git revision this build was made from. |
 
 The health endpoints are deliberately unversioned and unauthenticated, so a probe or a `warmup` call needs
 no credential.

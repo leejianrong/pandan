@@ -46,6 +46,21 @@ init_error_tracking()
 
 logger = logging.getLogger("kanban.health")
 
+# --- Build provenance (KAN-595) -------------------------------------------
+# The git revision this image was built from, baked in by the root Dockerfile
+# (`ARG GIT_REVISION` -> `ENV GIT_REVISION`) and passed by
+# .github/workflows/deploy.yml as `flyctl deploy --build-arg GIT_REVISION=<sha>`.
+# Surfaced on GET /api/health/version so the deploy-drift watcher can OBSERVE
+# what production is running instead of INFERRING it from GitHub Actions history
+# (KAN-586). Read ONCE at import time, never per request: the endpoint has to
+# stay a constant-time handler that reads no file and shells out to nothing.
+#
+# "unknown" is the honest default for a plain `docker build` with no build-arg,
+# for a source checkout, and for any image predating this change. The watcher
+# treats it as "I could not observe production" and fails LOUDLY rather than
+# passing — see the `drift` job in deploy.yml.
+GIT_REVISION = os.environ.get("GIT_REVISION", "").strip() or "unknown"
+
 
 # --- Payload hardening: request body-size ceiling (V28, KAN-292) -----------
 # Reject an over-large request by its declared Content-Length *before* the body is
@@ -215,6 +230,35 @@ def liveness() -> dict[str, str]:
     checks — always ``200`` while the app runs, so an orchestrator can tell
     "process alive" apart from "DB ready" (the readiness probe above)."""
     return {"status": "ok"}
+
+
+@app.get("/api/health/version", tags=["meta"])
+def version() -> dict[str, str]:
+    """Build provenance (KAN-595): the git revision this image was built from.
+
+    A **sibling** of the readiness probe rather than a field on it, deliberately:
+    ``GET /api/health`` is what Fly's health check and the keepalive poller hit,
+    its body is asserted by equality in the suite, and its whole job is to answer
+    one question cheaply. Provenance is a different question with a different
+    consumer, so it gets its own route and leaves the probe's contract alone.
+
+    Constant-time and DB-free (like ``/api/health/live``) — ``GIT_REVISION`` is
+    read from the environment once at import. No file read, no subprocess.
+
+    Unauthenticated, like the rest of ``/api/health*``. The repo is public and
+    every one of these SHAs is already visible on GitHub, so the commit is not a
+    secret; it is published on purpose so a watcher outside the deploy system can
+    read it with nothing but ``curl``.
+
+    The **full 40-char SHA**, not an abbreviation: the only consumer compares it
+    to ``git rev-parse HEAD`` and feeds it to ``git merge-base --is-ancestor``,
+    both of which want the whole thing. Prefix matching would be one more thing
+    to get subtly wrong for no gain.
+
+    ``{"revision": "unknown"}`` when the build passed no ``GIT_REVISION`` — see
+    the constant's note above.
+    """
+    return {"revision": GIT_REVISION}
 
 
 # Path to the built Svelte SPA. Overridable via env for the Docker image layout.
