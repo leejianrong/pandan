@@ -56,30 +56,39 @@ can. Treat it as a credential for the whole account, not for one board.
 
 ## Warm the API first
 
-The hosted board scales to zero, so the first request after an idle period takes about a second, and
-under a cold start it can briefly refuse connections. `warmup` needs no token and exits `0` only once
-the API answers, so loop on it:
-
-```bash
-until pandan warmup; do sleep 2; done
-pandan list --column todo
-```
-
-Give the loop a ceiling so a genuinely broken deploy fails the job instead of hanging it:
+The hosted board scales to zero, so the first request after an idle period takes about a second.
+`warmup` needs no token and exits `0` only once the API answers, so wait on it — with a ceiling, and
+with an escape for the failure that waiting cannot fix:
 
 ```bash
 for i in $(seq 1 30); do
   pandan warmup && break
+  [ $? -eq 7 ] && { echo "the origin is wrong, not cold — fix PANDAN_API_URL"; exit 1; }
   sleep 2
 done
 pandan warmup || { echo "API did not come up after 60s"; exit 1; }
+pandan list --column todo
 ```
 
-!!! warning "A failing warmup loop can mean a misconfigured origin"
+Every warmup row names the origin it tried, which is the first thing to read when one fails:
 
-    `warmup` reports `server not ready yet (ConnectError)` both when the API is cold and when nothing
-    is listening at all. If the loop never terminates, check `PANDAN_API_URL` before blaming the
-    deploy. A missing origin falls back to `http://localhost:8000`, which in CI is nothing.
+```console
+$ pandan warmup
+unreachable	http://localhost:8000	nothing is listening at http://localhost:8000 (ConnectError: …
+$ echo $?
+7
+```
+
+!!! warning "Do not use a bare `until pandan warmup; do sleep 2; done`"
+
+    This guide used to recommend exactly that, and on a runner that never set `PANDAN_API_URL` it
+    hung forever: the CLI falls back to `http://localhost:8000`, which in CI is nothing, and `until`
+    retries on **any** non-zero exit code — including one that will never change. Exit `7` is
+    `warmup`'s way of saying *retrying will not help*, but only a loop that reads it can act on that,
+    so give the loop a ceiling and check for `7`.
+
+    Exit `1` is the opposite case and is worth retrying: the origin answered but is not serving yet
+    (`waking`), which is the genuine cold start.
 
 ## A worked example
 
@@ -106,7 +115,13 @@ jobs:
           chmod +x /usr/local/bin/pandan
 
       - name: Wake the API
-        run: until pandan warmup; do sleep 2; done
+        run: |
+          for i in $(seq 1 30); do
+            pandan warmup && break
+            [ $? -eq 7 ] && { echo "PANDAN_API_URL is wrong — this is not a cold start"; exit 1; }
+            sleep 2
+          done
+          pandan warmup || { echo "API did not come up after 60s"; exit 1; }
 
       - name: Update the card
         run: |
@@ -174,9 +189,10 @@ jq -r '.cards[] | select(.priority=="high") | .ticket_number' cards.json
 
 ```bash
 curl -fsSL -o pandan …/pandan-linux-x86_64 && chmod +x pandan   # -f, always
-until pandan warmup; do sleep 2; done                            # with a ceiling
+for i in $(seq 1 30); do pandan warmup && break                  # bounded, never `until`
+  [ $? -eq 7 ] && exit 1; sleep 2; done                          # 7 = wrong origin, not cold
 pandan list --column todo --json | jq -r '.cards[].ticket_number'
 ```
 
-Set the three values from CI secrets, warm the API before authenticated calls, branch on exit codes
-rather than text, and batch your reads.
+Set the three values from CI secrets, warm the API before authenticated calls, bound the warmup loop
+and stop on exit `7`, branch on exit codes rather than text, and batch your reads.
