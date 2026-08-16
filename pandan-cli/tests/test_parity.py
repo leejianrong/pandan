@@ -46,6 +46,24 @@ and is left as a follow-up (it is a ``.github/`` change).
 Parity is about **capability, not spelling**. ``dispatch`` and ``next`` both map to
 ``pandan next`` (one flag apart), and ``claim_card`` maps to ``pandan claim`` — a
 many-to-one mapping is fine; an unmapped tool is not.
+
+## Section 0 (KAN-592): the parser proves itself before anything is concluded from it
+
+Everything below section 0 is a statement about a set this file *parsed out of another
+file's text*, so an empty parse makes all of it true and none of it meaningful. The
+original cross-check — tool names counted against raw ``@mcp.tool(`` decorators — was
+built for exactly that and was still blind in one direction, because **both counts were
+derived from the string ``mcp``**: rename the server variable and 0 == 0 passes. Only
+``test_the_mcp_surface_is_still_the_frozen_49``'s hardcoded ``49`` caught it, which is a
+constant doing the work of a design.
+
+The generalisable rule, and the reason this is documented rather than quietly patched:
+**a non-emptiness proof must not share an input with the thing whose non-emptiness it
+proves.** Two counts derived from the same regex target are one count. So the proof is
+now anchored on ``_SERVER_BINDING_RE``, which reads the decorator target out of
+``server.py``'s binding line and is the only thing here that does not hardcode ``mcp``;
+section 0 runs both mutations in-process so the guard is watched failing on every CI run
+rather than in a PR description.
 """
 from __future__ import annotations
 
@@ -59,14 +77,30 @@ from pandan_cli import cli
 
 MCP_SERVER = pathlib.Path(__file__).resolve().parents[2] / "mcp" / "pandan_mcp" / "server.py"
 
+#: The variable ``server.py`` binds its server object to, and therefore the name every
+#: ``@<target>.tool()`` decorator carries. Both regexes below hardcode it, which is the
+#: whole reason this file needs the anchor two definitions down (KAN-592).
+DECORATOR_TARGET = "mcp"
+
 # ``@mcp.tool()`` / ``@mcp.tool(name="next")`` followed by the decorated ``def``. The
 # explicit ``name=`` wins, because that is the name the tool is advertised under (only
 # ``next_ready`` uses it today, published as ``next``).
 _TOOL_RE = re.compile(
-    r"^@mcp\.tool\((?:\s*name\s*=\s*[\"'](?P<alias>[^\"']+)[\"']\s*)?\)\s*\n"
+    rf"^@{DECORATOR_TARGET}\.tool\((?:\s*name\s*=\s*[\"'](?P<alias>[^\"']+)[\"']\s*)?\)\s*\n"
     r"(?:@[^\n]*\n)*"
     r"def\s+(?P<func>\w+)\s*\(",
     re.MULTILINE,
+)
+
+_DECORATOR_RE = re.compile(rf"^@{DECORATOR_TARGET}\.tool\(", re.MULTILINE)
+
+# **The anchor (KAN-592), and the one thing here that does NOT mention ``mcp``.** The
+# server binding — ``mcp = MCPServer("pandan")``, ``FastMCP`` before SDK 2.0.0 (KAN-585)
+# — names its own variable, so it is the one place in ``server.py`` that can tell this
+# file what the decorators are actually called. Anchored on the *class*, matched at line
+# start so the ``from mcp.server import MCPServer`` line cannot satisfy it.
+_SERVER_BINDING_RE = re.compile(
+    r"^(?P<var>\w+)\s*=\s*(?:MCPServer|FastMCP)\s*\(", re.MULTILINE
 )
 
 # Every MCP tool → the CLI argv path reaching the same capability. Keys are asserted
@@ -160,21 +194,85 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
 }
 
 
-def mcp_tool_names() -> set[str]:
-    """The advertised tool names, read from ``server.py`` as text (no import)."""
-    if not MCP_SERVER.is_file():
-        pytest.skip(f"{MCP_SERVER} not present — CLI-only checkout")
-    source = MCP_SERVER.read_text(encoding="utf-8")
+def _parse_tool_names(source: str) -> set[str]:
+    """The advertised tool names, parsed out of ``server.py``'s text (no import).
+
+    Split from :func:`mcp_tool_names` so the guards below can be *run against a mutated
+    copy of the source* — see
+    ``test_the_non_vacuity_proof_survives_renaming_the_decorator_target``.
+
+    **The non-vacuity proof is three assertions deep, and their ORDER is the fix
+    KAN-592 shipped.** The original had one cross-check — tool names counted against
+    raw ``@mcp.tool(`` decorators — and it was blind in the one direction it was built
+    to cover, because *both* counts were derived from the string ``mcp``. Rename the
+    server variable and the tool regex matches 0, the decorator count is 0, ``0 == 0``
+    passes, ``MCP_TOOLS`` is empty, and every subset assertion below holds trivially:
+    the whole file goes green while asserting nothing. It was saved only by
+    ``test_the_mcp_surface_is_still_the_frozen_49``'s hardcoded constant — by luck, not
+    by its own design.
+
+    The general rule, which is why this is documented rather than just patched: **a
+    non-emptiness proof must not share an input with the thing whose non-emptiness it
+    proves.** Two counts derived from the same regex target are one count.
+
+    So, in order:
+
+    1. **The anchor.** ``_SERVER_BINDING_RE`` reads the decorator target out of the
+       binding line, which is the only statement in ``server.py`` that names that
+       variable without being a ``@mcp.`` decorator. A rename now fails *here*, naming
+       the new variable and the two regexes to update — an actionable message instead of
+       a silent zero. Deliberately an assertion rather than an adaptation: this file
+       building its regexes from whatever it found would keep passing through a rename,
+       which is the same "it says so, therefore it is" the docstring at the top rejects.
+    2. **Non-emptiness**, before any comparison, so an empty parse fails as *parsed
+       nothing* rather than as *the counts agree*.
+    3. **The cross-check**, which is now only being asked the question it is good at:
+       did the tool-name regex miss a decorator whose *shape* changed?
+    """
+    # 1. the anchor — independent of the name both regexes below hardcode.
+    binding = _SERVER_BINDING_RE.search(source)
+    assert binding, (
+        f"found no `<var> = MCPServer(...)` binding in {MCP_SERVER.name}, so this file "
+        "cannot confirm what its `@<target>.tool(` regexes should be matching. If the "
+        "SDK renamed the server class again (FastMCP → MCPServer was SDK 2.0.0, "
+        "KAN-585), add the new name to _SERVER_BINDING_RE."
+    )
+    assert binding.group("var") == DECORATOR_TARGET, (
+        f"{MCP_SERVER.name} binds its server to `{binding.group('var')}`, but this "
+        f"file matches `@{DECORATOR_TARGET}.tool(` — so it would parse ZERO tools and "
+        "every assertion below would pass vacuously (KAN-592). Set DECORATOR_TARGET to "
+        f"`{binding.group('var')}`, or rename it back in server.py."
+    )
+
     names = {m.group("alias") or m.group("func") for m in _TOOL_RE.finditer(source)}
-    # The regex is the weak link in this file, so it is checked against a second,
-    # independent count of the decorator — the same cross-check ADR 0019 used to
-    # establish "the surface is 49 tools, not 48".
-    decorators = len(re.findall(r"^@mcp\.tool\(", source, re.MULTILINE))
+    decorators = len(_DECORATOR_RE.findall(source))
+
+    # 2. parsed *something* — proven before anything is compared to anything.
+    assert decorators, (
+        f"parsed NOTHING from {MCP_SERVER.name}: zero `@{DECORATOR_TARGET}.tool(` "
+        "decorators. Every parity assertion in this file would hold trivially over an "
+        "empty set, so this is a failure, not a pass (KAN-592)."
+    )
+
+    # 3. the cross-check, in its remaining useful direction: a decorator whose SHAPE
+    #    the tool-name regex cannot read (a new form, or one reflowed across lines).
     assert len(names) == decorators, (
-        f"parsed {len(names)} tool names from {decorators} @mcp.tool decorators — the "
-        "regex missed one (a new decorator form?), so every assertion below is unsound"
+        f"parsed {len(names)} tool names from {decorators} @{DECORATOR_TARGET}.tool "
+        "decorators — the regex missed one (a new decorator form?), so every assertion "
+        "below is unsound"
     )
     return names
+
+
+def mcp_server_source() -> str:
+    if not MCP_SERVER.is_file():
+        pytest.skip(f"{MCP_SERVER} not present — CLI-only checkout")
+    return MCP_SERVER.read_text(encoding="utf-8")
+
+
+def mcp_tool_names() -> set[str]:
+    """The advertised tool names of the real ``server.py``."""
+    return _parse_tool_names(mcp_server_source())
 
 
 def cli_leaf_paths() -> set[tuple[str, ...]]:
@@ -191,6 +289,61 @@ def cli_leaf_paths() -> set[tuple[str, ...]]:
                 yield from walk(sub, (*path, name))
 
     return set(walk(cli.build_parser(), ()))
+
+
+# --- 0. the parser is sound before anything is concluded from it -------------
+# KAN-592. Everything below section 0 is a statement about a set this file *parsed*, so
+# a parse that silently returns ``set()`` makes all of it true and none of it meaningful.
+# These two tests are the mutations run by hand when the hole was found, kept in-process
+# so they run on every CI run rather than living in a PR description.
+
+
+def test_the_non_vacuity_proof_survives_renaming_the_decorator_target():
+    """**The mutation that used to pass.** Rename ``mcp`` in ``server.py`` and, before
+    KAN-592, the tool regex matched 0, the raw decorator count was 0, the cross-check
+    asserted ``0 == 0``, and the file went green over an empty set — saved only by
+    ``test_the_mcp_surface_is_still_the_frozen_49``'s hardcoded ``49``, i.e. by a
+    constant rather than by its own non-vacuity design.
+
+    Both halves are asserted, because the first is what makes the second non-trivial:
+    the mutated source really does defeat the regexes (0 names, 0 decorators), and the
+    parse fails anyway — on the anchor, which is the only thing in this file that reads
+    the decorator target out of ``server.py`` instead of hardcoding it."""
+    renamed = mcp_server_source().replace(
+        f"{DECORATOR_TARGET} = MCPServer(", "server = MCPServer("
+    ).replace(f"@{DECORATOR_TARGET}.tool(", "@server.tool(")
+
+    assert not _TOOL_RE.findall(renamed), "the mutation did not actually defeat the regex"
+    assert not _DECORATOR_RE.findall(renamed), "the mutation did not zero the cross-check"
+
+    with pytest.raises(AssertionError) as excinfo:
+        _parse_tool_names(renamed)
+    # Named the right thing: the rename, not "the counts agree".
+    assert "binds its server to `server`" in str(excinfo.value)
+
+
+def test_an_empty_parse_fails_as_parsed_nothing_and_not_as_counts_agree():
+    """The floor beneath the anchor: a server whose decorators vanished for some *other*
+    reason (a form the regexes cannot read at all) must fail as ``parsed NOTHING``, so
+    ``0 == 0`` can never be the sentence that lets an empty set through."""
+    with pytest.raises(AssertionError) as excinfo:
+        _parse_tool_names(f'{DECORATOR_TARGET} = MCPServer("pandan")\n')
+    assert "parsed NOTHING" in str(excinfo.value)
+    assert "would hold trivially over an empty set" in str(excinfo.value)
+
+
+def test_a_reshaped_decorator_still_fails_the_cross_check():
+    """The direction the original cross-check *did* cover, kept: a decorator the
+    tool-name regex cannot read (here, reflowed across lines) is a mismatch, not a
+    silent omission. This is the assertion the anchor above did not replace."""
+    source = mcp_server_source().replace(
+        f"@{DECORATOR_TARGET}.tool()\ndef warmup(",
+        f"@{DECORATOR_TARGET}.tool(\n)\ndef warmup(",
+        1,
+    )
+    with pytest.raises(AssertionError) as excinfo:
+        _parse_tool_names(source)
+    assert "the regex missed one" in str(excinfo.value)
 
 
 # --- 1. MCP ⊆ CLI ------------------------------------------------------------
