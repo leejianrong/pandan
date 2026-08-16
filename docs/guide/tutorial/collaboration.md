@@ -14,7 +14,7 @@ because an agent cannot tap you on the shoulder.
 Notes on a card, in order.
 
 ```bash
-pandan comment add KAN-591 --body "Confirmed: activity takes --cursor, list does not."
+pandan comment add KAN-591 --body "Confirmed against prod: the cursor round-trips, page 2 is new cards."
 pandan comment list KAN-591
 ```
 
@@ -131,7 +131,8 @@ The actor is a person's email or an agent's handle, so the trail answers "who mo
 ambiguity about whether it was a human. When a card is in a state nobody expects, this is where you
 look first.
 
-Activity is the one read that paginates properly with a cursor.
+Activity pages with a cursor, the same way [`pandan list`](../cli/reading.md#limiting-and-paging) does:
+pass back the value from the previous page's cursor line.
 
 ## Trash
 

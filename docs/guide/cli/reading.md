@@ -74,23 +74,37 @@ Sort keys: `position`, `priority`, `due_date`, `created_at`, `updated_at`, `stor
 `title`, `column`, `id`. A `-` prefix reverses. Sort keys choose the **order of rows**; to choose which
 **columns print**, use `--fields`.
 
-### Limiting
+### Limiting and paging
 
 ```bash
 pandan list --column todo --limit 5
 ```
 
-!!! warning "`list` cannot resume its own pagination"
+When there is more to read, the output ends with a cursor:
 
-    With `--limit`, the output ends with a cursor:
+```
+(more — next cursor: MjAyNi0wOC0wMVQwOTo1Mzo1My40ODA0OTYrMDA6MDB8NDM5)
+```
 
-    ```
-    (more — next cursor: MjAyNi0wOC0wMVQwOTo1Mzo1My40ODA0OTYrMDA6MDB8NDM5)
-    ```
+Pass that value straight back as `--cursor` to get the next page, keeping the same filters:
 
-    There is no `--cursor` flag on `list`, so you cannot currently pass that value back to fetch the
-    next page. Only `activity` accepts `--cursor`. To page through a large board, narrow with filters
-    or sort and re-query instead. This is a known gap.
+```bash
+pandan list --column todo --limit 5 --cursor MjAyNi0wOC0wMVQwOTo1Mzo1My40ODA0OTYrMDA6MDB8NDM5
+```
+
+Repeat until no cursor line is printed — that is the last page.
+
+!!! note "Carry your filters forward"
+
+    The cursor is a position in the result, not a saved query. Re-send the same `--column` / `--q` /
+    `--limit` you used for the first page; a cursor pasted onto a different filter set pages through a
+    different result.
+
+!!! warning "`--cursor` needs the default ordering"
+
+    Paging is a keyset over `(updated_at, id)`, so the API rejects `--cursor` alongside `--sort` or a
+    full-text `--q` (both reorder the result), and alongside `--refs` (a batch read is already bounded
+    by its 100-selector cap). Drop the flag or drop the cursor.
 
 ## One card in detail
 
@@ -187,7 +201,8 @@ pandan activity --action moved
 pandan activity --limit 50 --cursor MjAyNi0wOC0wMVQxMDoz…
 ```
 
-`activity` is the one read verb that does accept `--cursor`, so it pages properly.
+`--cursor` works the same way it does on [`list`](#limiting-and-paging): pass back the value from the
+previous page's cursor line.
 
 This is the audit trail. When a card is in a state nobody expects, the activity feed says who put it
 there, whether that was a person or an agent.

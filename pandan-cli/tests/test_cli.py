@@ -407,6 +407,7 @@ def test_list_maps_all_filters(monkeypatch, env):
                 "q": None,
                 "sort": None,
                 "limit": 10,
+                "cursor": None,
             },
         )
     ]
@@ -439,6 +440,79 @@ def test_list_maps_q_search(monkeypatch, env):
     code = cli.run(["list", "--q", "login flow"])
     assert code == 0
     assert fake.calls[0][1]["q"] == "login flow"
+
+
+# --- keyset pagination: list --cursor (KAN-615) -----------------------------
+#
+# Under `--limit`, `list` printed `(more — next cursor: …)` and then defined no
+# `--cursor`, so the value it advertised could not be handed back: cards could not be
+# paginated from the CLI at all, and the line implied a continuation that did not
+# exist. `PandanClient.list_cards` already took `cursor=` — only the surface was
+# missing. Mirrors `activity --cursor`.
+
+# Short and obviously fake, but shaped like the real thing (the API's cursor is a
+# keyset over `(updated_at, id)`): it carries the punctuation a careless renderer
+# would mangle, which is the half of the round trip worth testing.
+FAKE_CURSOR = "2026-08-01T09:53:53+00:00|439"
+
+
+def test_list_threads_the_cursor_to_the_client(monkeypatch, env):
+    """The flag reaches the wire under the name the API reads, alongside `--limit`."""
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": [CARD]}))
+    assert cli.run(["list", "--limit", "1", "--cursor", FAKE_CURSOR]) == cli.EXIT_OK
+    params = fake.calls[0][1]
+    assert params["cursor"] == FAKE_CURSOR
+    assert params["limit"] == 1
+
+
+def test_list_without_a_cursor_sends_none(monkeypatch, env):
+    """Purely additive: an ordinary list is unchanged on the wire."""
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": [CARD]}))
+    assert cli.run(["list"]) == cli.EXIT_OK
+    assert fake.calls[0][1]["cursor"] is None
+
+
+def test_the_printed_next_cursor_is_the_value_list_takes_back(monkeypatch, env, capsys):
+    """**The defect, end to end.** The cursor is read off the rendered page exactly as
+    a caller would read it — parsed out of stdout, not lifted from the fixture — and
+    fed back through argv.
+
+    That is what makes this a regression test rather than a restatement of the one
+    above: it fails if the handler drops `--cursor`, *and* it fails if the printed
+    token stops being the token the flag accepts (a truncated or reformatted cursor
+    silently paginates to the wrong place, which is worse than not paginating)."""
+    page = {"cards": [CARD], "next_cursor": FAKE_CURSOR}
+    patch_client(monkeypatch, FakeClient(result=page))
+    assert cli.run(["list", "--limit", "1"]) == cli.EXIT_OK
+    lines = capsys.readouterr().out.splitlines()
+    printed = next(line for line in lines if line.startswith("(more — next cursor:"))
+    cursor = printed.removeprefix("(more — next cursor:").removesuffix(")").strip()
+
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    assert cli.run(["list", "--limit", "1", "--cursor", cursor]) == cli.EXIT_OK
+    assert fake.calls[0][1]["cursor"] == FAKE_CURSOR
+
+
+def test_list_leaves_the_refs_cursor_clash_to_the_api(monkeypatch, env, capsys):
+    """`ids`/`refs` cannot be combined with `limit`/`cursor` (issue #254) — a truncated
+    page would report visible cards as misses — and the API 422s the pair.
+
+    The CLI does **not** pre-reject it, for the same reason it already does not
+    pre-reject `--refs --limit`: one authority on which parameters compose, and it is
+    the API. What is pinned here is that the request is really attempted and the
+    rejection arrives as the structured error row rather than a traceback."""
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            error=PandanApiError(422, "ids/refs cannot be combined with limit or cursor")
+        ),
+    )
+    assert cli.run(["list", "--refs", "KAN-1", "--cursor", FAKE_CURSOR]) == cli.EXIT_ERROR
+    params = fake.calls[0][1]
+    assert params["refs"] == "KAN-1" and params["cursor"] == FAKE_CURSOR
+    err = read_error(capsys)
+    assert err.code == "api_error"
+    assert "cannot be combined" in err.message
 
 
 def test_view_list_calls_client(monkeypatch, env):
