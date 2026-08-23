@@ -2205,6 +2205,19 @@ def _cmd_label_create(client: PandanClient, config: Config, args: argparse.Names
     return client.create_label(board, args.name, color)
 
 
+def _cmd_label_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    # Neither field is clearable, so "not passed" is the only meaning of None and a
+    # PATCH with nothing to send is a no-op the API returns unchanged. Refuse it here
+    # instead: a command that silently does nothing is worse than a usage error.
+    if args.name is None and args.color is None:
+        raise CliError(
+            "nothing to update; pass --name and/or --color",
+            code="nothing_to_update",
+            arg="--name/--color",
+        )
+    return client.update_label(args.label_id, name=args.name, color=args.color)
+
+
 def _cmd_label_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
         raise CliError(
@@ -3317,14 +3330,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_epic_delete.set_defaults(func=_cmd_epic_delete, noun="epic")
 
     # --- label subcommands (nested group; parity with /api/v1 labels) --------
-    p_label = sub.add_parser("label", help="manage labels (list / create / delete)")
+    p_label = sub.add_parser(
+        "label", help="manage labels (list / create / update / delete)"
+    )
     label_sub = p_label.add_subparsers(
         dest="label_command", metavar="<subcommand>", required=True
     )
 
     p_label_list = label_sub.add_parser("list", parents=[common], help="list a board's labels")
     p_label_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
-    _add_fields_arg(p_label_list, "id,name,color")
+    _add_fields_arg(p_label_list, "id,name,color,usage_count")
     p_label_list.set_defaults(func=_cmd_label_list, noun="label")
 
     p_label_create = label_sub.add_parser("create", parents=[common], help="create a label")
@@ -3343,6 +3358,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_label_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_label_create.set_defaults(func=_cmd_label_create, noun="label")
+
+    p_label_update = label_sub.add_parser(
+        "update", parents=[common], help="rename or recolour a label"
+    )
+    p_label_update.add_argument("label_id", type=int)
+    p_label_update.add_argument("--name", help="new label name")
+    p_label_update.add_argument("--color", help="new color string, e.g. #0ea5e9")
+    p_label_update.set_defaults(func=_cmd_label_update, noun="label")
 
     p_label_delete = label_sub.add_parser("delete", parents=[common], help="delete a label")
     p_label_delete.add_argument("label_id", type=int)

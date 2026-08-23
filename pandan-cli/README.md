@@ -92,6 +92,7 @@ rather than spot-fixing it.
 | `pandan epic delete <epic_id> --yes` | `DELETE /epics/{id}` |
 | `pandan label list [--board N]` | `GET /boards/{id}/labels` |
 | `pandan label create <name> [COLOR] [--color C] [--board N]` | `POST /boards/{id}/labels` |
+| `pandan label update <label_id> [--name N] [--color C]` | `PATCH /labels/{id}` |
 | `pandan label delete <label_id> --yes` | `DELETE /labels/{id}` |
 | `pandan view list [--board N]` | `GET /boards/{id}/views` |
 | `pandan view create <name> [--board N] [--column C] [--epic ID] [--priority P] [--label ID] [--due-before ISO] [--overdue] [--needs-human] [--assignee A] [--sort SPEC]` | `POST /boards/{id}/views` |

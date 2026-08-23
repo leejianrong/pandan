@@ -19,6 +19,7 @@ import {
   listCards,
   listEpics,
   listLabels,
+  updateLabel,
   listViews,
   moveCard as apiMoveCard,
   removeDependency,
@@ -314,6 +315,18 @@ export async function addLabel(name: string, color: string): Promise<Label | nul
   const created = await createLabel(boardStore.activeBoardId, { name, color });
   await refetchLabels();
   return created;
+}
+
+// Rename and/or recolour a label (V61, KAN-982). Refetch the cards as well as the
+// labels: a card's `labels` are INLINED in its payload, so a rename that only
+// refreshed labelStore would leave every chip on the board showing the old text.
+// That coupling is the same one removeLabel documents below, for the same reason.
+export async function editLabel(
+  id: number,
+  patch: { name?: string; color?: string },
+): Promise<void> {
+  await updateLabel(id, patch);
+  await Promise.all([refetchLabels(), refetch()]);
 }
 
 // Delete a label board-wide; it detaches from every card server-side (cascade),

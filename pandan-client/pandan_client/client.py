@@ -606,8 +606,11 @@ class PandanClient:
     # --- board labels (M5 V11 API / KAN-244 adapter) ------------------------
 
     def list_labels(self, board_id: int) -> dict[str, Any]:
-        """List a board's labels (id, name, color), oldest-first. Returns
-        ``{"labels": [<label>, ...]}``."""
+        """List a board's labels (id, name, color, usage_count), oldest-first.
+        Returns ``{"labels": [<label>, ...]}``.
+
+        ``usage_count`` (V61, KAN-982) is how many cards carry the label — present
+        here and **only** here; the labels nested under a card read do not carry it."""
         return {
             "labels": self._request("GET", f"/boards/{board_id}/labels").json()
         }
@@ -618,6 +621,27 @@ class PandanClient:
         board via ``label_ids`` on create/update."""
         return self._request(
             "POST", f"/boards/{board_id}/labels", json={"name": name, "color": color}
+        ).json()
+
+    def update_label(
+        self,
+        label_id: int,
+        *,
+        name: str | None = None,
+        color: str | None = None,
+    ) -> dict[str, Any]:
+        """Rename and/or recolour a label by id (V61, KAN-982). Only the arguments
+        you pass are sent, so ``update_label(3, color="#0ea5e9")`` leaves the name
+        alone. Returns the updated label.
+
+        This is the non-destructive edit: unlike :meth:`delete_label` the label keeps
+        every card attachment. Neither field is clearable — a label with no name or
+        no colour cannot render, so ``None`` means "not sent", never "clear"."""
+        payload = {
+            k: v for k, v in (("name", name), ("color", color)) if v is not None
+        }
+        return self._request(
+            "PATCH", f"/labels/{label_id}", json=payload
         ).json()
 
     def delete_label(self, label_id: int) -> dict[str, Any]:

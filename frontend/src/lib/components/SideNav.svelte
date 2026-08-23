@@ -13,6 +13,7 @@
     KeyRound,
     Layers,
     LayoutDashboard,
+    Tag,
     Trash2,
     Users,
     X,
@@ -23,6 +24,7 @@
   export type DrawerView =
     | "dashboard"
     | "epics"
+    | "labels"
     | "activity"
     | "tokens"
     | "members"
@@ -51,6 +53,7 @@
   const items: { id: DrawerView; label: string; icon: typeof Icon }[] = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "epics", label: "Epics", icon: Layers },
+    { id: "labels", label: "Labels", icon: Tag },
     { id: "activity", label: "Activity", icon: Activity },
     { id: "tokens", label: "Tokens", icon: KeyRound },
     { id: "members", label: "Members", icon: Users },

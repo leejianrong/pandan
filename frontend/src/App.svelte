@@ -6,6 +6,7 @@
   import Dashboard from "./lib/components/Dashboard.svelte";
   import Brand from "./lib/components/Brand.svelte";
   import Epics from "./lib/components/Epics.svelte";
+  import Labels from "./lib/components/Labels.svelte";
   import Inbox from "./lib/components/Inbox.svelte";
   import Landing from "./lib/components/Landing.svelte";
   import BoardSwitcher from "./lib/components/BoardSwitcher.svelte";
@@ -37,6 +38,7 @@
     | "board"
     | "dashboard"
     | "epics"
+    | "labels"
     | "activity"
     | "tokens"
     | "members"
@@ -241,6 +243,8 @@
       <Dashboard navigate={() => show("board")} />
     {:else if view === "epics"}
       <Epics />
+    {:else if view === "labels"}
+      <Labels />
     {:else if view === "activity"}
       <Activity />
     {:else if view === "tokens"}
