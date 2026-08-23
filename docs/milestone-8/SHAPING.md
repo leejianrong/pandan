@@ -297,12 +297,14 @@ tab-alignment in the CLI's human rows, so it is opt-in via `--fields`.
   suffix, because R1.4 says creation must never block.
 - **Q2** Ownership transfer across a key collision in the new owner's namespace. Auto-suffix and
   record it in the activity log? (Edge case today; certain at 100 users.)
-- **Q3** Does the SPA offer a per-user toggle between canonical and board-local display, or is
-  board-local simply what a board shows? Lean the latter — a toggle is a setting nobody finds.
+- **Q3** ~~A per-user toggle between canonical and board-local display?~~ **Settled: no toggle.**
+  Board-local is simply what a board shows, and the collision case is handled by qualification
+  rather than by a mode — see *Detail — when two accessible boards share a key* below.
 - **Q4** Does `planning_interval` need its own metrics endpoint, or does `cycle metrics` grow a
   `planning_interval_id` filter? Lean the filter.
-- **Q5** Which of the ~12 palette tokens, and do the existing `--accent` / `--agent` / `--danger`
-  semantic tokens participate, or is the label palette disjoint from them?
+- **Q5** ~~Do the existing semantic tokens participate?~~ **Settled 2026-08-23: the label palette is
+  DISJOINT from the semantic tokens** (`--accent`, `--agent`, `--danger`, `--success`, `--warning`), so a
+  label can never accidentally read as a status. Which twelve hues is still a V62 call.
 
 ## Shape — "Legible at Scale"
 
@@ -357,6 +359,54 @@ is whatever the global sequence gave it — say `KAN-1013`. The SPA renders `ENG
 works with `PANDAN_BOARD_ID` set; `pandan get KAN-1013` works from anywhere. A branch named
 `eng-42-fix-the-thing` is matched by autosync. A card moved between boards keeps `KAN-1013` and takes a
 new board-local ref on arrival.
+
+**When two accessible boards share a key.** Per-owner uniqueness (D2) means Alice can own an `ENG`
+and Bob can own an `ENG`. If Alice shares hers with Bob, Bob now sees two `ENG` boards. This is the
+one case per-user keys create, and it resolves on a single observation:
+
+> **A key collision is a property of the *viewer*, not of the board.**
+
+Alice never has one — she owns exactly one `ENG`. Only Bob does. So the collision is **computed per
+viewer at display time and never stored**, and in particular **no board is ever renamed because
+someone shared another board with you**. A share event mutating the sharer's data would be indefensible;
+it is also unnecessary.
+
+Three rules follow, and together they are the whole UX:
+
+1. **Inside a board, nothing is ever qualified.** You are in one board, the header names it, and
+   `ENG-14` means this board's 14. This is where most reading happens, so most reading is unaffected.
+2. **Across boards, qualify — but only on collision.** The cross-board surfaces are the dashboard, the
+   notification inbox, the command palette, search results, the activity feed and the board switcher.
+   There a colliding ref renders as **`alice/ENG-14`**, borrowing GitHub's `owner/repo` idiom that every
+   user already reads fluently. A shared board whose key does *not* collide stays bare — qualification
+   appears exactly where it is needed and nowhere else.
+3. **The canonical ticket is always one hover away.** `KAN-955` is shown in the title attribute and is
+   what click-to-copy yields, because it is the form that is unambiguous everywhere — in a message to a
+   colleague, in a branch name, in a PR title. The escape hatch is not a new feature; it is the
+   identifier D1 declined to remove.
+
+**The qualified form must be accepted as input, not merely printed.** This is a hard constraint rather
+than a nicety: `pandan-cli/tests/test_cli.py:3371` (V42 / KAN-425) takes the identifier out of every
+printed row and feeds it back verbatim, on the standing rule that *the CLI accepts every identifier it
+prints*. So `pandan get alice/ENG-14` resolves, and V53 owes a third accepted form, not two.
+
+**And the error is a menu, not a refusal.** Given a board-local ref with no board context that matches
+more than one accessible board, `ambiguous_ref` lists the candidates with their owner and canonical
+ref, so the next command is visible rather than guessable:
+
+```
+error	ambiguous_ref	'ENG-14' matches 2 accessible boards	ENG-14
+  board 5  ENG  Engineering   (alice)  → KAN-955
+  board 6  ENG  Engine Room   (you)    → KAN-207
+help: pandan get KAN-207
+help: pandan --board 6 get ENG-14
+```
+
+Two consequences worth noticing, both of which fall out for free. If Alice later re-keys her board to
+`ACME`, Bob's collision simply disappears — nothing to migrate, because nothing was stored. And a
+viewer-local nickname for someone else's board (Bob calling Alice's `ACME` in his own view) stays
+available as a later escape hatch if qualification proves insufficient; it is deliberately **not** built
+now, because it is per-user-per-board state and a setting nobody finds.
 
 **Closing a cycle.** `pandan cycle close 7 --rollover-to 8` reports what moved:
 `closed Sprint 12 · 9/13 done · 4 rolled over to Sprint 13`. `pandan cycle metrics 7` afterwards still

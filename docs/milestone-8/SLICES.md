@@ -127,9 +127,23 @@ Every site that parses `KAN-<n>` learns the second form. All verified 2026-08-23
 - `pandan-cli/pandan_cli/cli.py:1797,1830` — `_resolve_card` / `_resolve_epic`
 - any API path param accepting an id-or-ticket
 
-New error code **`ambiguous_ref`**, slotting into V43's error contract: a board-local ref with no
-board context matching more than one accessible board fails **naming the candidates**, never silently
-picking one.
+**Three accepted forms, not two.** Alongside `KAN-955` and `ENG-14`, the owner-qualified
+**`alice/ENG-14`** must resolve — because V54 *prints* it on the cross-board surfaces, and
+`pandan-cli/tests/test_cli.py:3371` (V42 / KAN-425) feeds every printed identifier back on the standing
+rule that the CLI accepts what it prints. Printing a form the CLI rejects would fail that suite, which
+is exactly the guard working as intended.
+
+New error code **`ambiguous_ref`**, slotting into V43's error contract. It is a **menu, not a
+refusal** — a board-local ref with no board context matching more than one accessible board lists the
+candidates with owner and canonical ref, so the next command is visible rather than guessable:
+
+```
+error	ambiguous_ref	'ENG-14' matches 2 accessible boards	ENG-14
+  board 5  ENG  Engineering   (alice)  → KAN-955
+  board 6  ENG  Engine Room   (you)    → KAN-207
+help: pandan get KAN-207
+help: pandan --board 6 get ENG-14
+```
 
 ### V54 · Render — KAN-975
 
@@ -140,6 +154,12 @@ shows the board-local ref, `--fields ticket` keeps the canonical form reachable.
 Fold in KAN-986 if it has not already landed. Board-local refs make that sort bug **more** visible,
 not less: a 77-card board goes from a sparse `KAN-530…971` to a solid `1…77`, where lexicographic
 misordering is obvious.
+
+**Qualification is a client concern, computed per viewer.** A key collision is a property of the
+*viewer*, not the board (SHAPING, *Detail — when two accessible boards share a key*): only a user who
+can see two `ENG` boards has one, and nothing is stored. Inside a board nothing is ever qualified;
+across boards a colliding ref renders `alice/ENG-14` and a non-colliding one stays bare. The canonical
+`KAN-955` is the title attribute and the click-to-copy value everywhere.
 
 Deliberately last, so a user never sees a ref that something cannot parse.
 
@@ -233,7 +253,9 @@ valid colour that renders as a blank dot. And `app.css` defines every token **tw
 would be unreadable in one theme.
 
 **The palette is the picker** (SHAPING D11): ~12 named tokens, each with a light and dark value, shown
-as a swatch grid. Validation becomes "a palette token **or** a well-formed hex", so existing stored
+as a swatch grid. The palette is **disjoint from the semantic tokens** (`--accent`, `--agent`,
+`--danger`, `--success`, `--warning`) — settled 2026-08-23 — so a label can never accidentally read as
+a status. Validation becomes "a palette token **or** a well-formed hex", so existing stored
 free-string colours keep rendering and no value migration is needed.
 
 ### V63 · Epic colour — KAN-984 🗄️
@@ -265,9 +287,9 @@ or folded into V54.
 |---|---|---|
 | **Q1** | Board-key collision — numeric suffix or ask the user? | Suffix; R1.4 says creation must never block |
 | **Q2** | Ownership transfer across a key collision in the new owner's namespace | Auto-suffix + record it in the activity log |
-| **Q3** | A per-user toggle between canonical and board-local display? | No — board-local is simply what a board shows |
+| **Q3** | ~~A per-user toggle between canonical and board-local display?~~ | **Settled: no toggle** — collisions are handled by qualification, not a mode |
 | **Q4** | Does `planning_interval` need its own metrics endpoint? | No — a filter on `cycle metrics` |
-| **Q5** | Which 12 palette tokens, and do the semantic tokens participate? | Decide in V62 |
+| **Q5** | ~~Do the semantic tokens participate?~~ | **Settled: disjoint.** Which twelve hues is a V62 call |
 
 ## Out of scope for M8
 
