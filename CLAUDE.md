@@ -12,7 +12,7 @@ PR auto-sync + agent-CLI ergonomics, M5 agent↔human handoff + awareness UI + f
 abuse hardening + projects + cycles + design system + notifications.
 
 **Milestone 7** ("Name & Sharpen the Tools", [docs/milestone-7/](docs/milestone-7/SLICES.md)) is
-**in progress**. Its first slice, **V40 — the `simple-kanban` → `pandan` rebrand**
+**closed** but for one deferred slice. Its first slice, **V40 — the `simple-kanban` → `pandan` rebrand**
 ([ADR 0018](docs/adr/0018-pandan-rebrand.md), which also names the `kaya` notes sibling), has landed:
 the product is **pandan**, the CLI is **`pandan`** (the `pdn` alias was withdrawn in KAN-442 — a
 `--onefile` release can't deliver a console-script alias; symlink one if you want it), env config is
@@ -23,6 +23,20 @@ and newly minted PATs carry **`pandan_pat_`**. The rebrand changed no API, schem
 (ambient context), V45 (truncation) and V46 (content-first + `help[]`) have all landed. **Ten of
 Milestone 7's eleven slices shipped; only V41/KAN-424 is deferred**, behind the k8s migration
 (KAN-439).
+
+**Milestone 8** ("Legible at Scale", [docs/milestone-8/](docs/milestone-8/SLICES.md)) is
+**planned, not started** — V51–V64 across three epics, shaped from three GitHub issues filed by the
+maintainer: **EPIC-122** board-local ticket refs ([#280](https://github.com/leejianrong/pandan/issues/280)),
+**EPIC-123** sprints/backlog/planning intervals ([#279](https://github.com/leejianrong/pandan/issues/279)),
+**EPIC-124** epic + label colour ([#278](https://github.com/leejianrong/pandan/issues/278)). One theme:
+the board assumed one user with one board, and all three problems are that assumption breaking.
+**M8 is the first milestone since M6 to change the schema** — M7's no-API/no-schema/no-migration
+constraint expired with it — so five slices carry an additive migration and each lands alone.
+Two decisions are settled and load-bearing before anyone starts: **`card.ticket_number` is never
+touched** (the board-local `ENG-14` is added *beside* it, and the canonical `KAN-955` becomes the
+cross-board addressing mode), and **board keys are unique per owner**, which is exactly why a
+board-local ref resolves only within a known board. Read
+[docs/milestone-8/SHAPING.md](docs/milestone-8/SHAPING.md) D1–D3 before touching identity.
 
 The **49-tool** MCP surface was right-sized in V49: measured at 8,775 `o200k_base` tokens of resident
 schema per session, shipped at **7,388** (compact; 10,307 pretty-printed) after
@@ -49,7 +63,7 @@ Both measurements are re-runnable —
 `mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The 49-tool surface is pinned by
 `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit** (adding an
 *argument*, as KAN-501 did, is not). **Per-slice status goes stale here faster than anywhere else in
-this file; read [docs/milestone-7/SLICES.md](docs/milestone-7/SLICES.md) and the board, not this
+this file; read [docs/milestone-8/SLICES.md](docs/milestone-8/SLICES.md) and the board, not this
 paragraph.**
 
 Three things the rebrand deliberately did **not** rename, so don't "finish" it:
