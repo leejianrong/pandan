@@ -643,6 +643,7 @@ renamed and never remapped to a different exit code.
 | `invalid_ref` | `1` | an `EPIC-` ticket where a card is wanted (or the reverse) |
 | `unknown_field` | `1` | `--fields` named a field the row doesn't have |
 | `no_token` | `1` | `login` / `config set` got no token to save |
+| `nothing_to_update` | `1` | a patch verb (`label update`) given no field to change |
 | `unauthorized` | `3` | `401` — bad or missing PAT |
 | `forbidden` | `4` | `403` — the board exists but isn't yours |
 | `not_found` | `5` | `404`, **or** a `KAN-`/`EPIC-` ticket that resolves to nothing |
