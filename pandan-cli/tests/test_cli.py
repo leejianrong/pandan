@@ -1055,14 +1055,23 @@ def test_label_update_sends_only_the_flags_given(monkeypatch, env):
     assert fake.calls == [("update_label", {"label_id": 5, "name": None, "color": "#222"})]
 
 
-def test_label_update_with_neither_flag_is_a_usage_error(monkeypatch, env):
+def test_label_update_with_neither_flag_is_a_usage_error(monkeypatch, env, capsys):
     """`label update 5` alone would be a no-op PATCH the API answers 200 to. A command
     that silently does nothing is worse than an error, so the CLI refuses before the
     call — and the refusal is exit 1, not 2, because argparse accepted the argv and it
-    is the CLI that rejected the runtime value (the V43 1-vs-2 rule)."""
+    is the CLI that rejected the runtime value (the V43 1-vs-2 rule).
+
+    **The `code` assertion is the point, not the exit code.** An earlier version of this
+    test asserted only `== 1` and passed while the CLI was actually printing
+    `error unexpected KeyError: 'nothing_to_update'` — the raise site named a code that
+    was not in ERROR_CODES, so CliError raised KeyError by design, the top-level handler
+    reported it as `unexpected`, and the exit code was 1 either way. Exit codes are too
+    coarse to pin a failure class; agents branch on the code string (V43/AXI 6)."""
     fake = patch_client(monkeypatch, FakeClient(result={}))
     assert cli.run(["label", "update", "5"]) == 1
     assert fake.calls == []
+    row = capsys.readouterr().out.strip().split("\t")
+    assert row[0] == "error" and row[1] == "nothing_to_update"
 
 
 def test_label_delete_requires_yes(monkeypatch, env, capsys):
@@ -3696,6 +3705,7 @@ def test_error_code_vocabulary_is_pinned():
         "invalid_ref": 1,
         "unknown_field": 1,
         "no_token": 1,
+        "nothing_to_update": 1,
         "unauthorized": 3,
         "forbidden": 4,
         "not_found": 5,
@@ -4006,3 +4016,61 @@ def test_config_set_rejects_non_integer_board_id_structured(capsys):
     err = read_error(capsys)
     assert err.code == "invalid_input"
     assert err.arg == "--board-id"
+
+
+# --- every raised code is a mapped code (KAN-982 follow-up) ------------------
+
+
+def test_every_cli_error_code_raised_in_the_source_is_in_error_codes():
+    """A ``CliError(code=...)`` naming a string absent from ``ERROR_CODES`` is a
+    programming error the runtime turns into the *wrong* error.
+
+    ``CliError.__init__`` looks the code up in ``ERROR_CODES`` and lets the ``KeyError``
+    escape — deliberately, per ``test_cli_error_derives_its_exit_code_and_rejects_an_
+    unknown_code``: a typo'd code should not become a silent exit 1. But the top-level
+    handler catches everything and reports it as ``unexpected``, so at a real terminal
+    the operator sees::
+
+        error	unexpected	KeyError: 'nothing_to_update'	-
+
+    ...with exit 1 — the same exit code the correct error would have used. **That is how
+    KAN-982 shipped a broken raise site through a green suite**: its own test asserted
+    only the exit code, every other test exercised paths whose codes happened to be
+    mapped, and the defect surfaced only when the verb was run against the real API from
+    an installed build.
+
+    So this enumerates the *class* instead of the instance: parse ``cli.py``, collect
+    every literal ``code=`` keyword on a ``CliError`` construction, and require each one
+    to be a key of ``ERROR_CODES``. Same technique as ``test_envelope_audit.py`` — read
+    the source, don't hand-maintain a list that drifts.
+
+    Non-vacuity is asserted too: if the scan finds nothing, the pattern changed and this
+    test is no longer looking at anything.
+    """
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(cli))
+    found: dict[str, int] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        name = getattr(target, "id", None) or getattr(target, "attr", None)
+        if name != "CliError":
+            continue
+        for kw in node.keywords:
+            if kw.arg == "code" and isinstance(kw.value, ast.Constant):
+                if isinstance(kw.value.value, str):
+                    found.setdefault(kw.value.value, kw.value.lineno)
+
+    assert len(found) >= 8, (
+        f"the CliError(code=...) scan found only {len(found)} literal codes — the raise "
+        "pattern changed and this guard is no longer reading anything"
+    )
+    unmapped = {code: line for code, line in found.items() if code not in cli.ERROR_CODES}
+    assert not unmapped, (
+        "CliError raised with codes that are NOT in ERROR_CODES — each would surface to "
+        "the user as `error unexpected KeyError: ...` instead of the intended code:\n"
+        + "\n".join(f"  cli.py:{line}  code={code!r}" for code, line in sorted(unmapped.items()))
+    )

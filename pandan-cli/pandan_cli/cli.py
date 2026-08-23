@@ -171,6 +171,7 @@ ERROR_CODES: dict[str, int] = {
     "invalid_ref": EXIT_ERROR,            # an EPIC- ticket where a card is wanted, etc.
     "unknown_field": EXIT_ERROR,          # --fields named a field the row doesn't have
     "no_token": EXIT_ERROR,               # login/config set got no token to save
+    "nothing_to_update": EXIT_ERROR,      # a patch verb given no field to change
     # API-mapped.
     "unauthorized": EXIT_AUTH,            # 401
     "forbidden": EXIT_FORBIDDEN,          # 403
