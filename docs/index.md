@@ -40,7 +40,7 @@ still builds, so it would ship as an orphan page nothing links to.
   worktree and deploy machinery. `CLAUDE.md` at the repo root is the agent brief.
 - **Where is the work tracked?** The project dogfoods itself: the *Pandan Roadmap* board on the
   deployed instance is the authoritative task list, plus
-  [`docs/milestone-7/SLICES.md`](milestone-7/SLICES.md) for the current milestone.
+  [`docs/milestone-8/SLICES.md`](milestone-8/SLICES.md) for the current milestone.
 
 ## How the docs fit together
 
@@ -70,8 +70,10 @@ flowchart LR
   [Milestone 3](milestone-3/SLICES.md) (accounts, multi-board with ownership, board authorization,
   and self-serve agent tokens), [Milestone 5](milestone-5/SLICES.md) (agent/human handoff, awareness
   UI, fleet reporting), [Milestone 6](milestone-6/SLICES.md) (abuse hardening, projects, cycles,
-  design system, notifications) and [Milestone 7](milestone-7/SLICES.md) (the `pandan` rebrand +
-  agent-ergonomic CLI), each planned with its own frame → shaping → breadboard → slices.
+  design system, notifications), [Milestone 7](milestone-7/SLICES.md) (the `pandan` rebrand +
+  agent-ergonomic CLI) and [Milestone 8](milestone-8/SLICES.md) (board-local ticket refs, sprint
+  and backlog tooling, epic/label colour), each planned with its own frame → shaping →
+  breadboard → slices.
 - **[Internal guides](guides/autosync-github-setup.md)** — ops and testing how-tos that are not user
   documentation: auto-sync setup and operations, running the end-to-end tests behind auth, and edge
   hardening.
