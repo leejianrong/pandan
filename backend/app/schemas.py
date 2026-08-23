@@ -226,6 +226,40 @@ class LabelCreate(BaseModel):
         return v
 
 
+class LabelUpdate(BaseModel):
+    """Field edits for a label (V61, KAN-982): ``PATCH /labels/{id}``. Both fields
+    optional — only sent fields are applied, via ``exclude_unset`` in the router.
+
+    Neither field is nullable: a label with no name or no colour cannot render, so
+    ``null`` is rejected rather than treated as "clear". That is the difference from
+    :class:`EpicUpdate`, whose ``target_date``/``lead`` are genuinely clearable."""
+
+    name: Annotated[str | None, Field(min_length=1, max_length=MAX_NAME_LEN)] = None
+    color: Annotated[
+        str | None, Field(min_length=1, max_length=MAX_LABEL_COLOR_LEN)
+    ] = None
+
+    @field_validator("name", "color")
+    @classmethod
+    def not_null_and_not_blank(cls, v: str | None) -> str:
+        """Reject an explicit ``null`` as well as whitespace.
+
+        This leans on a Pydantic v2 behaviour worth naming, because the whole
+        distinction rests on it: field validators do **not** run for a field left at
+        its default (``validate_default`` is False), so this fires only when the key
+        was actually sent. That is what lets one optional field mean "not sent" while
+        still refusing ``{"name": null}``.
+
+        Without the null branch, an explicit null validated cleanly, survived
+        ``exclude_unset`` (it *was* set), and reached ``setattr`` — turning a bad
+        request into a ``NOT NULL`` violation at COMMIT. A 500, not a 422."""
+        if v is None:
+            raise ValueError("must not be null; omit the field to leave it unchanged")
+        if not v.strip():
+            raise ValueError("must not be empty")
+        return v
+
+
 class LabelRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -234,6 +268,23 @@ class LabelRead(BaseModel):
     name: str
     color: str
     created_at: datetime
+
+
+class LabelReadWithUsage(LabelRead):
+    """A label plus how many cards carry it (V61, KAN-982) — the management
+    screen's list shape, and **only** that endpoint's.
+
+    Deliberately a subclass rather than a field on :class:`LabelRead`, because
+    ``LabelRead`` is embedded in :attr:`CardRead.labels`: putting the count there
+    would add a redundant number to every label on every card in every card read —
+    the per-call payload cost ADR 0019 is about — and would break card reads
+    outright, since the ORM ``Label`` objects nested under a card carry no such
+    attribute.
+
+    ``usage_count`` exists to make deletion honest: deleting a label detaches it
+    from every card via ``ON DELETE CASCADE``, and the confirm should say how many."""
+
+    usage_count: int
 
 
 class CommentCreate(BaseModel):

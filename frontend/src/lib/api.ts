@@ -51,6 +51,11 @@ export interface Label {
   name: string;
   color: string;
   created_at: string;
+  // How many cards carry this label. Present ONLY on the board's label list
+  // (GET /boards/{id}/labels) — the labels nested under a card read deliberately
+  // omit it, so a card payload doesn't carry a redundant count per label.
+  // Optional here because both shapes deserialize into this one interface.
+  usage_count?: number;
 }
 
 // A work-link on a card (KAN-32): a label (e.g. "PR", "branch", "CI") + a url.
@@ -444,6 +449,14 @@ export interface LabelCreate {
   color: string;
 }
 
+// Field edits for a label (V61, KAN-982). Both optional — only the keys present
+// are sent, so recolouring never touches the name. Neither is nullable: a label
+// with no name or no colour cannot render, so there is nothing to "clear".
+export interface LabelUpdate {
+  name?: string;
+  color?: string;
+}
+
 export async function listLabels(boardId: number): Promise<Label[]> {
   const res = await fetch(`${API}/boards/${boardId}/labels`);
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
@@ -453,6 +466,16 @@ export async function listLabels(boardId: number): Promise<Label[]> {
 export async function createLabel(boardId: number, payload: LabelCreate): Promise<Label> {
   const res = await fetch(`${API}/boards/${boardId}/labels`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function updateLabel(id: number, payload: LabelUpdate): Promise<Label> {
+  const res = await fetch(`${API}/labels/${id}`, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });

@@ -25,7 +25,7 @@ Three things, and they are the whole contract:
    explicitly classified ``CLI_ONLY`` verb. That dict carries **two** reasons, spelled
    out at its definition: a verb about the CLI's own installation (config/login/
    context/overview), or a board-API verb deliberately left out of the ADR-0019-frozen
-   MCP surface (``me``, since KAN-614).
+   MCP surface (``me`` since KAN-614, ``label update`` since KAN-982).
 3. **The mapping names verbs that exist** — each argv path is resolved against the real
    ``build_parser()``, so an entry cannot describe a verb nobody implemented.
 
@@ -213,7 +213,7 @@ MCP_ONLY: dict[str, str] = {}
 CLI_ONLY: dict[tuple[str, ...], str] = {
     ("overview",): "the CLI's content-first bare invocation (V46) — board state, no new capability",
     ("login",): "writes the local config file; a PAT never travels over MCP",
-    # Reason 2 — the only one, so far.
+    # Reason 2 — declined tools, not missing ones. Two instances.
     ("me",): (
         "reason 2 (KAN-614): `GET /api/v1/me` IS a board API call, so this is a "
         "declined tool and not a missing one. No `me` tool is added because ADR 0019 "
@@ -221,6 +221,15 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
         "other `/api/v1` route already knows the caller and the CLI is where the "
         "question is asked (a human or an agent checking `did my token work?`). "
         "Re-opening this is an ADR 0019 amendment, not an edit here."
+    ),
+    ("label", "update"): (
+        "reason 2 (KAN-982): `PATCH /labels/{id}` IS a board API call, so this is a "
+        "declined tool and not a missing one. ADR 0019 freezes the MCP surface at 49, "
+        "and a rename/recolour is a *human*-ergonomics affordance — V61 exists because "
+        "a human could not manage labels without a terminal, which was never true of an "
+        "agent. What an agent actually does with labels is attach them, via `label_ids` "
+        "on create_card/update_card, which is unchanged. Re-opening this is an ADR 0019 "
+        "amendment, not an edit here."
     ),
     ("config", "set"): "local config file",
     ("config", "unset"): "local config file (issue #277)",

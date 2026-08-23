@@ -144,6 +144,9 @@ class FakeClient:
     def create_label(self, board_id, name, color):
         return self._call("create_label", board_id=board_id, name=name, color=color)
 
+    def update_label(self, label_id, *, name=None, color=None):
+        return self._call("update_label", label_id=label_id, name=name, color=color)
+
     def delete_label(self, label_id):
         return self._call("delete_label", label_id=label_id)
 
@@ -1039,6 +1042,27 @@ def test_label_create_passes_name_and_color(monkeypatch, env):
     assert fake.calls == [
         ("create_label", {"board_id": 2, "name": "bug", "color": "#ef4444"})
     ]
+
+
+def test_label_update_sends_only_the_flags_given(monkeypatch, env):
+    """V61 (KAN-982). Recolouring must not carry a `name: None` along — the API's
+    LabelUpdate rejects an explicit null (a label needs a name), so a client that
+    sent every field would 422 on every partial edit."""
+    fake = patch_client(
+        monkeypatch, FakeClient(result={"id": 5, "name": "bug", "color": "#222"})
+    )
+    assert cli.run(["label", "update", "5", "--color", "#222"]) == 0
+    assert fake.calls == [("update_label", {"label_id": 5, "name": None, "color": "#222"})]
+
+
+def test_label_update_with_neither_flag_is_a_usage_error(monkeypatch, env):
+    """`label update 5` alone would be a no-op PATCH the API answers 200 to. A command
+    that silently does nothing is worse than an error, so the CLI refuses before the
+    call — and the refusal is exit 1, not 2, because argparse accepted the argv and it
+    is the CLI that rejected the runtime value (the V43 1-vs-2 rule)."""
+    fake = patch_client(monkeypatch, FakeClient(result={}))
+    assert cli.run(["label", "update", "5"]) == 1
+    assert fake.calls == []
 
 
 def test_label_delete_requires_yes(monkeypatch, env, capsys):

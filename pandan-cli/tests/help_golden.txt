@@ -24,7 +24,7 @@ positional arguments:
     notify        your notification inbox (list / read)
     board         manage boards (list / get / create / update / delete)
     epic          manage epics (list / get / create / update / delete)
-    label         manage labels (list / create / delete)
+    label         manage labels (list / create / update / delete)
     view          manage saved views (list / create / delete)
     cycle         manage cycles / iterations (list / create / delete)
     batch-create  create several cards in one call (JSON array; fail-fast, NOT

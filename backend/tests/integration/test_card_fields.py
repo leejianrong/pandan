@@ -212,6 +212,102 @@ def test_delete_label_detaches_from_cards(client):
     assert client.get(f"{BOARDS}/{board}/labels").json() == []
 
 
+# --- PATCH /labels/{id} + usage_count (V61, KAN-982) ------------------------
+# Labels shipped in M5 V11 with create/list/delete only, so the only way to fix a
+# typo was to delete the label — which detaches it from every card it was on. These
+# pin the non-destructive edit and the count the delete confirm needs.
+
+
+def test_update_label_renames_and_recolours(client):
+    board = _default_board(client)
+    la = _label(client, board, "buge", "#111")
+    r = client.patch(f"/api/v1/labels/{la['id']}", json={"name": "bug", "color": "#222"})
+    assert r.status_code == 200, r.text
+    assert (r.json()["name"], r.json()["color"]) == ("bug", "#222")
+    # Server-authoritative: the board list agrees, not just the response body.
+    listed = client.get(f"{BOARDS}/{board}/labels").json()
+    assert [(x["name"], x["color"]) for x in listed] == [("bug", "#222")]
+
+
+def test_update_label_applies_only_sent_fields(client):
+    """A PATCH carrying just ``color`` must not blank the name. ``exclude_unset`` is
+    what makes that true, so this fails if the router ever switches to a plain dump —
+    the bug would be silent otherwise, since ``name`` defaults to None."""
+    board = _default_board(client)
+    la = _label(client, board, "keepme", "#111")
+    r = client.patch(f"/api/v1/labels/{la['id']}", json={"color": "#333"})
+    assert r.status_code == 200, r.text
+    assert (r.json()["name"], r.json()["color"]) == ("keepme", "#333")
+
+
+def test_update_label_keeps_its_card_attachments(client):
+    """The whole point of PATCH over delete-and-recreate: a rename must not detach."""
+    board = _default_board(client)
+    la = _label(client, board, "old", "#111")
+    card = _card(client, "labelled", label_ids=[la["id"]])
+    client.patch(f"/api/v1/labels/{la['id']}", json={"name": "new"})
+    labels = client.get(f"{CARDS}/{card['id']}").json()["labels"]
+    assert [x["name"] for x in labels] == ["new"]
+
+
+def test_update_label_empty_body_is_a_noop_not_an_error(client):
+    board = _default_board(client)
+    la = _label(client, board, "same", "#111")
+    r = client.patch(f"/api/v1/labels/{la['id']}", json={})
+    assert r.status_code == 200
+    assert (r.json()["name"], r.json()["color"]) == ("same", "#111")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{"name": "  "}, {"color": " "}, {"name": None}, {"color": None}],
+)
+def test_update_label_rejects_blank_and_null_422(client, payload):
+    """Neither field is clearable: a label with no name or no colour cannot render,
+    so ``null`` is a 422 rather than "set it to nothing". That is the deliberate
+    difference from EpicUpdate, whose target_date/lead ARE clearable."""
+    board = _default_board(client)
+    la = _label(client, board, "ok", "#111")
+    assert client.patch(f"/api/v1/labels/{la['id']}", json=payload).status_code == 422
+
+
+def test_update_missing_label_404(client):
+    assert client.patch("/api/v1/labels/999999", json={"name": "x"}).status_code == 404
+
+
+def test_label_list_reports_usage_count(client):
+    board = _default_board(client)
+    used = _label(client, board, "used", "#111")
+    _label(client, board, "unused", "#222")
+    _card(client, "one", label_ids=[used["id"]])
+    _card(client, "two", label_ids=[used["id"]])
+    counts = {x["name"]: x["usage_count"] for x in client.get(f"{BOARDS}/{board}/labels").json()}
+    assert counts == {"used": 2, "unused": 0}
+
+
+def test_usage_count_is_absent_from_labels_nested_under_a_card(client):
+    """``usage_count`` lives on LabelReadWithUsage, which is the LIST endpoint's shape
+    only. If it leaked onto LabelRead it would ride along on every label of every card
+    in every card read — the per-call payload cost ADR 0019 is about — so this pins the
+    asymmetry that the subclass exists to create."""
+    board = _default_board(client)
+    la = _label(client, board, "nested", "#111")
+    card = _card(client, "labelled", label_ids=[la["id"]])
+    assert "usage_count" not in client.get(f"{CARDS}/{card['id']}").json()["labels"][0]
+    # ...and it IS on the list endpoint, so the test can't pass by the field being gone.
+    assert "usage_count" in client.get(f"{BOARDS}/{board}/labels").json()[0]
+
+
+def test_non_owner_cannot_patch_a_label_403(login_as):
+    alice = login_as(*ALICE)
+    a_board = alice.get(BOARDS).json()[0]["id"]
+    label = alice.post(
+        f"{BOARDS}/{a_board}/labels", json={"name": "priv", "color": "#000"}
+    ).json()
+    bob = login_as(*BOB)
+    assert bob.patch(f"/api/v1/labels/{label['id']}", json={"name": "x"}).status_code == 403
+
+
 def test_non_owner_cannot_touch_labels_403(login_as):
     alice = login_as(*ALICE)
     a_board = alice.get(BOARDS).json()[0]["id"]

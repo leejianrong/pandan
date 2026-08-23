@@ -547,13 +547,22 @@ def list_comments(
 
 
 # --- board labels (M5 V11 API / KAN-244 tools) ----------------------------
+# No ``update_label`` tool, deliberately (V61, KAN-982). ``PATCH /labels/{id}`` exists
+# and ``PandanClient.update_label`` wraps it, but ADR 0019 freezes this surface at 49
+# tools and a rename/recolour is a *human*-ergonomics affordance: KAN-982 exists because
+# a human could not manage labels without a terminal, which was never true of an agent.
+# Attaching labels to cards — the thing an agent actually does — is ``label_ids`` on
+# create_card/update_card and is untouched. Same call as ``me`` (KAN-614): a declined
+# tool, not a missing one. Re-opening it is an ADR 0019 amendment, not an edit here;
+# ``pandan-cli/tests/test_parity.py`` CLI_ONLY carries the matching entry.
 
 
 @mcp.tool()
 def list_labels(board_id: int | None = None) -> dict[str, Any]:
-    """List a board's labels (id, name, color). ``board_id`` targets one board
-    (defaults to PANDAN_BOARD_ID). Use the returned ids in ``label_ids`` on
-    create_card/update_card, or as the ``label`` filter on list_cards."""
+    """List a board's labels (id, name, color, usage_count — how many cards carry
+    it). ``board_id`` targets one board (defaults to PANDAN_BOARD_ID). Use the
+    returned ids in ``label_ids`` on create_card/update_card, or as the ``label``
+    filter on list_cards."""
     resolved = _board(board_id)
     if resolved is None:
         raise ValueError("board_id is required (set PANDAN_BOARD_ID or pass board_id)")

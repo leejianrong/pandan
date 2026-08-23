@@ -18,7 +18,23 @@ pandan create "Fix the warmup message" --label 3 --label 7
 ```
 
 Labels attach by id rather than by name, which is awkward by hand and deliberate for scripts. `label
-list` gives you the ids.
+list` gives you the ids, and how many cards carry each one.
+
+### Managing labels in the browser
+
+Open the menu and choose **Labels** to see the board's labels, create one, rename or recolour an
+existing one, and delete one. Each row shows how many cards carry the label, because deleting it
+removes it from all of them.
+
+Renaming and recolouring are safe: the label keeps every card it was attached to. Only deleting
+detaches it. From the command line the same edit is:
+
+```bash
+pandan label update 3 --name "defect"      # rename, colour untouched
+pandan label update 3 --color '#0ea5e9'    # recolour, name untouched
+```
+
+Pass only what you want to change — omitting a field leaves it alone.
 
 !!! warning "Updating labels replaces the whole set"
 
@@ -119,7 +135,8 @@ Templates are capped at 200 cards, checked when you create one and again when yo
 
 ## Recap
 
-- Labels attach by id, and an update replaces the whole set.
+- Labels attach by id, and a *card* update replaces the whole set — while a *label* update
+  (`pandan label update`, or the browser's Labels screen) only changes the fields you pass.
 - Views are saved queries with no contents; deleting one is safe.
 - A card has at most one cycle and at most one epic, independently.
 - Cycles scope reporting. They do not enforce anything at the end date.

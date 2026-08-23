@@ -179,6 +179,8 @@ pandan board delete 5
 ```bash
 pandan label list
 pandan label create "bug" --color '#dc2626'
+pandan label update 7 --name "defect"        # rename; colour untouched
+pandan label update 7 --color '#0ea5e9'      # recolour; name untouched
 pandan label delete 7
 ```
 
