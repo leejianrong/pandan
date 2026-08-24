@@ -7,6 +7,7 @@
   import { ArrowDown, ArrowUp } from "lucide-svelte";
   import { board, epicFor } from "../board.svelte";
   import type { Card } from "../api";
+  import { compareTicketRefs } from "../tickets";
 
   const PRIORITY_RANK: Record<string, number> = {
     none: 0,
@@ -33,6 +34,10 @@
     }
   }
 
+  function compare(av: string | number, bv: string | number): number {
+    return av < bv ? -1 : av > bv ? 1 : 0;
+  }
+
   function value(card: Card, key: SortKey): string | number {
     if (key === "priority") return PRIORITY_RANK[card.priority] ?? 0;
     if (key === "due_date") return card.due_date ?? "";
@@ -42,9 +47,13 @@
 
   const rows = $derived(
     [...board.cards].sort((a, b) => {
-      const av = value(a, sortKey);
-      const bv = value(b, sortKey);
-      let cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      // The ticket column sorts through the shared numeric-aware comparator: a
+      // plain string compare puts KAN-100 ahead of KAN-9 (KAN-986). Every other
+      // key is a genuine string or rank, so the relational compare is right there.
+      let cmp =
+        sortKey === "ticket_number"
+          ? compareTicketRefs(a.ticket_number, b.ticket_number)
+          : compare(value(a, sortKey), value(b, sortKey));
       if (cmp === 0) cmp = a.id - b.id; // stable tiebreak
       return desc ? -cmp : cmp;
     }),
