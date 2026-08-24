@@ -39,7 +39,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 |-------|------|:----:|------|:---:|----------------|
 | **V61 · Label management UI** ✅ | the screen that did not exist | C | KAN-982 | 5 | A human creates and recolours a label without touching a terminal |
 | **V55 · `PATCH /cycles/{id}`** ✅ | a sprint you can edit | B | KAN-976 | 1 | `pandan cycle update 7 --name 'Sprint 12'` works and the cards stay attached |
-| **V51 · Board keys** | `board.key`, unique per owner | A | KAN-972 | 3 | A board has a key; two users can each own an `ENG`; keying a board `KAN` is a clean `422` |
+| **V51 · Board keys** ✅ | `board.key`, unique per owner 🗄️ | A | KAN-972 | 3 | A board has a key; two users can each own an `ENG`; keying a board `KAN` is a clean `422` |
 | **V52 · Per-board sequences** | `board_seq` + backfill 🗄️ | A | KAN-973 | 5 | Every card and epic carries a gapless board-local ref in its payload |
 | **V53 · Resolution** | both forms, everywhere | A | KAN-974 | 5 | `pandan get ENG-42` and `pandan get KAN-1013` return the same card |
 | **V54 · Render** | SPA + CLI show the ref | A | KAN-975 | 3 | The board reads `ENG-1…ENG-77` instead of `KAN-530…KAN-971` |
@@ -82,7 +82,7 @@ Keeping the canonical ticket is not backward compatibility — **it is the cross
 mode**, and it is the reason per-user board keys are safe (SHAPING D3). Two users may each own an
 `ENG`; a board-local ref only ever resolves inside a board.
 
-### V51 · Board keys — KAN-972
+### V51 · Board keys — KAN-972 ✅ 🗄️
 
 `board.key`, `^[A-Z][A-Z0-9]{1,9}$`, `UniqueConstraint(owner_id, key)`. Postgres treats NULLs as
 distinct, so the nullable `owner_id` needs no partial index and orphaned boards cannot collide.
@@ -92,7 +92,22 @@ numeric suffix on collision, because creation must never block on naming (R1.4).
 No hyphens in a key is load-bearing: it means a ref splits unambiguously on its **first** hyphen —
 head is the key, all-digit tail is a card, `E`+digits tail is an epic.
 
-**Deliverable includes ADR 0020.**
+**Shipped with [ADR 0020](../adr/0020-board-keys.md).** Four notes worth keeping:
+
+- **The migration marker was missing from the table above.** V51 adds a column, so it always carried
+  one; the intro's "five of these fourteen slices carry a migration" was right and the table listed
+  four. Corrected, and worth remembering as the failure mode this file is most prone to — a count in
+  prose that no longer matches the rows under it.
+- **Two failure codes, chosen rather than defaulted.** Malformed or reserved is a `422` (a fact about
+  the request); a key already used by that owner is a `409` (a fact about the database). A caller
+  deciding whether to fix the argument or pick another key needs to know which. Auto-derivation cannot
+  hit either — it suffixes.
+- **The derivation is duplicated into the migration on purpose**, not imported from
+  `app.board_keys`. A migration is a historical record and must keep producing the same result years
+  from now, which importing live code forfeits. The copies may drift after that revision and no
+  invariant depends on their agreeing.
+- **+215 resident MCP tokens** (8,426 → 8,641 compact, measured both ways) for the `key` argument on
+  `create_board` and `update_board`. ADR 0019's freeze is on the tool *count*, unchanged at 49.
 
 ### V52 · Per-board sequences — KAN-973 🗄️
 

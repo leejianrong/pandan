@@ -91,8 +91,13 @@ def _reset_tables():
         conn.execute(text("ALTER SEQUENCE epic_ticket_seq RESTART WITH 1"))
         # Re-seed the default board (id=1) so card/epic creation without an explicit
         # board_id resolves to it — matching the post-migration steady state and
-        # keeping the pre-board tests (which send no board_id) green.
-        conn.execute(text("INSERT INTO board (name) VALUES ('Default Board')"))
+        # keeping the pre-board tests (which send no board_id) green. ``key`` is NOT
+        # NULL since V51 (KAN-972), and 'DEF' is exactly what migration 0022's
+        # backfill derives from 'Default Board' — so this row stays a faithful
+        # stand-in for the real post-migration board rather than an arbitrary one.
+        conn.execute(
+            text("INSERT INTO board (name, key) VALUES ('Default Board', 'DEF')")
+        )
     yield
 
 

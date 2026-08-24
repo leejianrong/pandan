@@ -124,9 +124,16 @@ def list_boards(fields: list[str] | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
-def create_board(name: str) -> dict[str, Any]:
-    """Create a new board owned by you; returns it (including its id)."""
-    return _client_instance().create_board(name)
+def create_board(name: str, key: str | None = None) -> dict[str, Any]:
+    """Create a new board owned by you; returns it (including its id and key).
+
+    ``key`` is the board's short ref prefix — the ``ENG`` in a board-local ``ENG-14``
+    — 2-10 chars, an uppercase letter then uppercase letters/digits, and unique among
+    YOUR boards (another user may hold the same key). Usually omit it: one is derived
+    from the name and suffixed on collision, so a create never fails on naming. Pass
+    it to ask for a specific prefix: malformed or reserved (``KAN``/``EPIC``) is a
+    422, already used by your boards is a 409."""
+    return _client_instance().create_board(name, key=key)
 
 
 @mcp.tool()
@@ -140,6 +147,7 @@ def get_board(board_id: int) -> dict[str, Any]:
 def update_board(
     board_id: int,
     name: str | None = None,
+    key: str | None = None,
     autosync_enabled: bool | None = None,
     autosync_advance_to_done: bool | None = None,
     outbound_webhook_url: str | None = None,
@@ -147,6 +155,9 @@ def update_board(
     outbound_webhook_enabled: bool | None = None,
 ) -> dict[str, Any]:
     """Update a board's settings (only the arguments you pass are changed): ``name``;
+    ``key`` (the board-local ref prefix — safe to change, since nothing about a card
+    is stored per key and the canonical ``KAN-…`` ticket never moves; 422 if malformed
+    or reserved, 409 if another of your boards uses it);
     the GitHub PR auto-sync opt-in — ``autosync_enabled`` (master switch; PRs mentioning
     a ticket attach links and post CI comments) and ``autosync_advance_to_done``
     (separately allow a merged PR to move the card to done; effective only while
@@ -159,6 +170,7 @@ def update_board(
     return _client_instance().update_board(
         board_id,
         name=name,
+        key=key,
         autosync_enabled=autosync_enabled,
         autosync_advance_to_done=autosync_advance_to_done,
         outbound_webhook_url=outbound_webhook_url,

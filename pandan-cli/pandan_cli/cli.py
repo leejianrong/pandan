@@ -2080,7 +2080,9 @@ def _cmd_board_list(client: PandanClient, config: Config, args: argparse.Namespa
 
 
 def _cmd_board_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.create_board(args.name)
+    # --key is optional and usually omitted: the server derives one from the name and
+    # suffixes on collision, so a create never fails on naming (V51, KAN-972).
+    return client.create_board(args.name, key=args.key)
 
 
 def _cmd_board_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -2093,7 +2095,11 @@ def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Names
     capability that was MCP-only until KAN-502, and the reason the packaged skill
     shipped a raw-``curl`` workaround.
 
-    These six are exactly the API's ``BoardUpdate`` fields, so ``pandan board update``
+    ``--key`` (V51, KAN-972) changes the board's board-local ref prefix — the ``ENG`` in
+    ``ENG-14``. Renaming it is safe: nothing about a card is stored per key, and the
+    canonical ``KAN-…`` ticket is untouched forever (SHAPING D1).
+
+    These seven are exactly the API's ``BoardUpdate`` fields, so ``pandan board update``
     now reaches all of ``PATCH /api/v1/boards/{id}``. The two ``--autosync-*`` tri-states
     (KAN-529) close the last hole: they were reachable from *neither* adapter, which made
     a raw ``curl`` the only way to turn auto-sync on — the exact state this verb exists
@@ -2109,6 +2115,7 @@ def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Names
     secret = _read_secret_arg(args)
     fields = {
         "name": args.name,
+        "key": args.key,
         "autosync_enabled": args.autosync_enabled,
         "autosync_advance_to_done": args.autosync_advance_to_done,
         "outbound_webhook_url": args.outbound_webhook_url,
@@ -2117,7 +2124,7 @@ def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Names
     }
     if all(value is None for value in fields.values()):
         raise CliError(
-            "nothing to update (pass --name / --autosync-enabled|-disabled / "
+            "nothing to update (pass --name / --key / --autosync-enabled|-disabled / "
             "--autosync-advance-to-done|--no-autosync-advance-to-done / "
             "--outbound-webhook-url / --outbound-webhook-secret[-stdin] / "
             "--outbound-webhook-enabled|-disabled)",
@@ -3222,6 +3229,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_board_create = board_sub.add_parser("create", parents=[common], help="create a board")
     p_board_create.add_argument("name")
+    p_board_create.add_argument(
+        "--key",
+        help=(
+            "board-local ref prefix, e.g. ENG (2-10 chars, A-Z then A-Z0-9). "
+            "Omit and one is derived from the name"
+        ),
+    )
     p_board_create.set_defaults(
         func=_cmd_board_create, noun="board", hints=_HINTS["board create"]
     )
@@ -3233,6 +3247,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_board_update.add_argument("board_id", type=int, metavar="BOARD", help="a board id")
     p_board_update.add_argument("--name", help="rename the board")
+    p_board_update.add_argument(
+        "--key", help="change the board-local ref prefix, e.g. ENG (V51)"
+    )
     # EPIC-10 / ADR 0016 GitHub PR auto-sync (KAN-529). Both were reachable from neither
     # the CLI nor MCP, so `curl` was the only way to opt a board in. Tri-states for the
     # same reason as the webhook switch below: `--name`-only must not flip them.

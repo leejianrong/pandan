@@ -87,6 +87,12 @@ a bearer token. It returns the minimum on purpose, because it is a cross-applica
 `PATCH` is where auto-sync and outbound webhook settings live. The outbound secret is accepted here and
 never returned by any read.
 
+Every board carries a **`key`** — a short ref prefix like `ENG`, matching `^[A-Z][A-Z0-9]{1,9}$`. It is
+unique **per owner**, not globally, so two users can each hold `ENG`. `POST` derives one from the name
+when you omit it, so a create never fails on naming; supply one and a malformed or reserved
+(`KAN`/`EPIC`) value is a `422` while a key you already use is a `409`. `PATCH` changes it, which is
+safe — a card's `ticket_number` never moves.
+
 ### Cards
 
 | Method | Path | Notes |
@@ -167,11 +173,11 @@ Deleting an epic detaches its cards rather than cascading to them.
 | `GET` `POST` | `/api/v1/boards/{board_id}/members` |
 | `PATCH` `DELETE` | `/api/v1/boards/{board_id}/members/{member_id}` |
 | `GET` `POST` | `/api/v1/boards/{board_id}/labels` |
-| `DELETE` | `/api/v1/labels/{label_id}` |
+| `PATCH` `DELETE` | `/api/v1/labels/{label_id}` |
 | `GET` `POST` | `/api/v1/boards/{board_id}/views` |
 | `GET` `DELETE` | `/api/v1/boards/{board_id}/views/{view_id}` |
 | `GET` `POST` | `/api/v1/boards/{board_id}/cycles` |
-| `GET` `DELETE` | `/api/v1/boards/{board_id}/cycles/{cycle_id}` |
+| `GET` `PATCH` `DELETE` | `/api/v1/boards/{board_id}/cycles/{cycle_id}` |
 | `GET` | `/api/v1/boards/{board_id}/cycles/{cycle_id}/metrics` |
 | `GET` `POST` | `/api/v1/boards/{board_id}/templates` |
 | `GET` `DELETE` | `/api/v1/boards/{board_id}/templates/{template_id}` |

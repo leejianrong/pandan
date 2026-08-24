@@ -164,9 +164,16 @@ Deleting an epic detaches its stories rather than deleting them.
 pandan board list
 pandan board get 5
 pandan board create "Q4 planning"
+pandan board create "Engineering" --key ENG
 pandan board update 5 --name "Pandan Roadmap"
+pandan board update 5 --key PDN
 pandan board delete 5
 ```
+
+Every board has a **key** — a short prefix like `ENG`, two to ten characters, an uppercase letter
+followed by uppercase letters and digits. Omit `--key` and one is derived from the name, so a create
+never fails on naming. Keys are unique among *your* boards, not globally: another user can hold `ENG`
+too. `KAN` and `EPIC` are reserved, and a key you already use is a `409`.
 
 !!! danger "Deleting a board deletes its cards"
 

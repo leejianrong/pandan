@@ -191,15 +191,23 @@ class PandanClient:
         """List the boards the caller's user owns (owner-scoped by the API)."""
         return {"boards": self._request("GET", "/boards").json()}
 
-    def create_board(self, name: str) -> dict[str, Any]:
-        """Create a board owned by the caller's user."""
-        return self._request("POST", "/boards", json={"name": name}).json()
+    def create_board(self, name: str, *, key: str | None = None) -> dict[str, Any]:
+        """Create a board owned by the caller's user.
+
+        ``key`` (V51, KAN-972) is the board's short ref prefix — the ``ENG`` in
+        ``ENG-14`` — and is **optional on purpose**: omit it and the server derives
+        one from the name, suffixing on collision, so a create can never fail on
+        naming. Name it and you get that exact key or an error: a malformed or
+        reserved key is a 422, one already used by your boards is a 409."""
+        payload = _clean({"name": name, "key": key})
+        return self._request("POST", "/boards", json=payload).json()
 
     def update_board(
         self,
         board_id: int,
         *,
         name: str | None = None,
+        key: str | None = None,
         autosync_enabled: bool | None = None,
         autosync_advance_to_done: bool | None = None,
         outbound_webhook_url: str | None = None,
@@ -208,20 +216,24 @@ class PandanClient:
     ) -> dict[str, Any]:
         """PATCH a board's settings — only the arguments you pass are sent.
 
-        ``name`` renames it; the ``autosync_*`` pair is the EPIC-10 / ADR 0016 GitHub
+        ``name`` renames it; ``key`` changes its board-local ref prefix (V51 — 422 if
+        malformed or reserved, 409 if another of your boards already uses it, and
+        renaming it is safe because nothing about a card is stored per key); the
+        ``autosync_*`` pair is the EPIC-10 / ADR 0016 GitHub
         PR→board opt-in (``autosync_enabled`` is the master switch, and
         ``autosync_advance_to_done`` separately gates merge→Done, which only has effect
         while the master switch is on); the ``outbound_webhook_*`` trio configures the
         V38 signed outbound webhook (``_url`` target, ``_secret`` write-only HMAC key,
         ``_enabled`` on/off).
 
-        These are the six fields of the API's ``BoardUpdate``. ``_clean`` drops unset
+        These are the seven fields of the API's ``BoardUpdate``. ``_clean`` drops unset
         (None) args — and only ``None``, so an explicit ``False`` *is* sent — meaning an
         omitted field is left untouched (clearing a string value needs the raw API,
         which accepts explicit null)."""
         payload = _clean(
             {
                 "name": name,
+                "key": key,
                 "autosync_enabled": autosync_enabled,
                 "autosync_advance_to_done": autosync_advance_to_done,
                 "outbound_webhook_url": outbound_webhook_url,

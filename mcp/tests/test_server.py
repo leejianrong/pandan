@@ -457,12 +457,12 @@ def test_create_card_passes_cycle_id(monkeypatch):
     assert json.loads(seen["content"]) == {"board_id": 3, "title": "T", "cycle_id": 4}
 
 
-# --- update_board: the autosync pair (KAN-529) ------------------------------
-# `autosync_enabled` / `autosync_advance_to_done` are two of the six `BoardUpdate`
-# fields (backend/app/schemas.py:436-443) and were reachable from NEITHER adapter, so
-# opting a board into EPIC-10 / ADR 0016 auto-sync meant a raw `curl`. Added as tool
-# ARGUMENTS, which ADR 0019's freeze permits — it freezes the tool *count*, pinned by
-# `tests/test_schema.py`, which these do not move.
+# --- update_board: the autosync pair (KAN-529) + the board key (V51) --------
+# `autosync_enabled` / `autosync_advance_to_done` are two of the `BoardUpdate` fields
+# and were reachable from NEITHER adapter, so opting a board into EPIC-10 / ADR 0016
+# auto-sync meant a raw `curl`. `key` (V51, KAN-972) is the newest. All were added as
+# tool ARGUMENTS, which ADR 0019's freeze permits — it freezes the tool *count*,
+# pinned by `tests/test_schema.py`, which arguments do not move.
 
 _BOARD_READ = {"id": 5, "name": "Roadmap", "autosync_enabled": True}
 
@@ -475,13 +475,19 @@ def test_update_board_still_requires_only_board_id():
     assert update_board.input_schema["required"] == ["board_id"]
 
 
-def test_update_board_advertises_all_six_boardupdate_fields():
-    """The previous four must survive verbatim — a rename would break callers as surely
-    as a removal — and the two new ones must appear alongside them."""
+def test_update_board_advertises_every_boardupdate_field():
+    """Every existing argument must survive verbatim — a rename would break callers as
+    surely as a removal — and each new one must appear alongside them.
+
+    The set is pinned **by name, never by a count**, which this test has now been
+    right about twice: KAN-529 took it to six, and V51 (KAN-972) added ``key`` for
+    seven. Both times the assertion was what noticed, which is why the name of this
+    test no longer contains a number."""
     update_board = next(t for t in _tools() if t.name == "update_board")
     assert set(update_board.input_schema["properties"]) == {
         "board_id",
         "name",
+        "key",
         "autosync_enabled",
         "autosync_advance_to_done",
         "outbound_webhook_url",

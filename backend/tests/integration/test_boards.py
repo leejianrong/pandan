@@ -161,3 +161,202 @@ def test_delete_board_leaves_other_boards_untouched(logged_in_client):
 
     assert c.get(f"{CARDS}/{kept_card['id']}").status_code == 200
     assert {x["title"] for x in c.get(CARDS, params={"board_id": keep}).json()} == {"kept"}
+
+
+# --- board keys (M8 V51, KAN-972; ADR 0020) ---------------------------------
+
+
+def test_a_new_board_gets_a_key_derived_from_its_name(logged_in_client):
+    board = logged_in_client.post(BOARDS, json={"name": "Engine Room"}).json()
+    assert board["key"] == "ENG"
+
+
+def test_the_default_boards_key_matches_what_the_migration_would_derive(logged_in_client):
+    """**This does not test the migration**, and saying so is the point.
+
+    The testcontainer migrates an *empty* database, so 0022's backfill loop touches
+    no rows; the default board every other test sees is re-inserted by conftest's
+    ``_reset_tables`` with a hardcoded ``'DEF'``. What this pins is that the seed
+    stays a faithful stand-in for the real post-migration row — if the derivation
+    ever changes, this is the assertion that says the fixture drifted.
+
+    The backfill itself is covered by
+    ``test_the_backfill_derives_keys_and_deduplicates_per_owner``, which runs the
+    real migration over real rows."""
+    default = logged_in_client.get(BOARDS).json()[0]
+    assert default["name"] == "Default Board"
+    assert default["key"] == "DEF"
+
+
+def test_the_backfill_derives_keys_and_deduplicates_per_owner():
+    """Migration 0022's backfill, over rows that actually exist (V51, KAN-972).
+
+    Every other test in this suite runs against a database migrated while empty, so
+    the backfill loop never executes. This one downgrades one revision, inserts
+    boards with no key, and upgrades again — the only way to exercise the branch that
+    will run exactly once in production, on data that matters.
+
+    ``finally`` re-upgrades unconditionally: a failure mid-test would otherwise leave
+    the schema one revision behind and break every test after it, turning one red
+    into a hundred.
+    """
+    from alembic.config import Config
+    from sqlalchemy import text
+
+    from alembic import command
+    from app.db import engine
+
+    cfg = Config("alembic.ini")
+    command.downgrade(cfg, "-1")
+    try:
+        with engine.begin() as conn:
+            owner = conn.execute(
+                text(
+                    'INSERT INTO "user" (id, email, hashed_password, is_active, '
+                    "is_superuser, is_verified) VALUES "
+                    "(gen_random_uuid(), 'backfill@example.com', 'x', true, false, true) "
+                    "RETURNING id"
+                )
+            ).scalar_one()
+            conn.execute(text("DELETE FROM board"))
+            for name in ("Engine Room", "Engineering", "Engines", "Kanban", "曜日"):
+                conn.execute(
+                    text("INSERT INTO board (name, owner_id) VALUES (:n, :o)"),
+                    {"n": name, "o": owner},
+                )
+            # An unowned board whose name derives the same key as an owned one.
+            # NULLs are distinct in a unique index, so it keeps the plain key.
+            conn.execute(text("INSERT INTO board (name) VALUES ('Engine Room')"))
+
+        command.upgrade(cfg, "head")
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT name, key, owner_id FROM board ORDER BY id")
+            ).all()
+        owned = [(name, key) for name, key, o in rows if o is not None]
+        unowned = [(name, key) for name, key, o in rows if o is None]
+
+        assert owned == [
+            ("Engine Room", "ENG"),
+            ("Engineering", "ENG2"),  # same derivation, same owner → suffixed
+            ("Engines", "ENG3"),
+            ("Kanban", "KAN2"),  # reserved, so it walks the collision path too
+            ("曜日", "BRD"),  # nothing usable in ASCII → the fallback
+        ]
+        # The unowned board is exempt from the per-owner dedup and keeps ENG,
+        # colliding with the owned ENG only in a way Postgres does not police.
+        assert unowned == [("Engine Room", "ENG")]
+    finally:
+        command.upgrade(cfg, "head")
+
+
+def test_a_derived_key_suffixes_instead_of_failing(logged_in_client):
+    """R1.4: creating a board must never block on naming. Three same-derivation
+    names in a row, and every create still returns 201."""
+    keys = [
+        logged_in_client.post(BOARDS, json={"name": f"Engine Room {n}"}).json()["key"]
+        for n in range(3)
+    ]
+    assert keys == ["ENG", "ENG2", "ENG3"]
+
+
+def test_an_explicit_key_is_honoured(logged_in_client):
+    board = logged_in_client.post(BOARDS, json={"name": "Platform", "key": "PLT"}).json()
+    assert board["key"] == "PLT"
+
+
+def test_two_users_can_each_own_an_eng(login_as):
+    """SHAPING D2, and the reason board-local refs resolve board-locally (D3). This
+    is the assertion the whole slice exists to make true."""
+    alice = login_as("alice-keys@example.com", "gh-alice-keys")
+    bob = login_as("bob-keys@example.com", "gh-bob-keys")
+    a = alice.post(BOARDS, json={"name": "Engineering", "key": "ENG"})
+    b = bob.post(BOARDS, json={"name": "Engine Room", "key": "ENG"})
+    assert a.status_code == 201 and b.status_code == 201
+    assert a.json()["key"] == b.json()["key"] == "ENG"
+    assert a.json()["id"] != b.json()["id"]
+
+
+def test_reusing_your_own_key_is_a_409(logged_in_client):
+    """A conflict with stored state, not a malformed request — so 409, not 422. The
+    distinction matters to a caller deciding whether to fix the argument or pick
+    another key."""
+    logged_in_client.post(BOARDS, json={"name": "Platform", "key": "PLT"})
+    again = logged_in_client.post(BOARDS, json={"name": "Other", "key": "PLT"})
+    assert again.status_code == 409
+    assert "PLT" in again.json()["detail"]
+
+
+def test_a_reserved_key_is_a_422(logged_in_client):
+    """SHAPING D3/D5: a board key that shadowed a canonical prefix would make
+    ``KAN-14`` mean two things. Case-insensitive, so the lowercase spelling cannot
+    sneak in on its way to being uppercased."""
+    for key in ("KAN", "EPIC", "kan", "epic"):
+        r = logged_in_client.post(BOARDS, json={"name": "Nope", "key": key})
+        assert r.status_code == 422, key
+
+
+def test_a_malformed_key_is_a_422(logged_in_client):
+    for key in ("eng", "E", "ENG-X", "1NG", "EN G", "ABCDEFGHIJK", ""):
+        r = logged_in_client.post(BOARDS, json={"name": "Nope", "key": key})
+        assert r.status_code == 422, key
+
+
+def test_a_board_named_kanban_derives_past_the_reserved_key(logged_in_client):
+    """Reservation and collision share one mechanism, so the derived path resolves a
+    reserved key the same way it resolves a taken one."""
+    assert logged_in_client.post(BOARDS, json={"name": "Kanban"}).json()["key"] == "KAN2"
+
+
+def test_a_key_can_be_changed_by_patch(logged_in_client):
+    board = logged_in_client.post(BOARDS, json={"name": "Platform"}).json()
+    updated = logged_in_client.patch(f"{BOARDS}/{board['id']}", json={"key": "PLT"})
+    assert updated.status_code == 200
+    assert updated.json()["key"] == "PLT"
+    assert updated.json()["name"] == "Platform"  # unsent fields untouched
+
+
+def test_patching_a_key_to_its_current_value_is_not_a_self_collision(logged_in_client):
+    board = logged_in_client.post(BOARDS, json={"name": "Platform", "key": "PLT"}).json()
+    again = logged_in_client.patch(f"{BOARDS}/{board['id']}", json={"key": "PLT"})
+    assert again.status_code == 200
+    assert again.json()["key"] == "PLT"
+
+
+def test_patching_a_key_onto_another_of_your_boards_is_a_409(logged_in_client):
+    first = logged_in_client.post(BOARDS, json={"name": "Platform", "key": "PLT"}).json()
+    second = logged_in_client.post(BOARDS, json={"name": "Other", "key": "OTH"}).json()
+    clash = logged_in_client.patch(f"{BOARDS}/{second['id']}", json={"key": "PLT"})
+    assert clash.status_code == 409
+    assert logged_in_client.get(f"{BOARDS}/{second['id']}").json()["key"] == "OTH"
+    assert logged_in_client.get(f"{BOARDS}/{first['id']}").json()["key"] == "PLT"
+
+
+def test_patching_a_key_to_a_reserved_or_malformed_value_is_a_422(logged_in_client):
+    board = logged_in_client.post(BOARDS, json={"name": "Platform"}).json()
+    for key in ("KAN", "epic", "eng", "X"):
+        r = logged_in_client.patch(f"{BOARDS}/{board['id']}", json={"key": key})
+        assert r.status_code == 422, key
+
+
+def test_a_key_cannot_be_cleared(logged_in_client):
+    """Unlike the webhook fields, a null is a 422 rather than "clear it": every
+    board has a key, because V52's board-local refs cannot render without one."""
+    board = logged_in_client.post(BOARDS, json={"name": "Platform"}).json()
+    r = logged_in_client.patch(f"{BOARDS}/{board['id']}", json={"key": None})
+    assert r.status_code == 422
+    assert logged_in_client.get(f"{BOARDS}/{board['id']}").json()["key"] == "PLA"
+
+
+def test_a_key_patch_does_not_disturb_the_boards_cards(logged_in_client):
+    """Nothing about a card is stored per key — ``ticket_number`` is untouched
+    forever (SHAPING D1), which is precisely what makes a key renameable."""
+    board = logged_in_client.post(BOARDS, json={"name": "Platform"}).json()
+    card = logged_in_client.post(
+        CARDS, json={"title": "story", "board_id": board["id"]}
+    ).json()
+    logged_in_client.patch(f"{BOARDS}/{board['id']}", json={"key": "PLT"})
+    after = logged_in_client.get(f"{CARDS}/{card['id']}").json()
+    assert after["ticket_number"] == card["ticket_number"]
+    assert after["board_id"] == board["id"]

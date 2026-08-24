@@ -15,6 +15,18 @@ the flat structure of the cards/epics routers (API-first, ADR 0005). Mounted by
 otherwise). Reads are ``Access.READ`` (viewer or above); rename/delete are
 ``Access.MANAGE`` (owner only). The list stays owner-scoped (member visibility is
 KAN-15). See :mod:`app.authz`.
+
+**Board keys (M8 V51, KAN-972; ADR 0020).** Every board carries a ``key`` — the
+``ENG`` in a board-local ``ENG-14`` — unique **per owner**, not globally. Two status
+codes, and which one you get depends on whether you named the key:
+
+- **Omitted on create** → derived from the name, suffixed on collision, never an
+  error (R1.4: creating a board must not block on naming).
+- **Named** (on create or PATCH) → malformed or reserved is a ``422`` from the
+  schema; already used by this owner is a ``409`` from here, because "taken" is a
+  fact about the database and not about the request.
+
+See :mod:`app.board_keys` for the shape, the reserved words and the derivation.
 """
 from __future__ import annotations
 
@@ -23,11 +35,13 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select, tuple_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..activity import record_activity
 from ..auth_models import User
 from ..authz import Access, authorize_board, get_principal, visible_board_ids
+from ..board_keys import allocate_board_key
 from ..db import get_db
 from ..metrics import compute_metrics, move_target
 from ..models import Activity, Board, BoardMember, Card
@@ -46,6 +60,12 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/boards", tags=["boards"])
+
+#: How many times ``create_board`` re-derives a key after losing the unique
+#: constraint to a concurrent create. Three, because each retry reads the winning
+#: key and suffixes past it, so the loop converges in one extra pass for any
+#: realistic amount of contention — this is a bound on pathology, not a strategy.
+_KEY_ALLOCATION_ATTEMPTS = 3
 
 
 def resolve_board_id(db: Session, board_id: int | None) -> int:
@@ -98,6 +118,30 @@ def list_boards(
     return boards
 
 
+def _owner_keys(db: Session, owner_id, *, excluding: int | None = None) -> set[str]:
+    """The board keys already used by one owner (V51, KAN-972).
+
+    Scoped to the owner because that is the scope of the uniqueness constraint
+    (SHAPING D2) — this must never be a global query, or two users could not each
+    own an ``ENG``. ``excluding`` skips a board's own row so re-PATCHing a board to
+    the key it already has is a no-op rather than a self-collision.
+    """
+    query = select(Board.key).where(Board.owner_id == owner_id)
+    if excluding is not None:
+        query = query.where(Board.id != excluding)
+    return set(db.scalars(query).all())
+
+
+def _reject_taken_key(db: Session, owner_id, key: str, *, excluding: int | None = None) -> None:
+    """409 if ``key`` is already used by this owner. Only ever called for a key the
+    caller *named*: a derived key resolves a collision by suffixing instead."""
+    if key in _owner_keys(db, owner_id, excluding=excluding):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"board key {key!r} is already used by one of your boards",
+        )
+
+
 @router.post("", response_model=BoardRead, status_code=status.HTTP_201_CREATED)
 def create_board(
     payload: BoardCreate,
@@ -105,9 +149,36 @@ def create_board(
     principal: User = Depends(get_principal),
 ) -> Board:
     # Owner comes from the calling user, never the request body.
-    board = Board(name=payload.name, owner_id=principal.id)
-    db.add(board)
-    db.commit()
+    #
+    # The key is the caller's if they named one (already checked for shape and
+    # reservation by the schema; only "taken" is left to check), otherwise derived
+    # from the name with a numeric suffix on collision. That asymmetry is the point:
+    # asking for `ENG` and not getting it is worth an error, while not asking is
+    # worth never failing.
+    if payload.key is not None:
+        _reject_taken_key(db, principal.id, payload.key)
+    # Read-then-write is not atomic, so two concurrent creates can pick the same
+    # derived key and one of them loses the unique constraint at COMMIT. Retry the
+    # *derived* path — the second attempt reads the winner's key and suffixes past
+    # it — and turn a lost race on a caller-named key into the 409 it would have
+    # been a moment earlier, rather than a 500 from an IntegrityError.
+    for attempt in range(_KEY_ALLOCATION_ATTEMPTS):
+        key = payload.key or allocate_board_key(
+            payload.name, _owner_keys(db, principal.id)
+        )
+        board = Board(name=payload.name, key=key, owner_id=principal.id)
+        db.add(board)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            if payload.key is not None or attempt == _KEY_ALLOCATION_ATTEMPTS - 1:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"board key {key!r} is already used by one of your boards",
+                ) from None
+            continue
+        break
     db.refresh(board)
     record_activity(
         db,
@@ -145,6 +216,12 @@ def update_board(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="name must not be empty",
         )
+    if "key" in data:
+        # Uniqueness is per owner, and the owner here is the board's — not
+        # necessarily the caller's. `Access.MANAGE` means owner-only today, so the
+        # two coincide; scoping to ``board.owner_id`` anyway keeps this correct if
+        # MANAGE ever widens, rather than silently checking the wrong namespace.
+        _reject_taken_key(db, board.owner_id, data["key"], excluding=board.id)
     for field, value in data.items():
         setattr(board, field, value)
     record_activity(

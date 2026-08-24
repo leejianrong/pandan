@@ -22,6 +22,14 @@ the CLI:
 pandan board create "Q4 planning"
 ```
 
+Each board gets a short **key** — `Q4 planning` becomes `Q4P` — derived from the name so that creating
+a board never stops to ask you for one. Pick your own with `--key ENG`, or change it later with
+`pandan board update <id> --key ENG`; nothing breaks when you do, because a card's own ticket number
+never changes.
+
+Keys are unique among your own boards rather than across everybody's, so you are not competing with
+other people for the short ones.
+
 Separate boards are the right tool when the work has nothing to do with each other. Two products, or a
 work board and a personal one. Within one project, prefer [epics](epics.md) and
 [labels](organising.md) over a second board, because cards cannot move between boards and reporting

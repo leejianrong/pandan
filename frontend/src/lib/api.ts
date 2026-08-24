@@ -189,6 +189,12 @@ export interface EpicCreate {
 export interface Board {
   id: number;
   name: string;
+  // The board's short ref prefix — the `ENG` in a board-local `ENG-14` (M8 V51,
+  // KAN-972). Unique per OWNER, not globally, so this alone does not identify a
+  // board across users; `ticket_number` stays the cross-board address. Nothing
+  // renders it yet: V54 owns the display, and the chain's rule is that no ref
+  // appears until every resolver understands it.
+  key: string;
   owner_id: string | null;
   // The caller's effective role on this board (KAN-15): "owner" if they own it,
   // else their membership role. Drives the switcher's shared-board badge.
@@ -199,10 +205,14 @@ export interface Board {
 
 export interface BoardCreate {
   name: string;
+  // Optional: omit and the server derives one from the name, suffixing on
+  // collision, so a create never fails on naming.
+  key?: string;
 }
 
 export interface BoardUpdate {
   name?: string;
+  key?: string;
 }
 
 export interface EpicUpdate {
