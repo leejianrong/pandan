@@ -991,6 +991,46 @@ class CycleCreate(BaseModel):
         return v
 
 
+class CycleUpdate(BaseModel):
+    """Field edits for a cycle (V55, KAN-976): ``PATCH /boards/{id}/cycles/{cid}``.
+
+    All three fields are optional — only the keys actually sent are applied, via
+    ``exclude_unset`` in the router.
+
+    **The three fields are deliberately not tri-state in the same way**, and the
+    split mirrors :class:`LabelUpdate` vs :class:`EpicUpdate`:
+
+    * ``name`` is **not nullable**. A cycle with no name cannot be listed or
+      referred to, so an explicit ``null`` is a ``422`` rather than "clear it".
+      Same Pydantic subtlety :class:`LabelUpdate` documents at length: a field
+      validator does not run for a field left at its default, so this fires only
+      when the key was really sent — which is what lets one optional field mean
+      "not sent" while still refusing ``{"name": null}``.
+    * ``starts_on`` / ``ends_on`` **are** nullable, because a cycle with no bounds
+      is already a valid cycle (:class:`CycleCreate` makes both optional, and
+      ``cycle metrics`` burns down to an empty series when they are absent). So
+      ``null`` here genuinely means *unschedule*, and is not an error.
+
+    Cycle **bounds are not order-checked** (``ends_on`` before ``starts_on`` is
+    accepted). ``CycleCreate`` does not check it either, and adding the rule on the
+    edit path alone would make the one operation that exists to *fix* a mistyped
+    date the only one that can be refused by an already-stored value.
+    """
+
+    name: Annotated[str | None, Field(min_length=1, max_length=MAX_NAME_LEN)] = None
+    starts_on: datetime | None = None
+    ends_on: datetime | None = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_null_and_not_blank(cls, v: str | None) -> str:
+        if v is None:
+            raise ValueError("must not be null; omit the field to leave it unchanged")
+        if not v.strip():
+            raise ValueError("name must not be empty")
+        return v
+
+
 class CycleRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

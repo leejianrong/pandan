@@ -204,6 +204,9 @@ class FakeClient:
     def create_cycle(self, board_id, name, **kw):
         return self._call("create_cycle", board_id=board_id, name=name, **kw)
 
+    def update_cycle(self, board_id, cycle_id, **kw):
+        return self._call("update_cycle", board_id=board_id, cycle_id=cycle_id, **kw)
+
     def delete_cycle(self, board_id, cycle_id):
         return self._call("delete_cycle", board_id=board_id, cycle_id=cycle_id)
 
@@ -639,6 +642,42 @@ def test_cycle_create_passes_name_and_bounds(monkeypatch, env):
             },
         )
     ]
+
+
+def test_cycle_update_passes_only_the_fields_given(monkeypatch, env):
+    """V55 / KAN-976. A partial edit sends a partial payload — the whole point is that
+    correcting an end date leaves the name and the cycle's cards alone."""
+    fake = patch_client(monkeypatch, FakeClient(result={"id": 4, "name": "Sprint 12"}))
+    code = cli.run(
+        ["cycle", "update", "4", "--board", "3", "--name", "Sprint 12",
+         "--ends-on", "2026-09-05T00:00:00Z"]
+    )
+    assert code == 0
+    assert fake.calls == [
+        (
+            "update_cycle",
+            {
+                "board_id": 3,
+                "cycle_id": 4,
+                "name": "Sprint 12",
+                "starts_on": None,
+                "ends_on": "2026-09-05T00:00:00Z",
+            },
+        )
+    ]
+
+
+def test_cycle_update_with_no_fields_is_a_named_error(monkeypatch, env, capsys):
+    """The `label update` lesson (KAN-982), and the reason the assertion is on the
+    **code**: a PATCH with nothing set is a server-side no-op, and a command that
+    silently does nothing is worse than a usage error. Asserting only `== 1` would
+    pass even if the raise site named a code missing from ERROR_CODES, which surfaces
+    as `error unexpected KeyError: ...` at the same exit code."""
+    fake = patch_client(monkeypatch, FakeClient(result={}))
+    assert cli.run(["cycle", "update", "4", "--board", "3"]) == 1
+    assert fake.calls == []
+    row = capsys.readouterr().out.strip().split("\t")
+    assert row[0] == "error" and row[1] == "nothing_to_update"
 
 
 def test_cycle_delete_requires_yes(monkeypatch, env):

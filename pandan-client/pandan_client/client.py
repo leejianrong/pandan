@@ -903,6 +903,30 @@ class PandanClient:
             "GET", f"/boards/{board_id}/cycles/{cycle_id}"
         ).json()
 
+    def update_cycle(
+        self,
+        board_id: int,
+        cycle_id: int,
+        *,
+        name: str | None = None,
+        starts_on: str | None = None,
+        ends_on: str | None = None,
+    ) -> dict[str, Any]:
+        """Rename a cycle on ``board_id`` and/or correct its bounds (V55, KAN-976).
+
+        Only the arguments actually passed are sent (``_clean``), so this is a
+        partial edit and the cycle keeps every card assigned to it — unlike
+        ``delete_cycle``, which detaches them. 404 if the cycle isn't on that board.
+
+        Like every other ``update_*`` here, ``None`` means *omit*, so the API's
+        ability to **clear** ``starts_on``/``ends_on`` with an explicit ``null`` is
+        not reachable through this method — the same limitation ``update_epic`` has
+        for ``target_date``, and deliberately not special-cased for one field."""
+        payload = _clean({"name": name, "starts_on": starts_on, "ends_on": ends_on})
+        return self._request(
+            "PATCH", f"/boards/{board_id}/cycles/{cycle_id}", json=payload
+        ).json()
+
     def delete_cycle(self, board_id: int, cycle_id: int) -> dict[str, Any]:
         """Delete a cycle on ``board_id`` (its cards are detached, not deleted).
         204 No Content — no body to parse."""
