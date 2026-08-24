@@ -16,16 +16,16 @@
     "@playwright/test": "^1.62.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tsconfig/svelte": "^5.0.4",
-    "svelte": "^5.56.9",
+    "svelte": "^5.56.10",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
-    "vite": "^8.2.1"
+    "vite": "^8.2.2"
   },
   "dependencies": {
-    "bits-ui": "^2.18.1",
-    "dompurify": "^3.4.12",
+    "bits-ui": "^2.19.0",
+    "dompurify": "^3.4.14",
     "lucide-svelte": "^1.0.1",
-    "marked": "^18.0.9",
+    "marked": "^18.0.10",
     "svelte-dnd-action": "^0.9.78"
   }
 }
