@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Column, Priority } from "../api";
+  import { labelColor, type Column, type Priority } from "../api";
   import { addCard, epicStore, labelStore } from "../board.svelte";
   import { Select, TextInput, Textarea } from "./ui";
 
@@ -112,7 +112,7 @@
           class:selected={labelIds.includes(label.id)}
           onclick={() => toggleLabel(label.id)}
         >
-          <span class="label-dot" style="background: {label.color}" aria-hidden="true"></span>
+          <span class="label-dot" style="background: {labelColor(label.color)}" aria-hidden="true"></span>
           {label.name}
         </button>
       {/each}

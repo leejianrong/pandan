@@ -58,6 +58,52 @@ export interface Label {
   usage_count?: number;
 }
 
+// The label colour palette (V62, KAN-983) — "the palette is the picker" (SHAPING
+// D11). Each token is defined for BOTH themes as `--label-<token>` in app.css, which
+// is the entire point of a token over a hex: M6's design system defines every colour
+// twice, and a single user-picked hex is unreadable in one theme about half the time.
+//
+// DISJOINT from the semantic tokens (--accent/--agent/--danger/--success/--warning)
+// and from Card.svelte's priority dots, so a label can never read as a status — and
+// that is MEASURED, not eyeballed: seven rather than the shape's "~12" because CIE
+// Lab ΔE against every status colour in both themes rejected the rest. See
+// backend/app/palette.py for the numbers.
+//
+// Third of the three places this list lives (Python validates, CSS renders, this
+// draws the grid), and the only one of the app's three-places rules that is actually
+// PROVEN rather than trusted: backend/tests/unit/test_palette.py parses this file and
+// app.css and asserts both agree with LABEL_PALETTE in palette.py.
+export const LABEL_PALETTE = [
+  "sky",
+  "blue",
+  "cyan",
+  "fuchsia",
+  "mulberry",
+  "pink",
+  "ink",
+] as const;
+
+export type LabelPaletteToken = (typeof LABEL_PALETTE)[number];
+
+// The token a new label starts on, matching palette.py's DEFAULT_LABEL_COLOR and the
+// CLI's `label create` fallback, so a label made here and one made from the terminal
+// start the same colour. (Those two had silently drifted — the CLI used #64748b and
+// this file #94a3b8, each with a comment claiming it matched the other.)
+export const DEFAULT_LABEL_COLOR: LabelPaletteToken = "ink";
+
+// Resolve a stored `label.color` to something CSS can paint.
+//
+// A palette token becomes `var(--label-sky)` and so follows the theme. Anything else
+// is passed through untouched, which is what lets pre-V62 labels keep rendering with
+// no value migration (SHAPING D11): a stored "#0ea5e9" still paints, and even a
+// stored "banana" still paints exactly as badly as it did before — the validator
+// stops NEW ones, it does not rewrite old ones.
+export function labelColor(color: string): string {
+  return (LABEL_PALETTE as readonly string[]).includes(color)
+    ? `var(--label-${color})`
+    : color;
+}
+
 // A work-link on a card (KAN-32): a label (e.g. "PR", "branch", "CI") + a url.
 export interface CardLink {
   id: number;

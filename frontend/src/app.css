@@ -31,6 +31,25 @@
   --scrim: rgba(18, 22, 26, 0.42);
   --shadow-lg: 0 24px 60px -18px rgba(15, 20, 25, 0.45), 0 4px 12px -6px rgba(15, 20, 25, 0.25);
 
+  /* Label palette (V62, KAN-983) — the seven hues a label may be coloured with.
+     DISJOINT from the semantic tokens above (--accent/--agent/--danger/--success/
+     --warning) and from Card.svelte's priority dots (amber/orange/danger/muted), so a
+     label can never read as a status — and that is MEASURED, in CIE Lab ΔE against every
+     status colour in BOTH themes, not eyeballed. That is why there are seven and not the
+     shape's "~12": a mid-grey `slate` measured 6.9 ΔE from --muted (which priority "low"
+     paints) and `indigo` 14.4 from --agent, and once green/violet/red/orange/grey are out,
+     the survivors also have to separate from each other — nine could not (mutual ΔE 11.2),
+     seven do (21.4). Kept in sync with backend/app/palette.py, api.ts and the CLI by
+     backend/tests/unit/test_palette.py, which parses this file. These are the LIGHT values.
+     */
+  --label-sky: #0284c7;
+  --label-blue: #2563eb;
+  --label-cyan: #0891b2;
+  --label-fuchsia: #c026d3;
+  --label-mulberry: #9d174d;
+  --label-pink: #db2777;
+  --label-ink: #334155;
+
   /* Tell the UA to paint native controls/popups/date-pickers/scrollbars light. */
   color-scheme: light;
 
@@ -65,6 +84,25 @@
     --shadow-md: 0 10px 28px -14px rgba(0, 0, 0, 0.8);
     --scrim: rgba(0, 0, 0, 0.62);
     --shadow-lg: 0 24px 60px -18px rgba(0, 0, 0, 0.85), 0 4px 14px -6px rgba(0, 0, 0, 0.7);
+
+    /* Label palette (V62, KAN-983) — the seven hues a label may be coloured with.
+       DISJOINT from the semantic tokens above (--accent/--agent/--danger/--success/
+       --warning) and from Card.svelte's priority dots (amber/orange/danger/muted), so a
+       label can never read as a status — and that is MEASURED, in CIE Lab ΔE against every
+       status colour in BOTH themes, not eyeballed. That is why there are seven and not the
+       shape's "~12": a mid-grey `slate` measured 6.9 ΔE from --muted (which priority "low"
+       paints) and `indigo` 14.4 from --agent, and once green/violet/red/orange/grey are out,
+       the survivors also have to separate from each other — nine could not (mutual ΔE 11.2),
+       seven do (21.4). Kept in sync with backend/app/palette.py, api.ts and the CLI by
+       backend/tests/unit/test_palette.py, which parses this file. These are the DARK values (prefers-color-scheme).
+       */
+    --label-sky: #38bdf8;
+    --label-blue: #60a5fa;
+    --label-cyan: #22d3ee;
+    --label-fuchsia: #e879f9;
+    --label-mulberry: #fda4d4;
+    --label-pink: #f472b6;
+    --label-ink: #cbd5e1;
   }
 }
 :root[data-theme="dark"] {
@@ -91,6 +129,25 @@
   --shadow-md: 0 10px 28px -14px rgba(0, 0, 0, 0.8);
   --scrim: rgba(0, 0, 0, 0.62);
   --shadow-lg: 0 24px 60px -18px rgba(0, 0, 0, 0.85), 0 4px 14px -6px rgba(0, 0, 0, 0.7);
+
+  /* Label palette (V62, KAN-983) — the seven hues a label may be coloured with.
+     DISJOINT from the semantic tokens above (--accent/--agent/--danger/--success/
+     --warning) and from Card.svelte's priority dots (amber/orange/danger/muted), so a
+     label can never read as a status — and that is MEASURED, in CIE Lab ΔE against every
+     status colour in BOTH themes, not eyeballed. That is why there are seven and not the
+     shape's "~12": a mid-grey `slate` measured 6.9 ΔE from --muted (which priority "low"
+     paints) and `indigo` 14.4 from --agent, and once green/violet/red/orange/grey are out,
+     the survivors also have to separate from each other — nine could not (mutual ΔE 11.2),
+     seven do (21.4). Kept in sync with backend/app/palette.py, api.ts and the CLI by
+     backend/tests/unit/test_palette.py, which parses this file. These are the DARK values (forced by the in-app toggle).
+     */
+  --label-sky: #38bdf8;
+  --label-blue: #60a5fa;
+  --label-cyan: #22d3ee;
+  --label-fuchsia: #e879f9;
+  --label-mulberry: #fda4d4;
+  --label-pink: #f472b6;
+  --label-ink: #cbd5e1;
 }
 
 * {

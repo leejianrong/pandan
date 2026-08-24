@@ -37,13 +37,13 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 
 | Slice | What | Part | Card | Pts | Ends in (demo) |
 |-------|------|:----:|------|:---:|----------------|
-| **V61 · Label management UI** | the screen that does not exist | C | KAN-982 | 5 | A human creates and recolours a label without touching a terminal |
+| **V61 · Label management UI** ✅ | the screen that did not exist | C | KAN-982 | 5 | A human creates and recolours a label without touching a terminal |
 | **V55 · `PATCH /cycles/{id}`** | a sprint you can edit | B | KAN-976 | 1 | `pandan cycle update 7 --name 'Sprint 12'` works and the cards stay attached |
 | **V51 · Board keys** | `board.key`, unique per owner | A | KAN-972 | 3 | A board has a key; two users can each own an `ENG`; keying a board `KAN` is a clean `422` |
 | **V52 · Per-board sequences** | `board_seq` + backfill 🗄️ | A | KAN-973 | 5 | Every card and epic carries a gapless board-local ref in its payload |
 | **V53 · Resolution** | both forms, everywhere | A | KAN-974 | 5 | `pandan get ENG-42` and `pandan get KAN-1013` return the same card |
 | **V54 · Render** | SPA + CLI show the ref | A | KAN-975 | 3 | The board reads `ENG-1…ENG-77` instead of `KAN-530…KAN-971` |
-| **V62 · Dual-theme palette** | + colour validation | C | KAN-983 | 3 | Every label is readable in both themes; a bad colour is a `422` |
+| **V62 · Dual-theme palette** ✅ | + colour validation | C | KAN-983 | 3 | Every label is readable in both themes; a bad colour is a `422` |
 | **V63 · Epic colour** | 🗄️ | C | KAN-984 | 2 | An epic's stories are recognisable on the board without reading them |
 | **V64 · Label emoji** | 🗄️ | C | KAN-985 | 2 | Two labels sharing a colour are still distinguishable at a glance |
 | **V56 · Backlog** | derived, groomable | B | KAN-977 | 3 | The backlog is a place you can open; parked ≠ never scheduled |
@@ -52,7 +52,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | **V59 · Explicit close** | + rollover | B | KAN-980 | 3 | Closing is deliberate and reported; past velocity numbers stop moving |
 | **V60 · Observed throughput** | agent vs human | B | KAN-981 | 3 | `agent: 6.2 pts/day (n=143)` — a budget backed by evidence, not a multiplier |
 
-🗄️ = carries a migration, lands alone.
+🗄️ = carries a migration, lands alone. ✅ = shipped.
 
 Total: **40 points across 14 slices**, plus one standalone bug (KAN-986) found while tracing #280.
 
@@ -252,11 +252,30 @@ valid colour that renders as a blank dot. And `app.css` defines every token **tw
 — a raw `<input type="color">` yields one hex with no dark variant, so roughly half of all user picks
 would be unreadable in one theme.
 
-**The palette is the picker** (SHAPING D11): ~12 named tokens, each with a light and dark value, shown
-as a swatch grid. The palette is **disjoint from the semantic tokens** (`--accent`, `--agent`,
+**The palette is the picker** (SHAPING D11): named tokens, each with a light and dark value, shown as
+a swatch grid. The palette is **disjoint from the semantic tokens** (`--accent`, `--agent`,
 `--danger`, `--success`, `--warning`) — settled 2026-08-23 — so a label can never accidentally read as
 a status. Validation becomes "a palette token **or** a well-formed hex", so existing stored
 free-string colours keep rendering and no value migration is needed.
+
+**Shipped as SEVEN tokens, not "~12", and the reason is worth keeping.** Two things made the
+disjointness constraint far more binding than the shape assumed. The exclusion set is *wider* than the
+five semantic tokens: `Card.svelte` renders **priority** as a coloured dot + text — the same visual
+primitive as a label dot, in the same card — using amber, orange, `--danger` and `--muted`. And once
+"disjoint" was **measured** (CIE Lab ΔE to every status colour, in both themes) rather than eyeballed,
+the first hand-picked nine lost three members: `slate` scored **6.9** against `--muted`, which is
+literally what priority "low" paints, `indigo` **14.4** against `--agent`, and `brown` **14.8** against
+`--warning`. All three read as clean hues by name and are nothing of the kind on screen.
+
+With green, violet, red, orange and grey excluded, only blues and magentas remain — a narrow arc — so
+the survivors also have to separate from *each other*. Nine cannot (mutual ΔE falls to 11.2); seven
+hold at **21.4**. The measurement lives in `backend/tests/unit/test_palette.py`, so a future tenth hue
+has to clear the same bar rather than argue for itself.
+
+The list is duplicated in **four** places by necessity — Python validates, CSS renders, `api.ts` draws
+the grid, the CLI prints it in `--help` — and unlike the app's other three-places rules, that
+agreement is **proven, not trusted**: the test parses the CSS, the TypeScript and the CLI and names
+whichever one you forgot.
 
 ### V63 · Epic colour — KAN-984 🗄️
 
@@ -289,7 +308,7 @@ or folded into V54.
 | **Q2** | Ownership transfer across a key collision in the new owner's namespace | Auto-suffix + record it in the activity log |
 | **Q3** | ~~A per-user toggle between canonical and board-local display?~~ | **Settled: no toggle** — collisions are handled by qualification, not a mode |
 | **Q4** | Does `planning_interval` need its own metrics endpoint? | No — a filter on `cycle metrics` |
-| **Q5** | ~~Do the semantic tokens participate?~~ | **Settled: disjoint.** Which twelve hues is a V62 call |
+| **Q5** | ~~Do the semantic tokens participate?~~ | **Settled: disjoint** — and V62 then settled the hues: **seven**, chosen by measured ΔE, because three of the first nine were status colours under other names |
 
 ## Out of scope for M8
 
