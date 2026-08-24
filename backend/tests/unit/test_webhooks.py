@@ -125,41 +125,98 @@ def test_dispatch_invokes_the_matching_handler(client, monkeypatch):
     assert calls == [{"action": "opened", "number": 42}]
 
 
-# --- ticket parsing (KAN-43, app.autosync) -----------------------------------
-# Pure-function, DB-free: the mapping layer parses the card ticket before it
-# touches the database, so these payloads (no ticket) never open a session.
+# --- ticket parsing (KAN-43, app.autosync; both forms since V53, KAN-974) ------
+# Pure-function, DB-free: the mapping layer parses the reference before it touches
+# the database, so these payloads (no ticket) never open a session. Since V53 it
+# returns a parsed reference rather than a string, because a board-local ``ENG-42``
+# cannot be flattened to one — resolving it needs the key and the number apart.
 
 
 def test_parse_ticket_from_branch():
     from app.autosync import parse_ticket
 
-    assert parse_ticket("feat/kan-12-add-widget", None) == "KAN-12"
+    ref = parse_ticket("feat/kan-12-add-widget", None)
+    assert (ref.canonical, ref.entity, ref.number) == (True, "card", 12)
 
 
-def test_parse_ticket_is_case_insensitive_and_normalised():
+def test_parse_ticket_is_case_insensitive():
     from app.autosync import parse_ticket
 
-    assert parse_ticket("KAN-7") == "KAN-7"
-    assert parse_ticket("kan-7") == "KAN-7"
+    for spelling in ("KAN-7", "kan-7", "Kan-7"):
+        ref = parse_ticket(spelling)
+        assert (ref.canonical, ref.number) == (True, 7), spelling
 
 
 def test_parse_ticket_prefers_first_candidate():
     from app.autosync import parse_ticket
 
     # Branch first, then title — the branch's ticket wins.
-    assert parse_ticket("feature/KAN-3", "KAN-99: something") == "KAN-3"
+    assert parse_ticket("feature/KAN-3", "KAN-99: something").number == 3
 
 
 def test_parse_ticket_falls_back_to_later_candidate():
     from app.autosync import parse_ticket
 
-    assert parse_ticket(None, "fix KAN-5 in the parser") == "KAN-5"
+    assert parse_ticket(None, "fix KAN-5 in the parser").number == 5
 
 
 def test_parse_ticket_none_when_absent():
     from app.autosync import parse_ticket
 
     assert parse_ticket("main", "no ticket here", None) is None
+
+
+def test_parse_ticket_reads_a_board_local_branch():
+    """V53's requirement, verbatim from the card: a branch named
+    ``eng-42-fix-the-thing`` must match."""
+    from app.autosync import parse_ticket
+
+    ref = parse_ticket("eng-42-fix-the-thing")
+    assert (ref.canonical, ref.entity, ref.board_key, ref.number) == (
+        False,
+        "card",
+        "ENG",
+        42,
+    )
+
+
+def test_the_canonical_form_wins_over_a_board_local_one_anywhere_in_the_text():
+    """Canonical is searched across every candidate before board-local is searched
+    across any. It is the form that cannot be wrong — it needs no board context — so
+    letting a coincidental board-local match outrank it would be strictly worse."""
+    from app.autosync import parse_ticket
+
+    ref = parse_ticket("eng-9-branch", "fixes KAN-12")
+    assert (ref.canonical, ref.number) == (True, 12)
+
+
+def test_a_board_local_scan_is_loose_and_that_is_deliberate():
+    """``release-2024`` really does parse as key ``RELEASE``, number 2024. Pinned
+    rather than papered over: nothing is decided by parsing. Resolution then looks
+    for an **auto-sync-enabled** board with that key, and a key nobody owns finds
+    nothing — which is why a loose scanner is safe here."""
+    from app.autosync import parse_ticket
+
+    ref = parse_ticket("release-2024")
+    assert (ref.board_key, ref.number) == ("RELEASE", 2024)
+
+
+def test_an_epic_reference_is_not_a_card_and_is_discarded():
+    """Auto-sync attaches PR links and moves columns; an epic has neither. Before V53
+    this could not arise, because the pattern only matched ``KAN-``."""
+    from app.autosync import parse_ticket
+
+    assert parse_ticket("EPIC-3") is None
+    assert parse_ticket("eng-e7-branch") is None
+
+
+def test_a_longer_number_is_not_truncated():
+    """Without the trailing boundary, ``eng-4200`` would read as ``ENG-42`` and the
+    webhook would attach to the wrong card."""
+    from app.autosync import parse_ticket
+
+    assert parse_ticket("eng-4200").number == 4200
+    assert parse_ticket("kan-4200").number == 4200
 
 
 def test_pull_request_without_ticket_is_a_noop(client):

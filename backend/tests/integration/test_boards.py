@@ -366,3 +366,38 @@ def test_a_key_patch_does_not_disturb_the_boards_cards(logged_in_client):
     after = logged_in_client.get(f"{CARDS}/{card['id']}").json()
     assert after["ticket_number"] == card["ticket_number"]
     assert after["board_id"] == board["id"]
+
+
+# --- owner_email (M8 V53, KAN-974) ------------------------------------------
+
+
+def test_board_reads_carry_the_owners_email(logged_in_client):
+    """Needed so a viewer who can see two ``ENG`` boards can tell them apart — the
+    ``alice/ENG-14`` qualifier V53 resolves and V54 prints. ``owner_id`` is a UUID and
+    not a handle a human types, so it cannot serve."""
+    created = logged_in_client.post(BOARDS, json={"name": "Platform"}).json()
+    assert created["owner_email"] == "octocat@example.com"
+    assert logged_in_client.get(f"{BOARDS}/{created['id']}").json()["owner_email"] == (
+        "octocat@example.com"
+    )
+    listed = logged_in_client.get(BOARDS).json()
+    assert all(b["owner_email"] == "octocat@example.com" for b in listed)
+    patched = logged_in_client.patch(
+        f"{BOARDS}/{created['id']}", json={"name": "Platform 2"}
+    ).json()
+    assert patched["owner_email"] == "octocat@example.com"
+
+
+def test_a_shared_board_shows_its_owners_email_to_a_member(logged_in_client, login_as):
+    """The privacy question, answered as a test. Every board a caller can read is one
+    they own or are a member of, and ``MemberRead.email`` already shows a board's
+    members their addresses — so this exposes nothing co-membership did not."""
+    board = logged_in_client.post(BOARDS, json={"name": "Shared"}).json()
+    member = login_as("member-oe@example.com", "gh-member-oe")
+    logged_in_client.post(
+        f"{BOARDS}/{board['id']}/members",
+        json={"email": "member-oe@example.com", "role": "viewer"},
+    )
+    seen = member.get(f"{BOARDS}/{board['id']}").json()
+    assert seen["owner_email"] == "octocat@example.com"
+    assert seen["role"] is None or seen["role"] == "viewer"

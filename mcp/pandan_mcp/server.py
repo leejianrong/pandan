@@ -229,10 +229,15 @@ def list_cards(
     available together with ``sort`` or ``q``).
 
     **``refs`` reads a known set of stories in ONE call** — a comma-separated list of
-    ids and/or tickets, e.g. ``"KAN-12,45,KAN-9"``. Use it instead of N ``get_card``
+    ids and/or references, e.g. ``"KAN-12,45,KAN-9"``. Use it instead of N ``get_card``
     calls whenever you already hold the refs. Capped at 100, cannot be combined with
     ``limit``/``cursor``, and any selector matching nothing is left out of ``cards``
     and named in ``unresolved`` rather than failing the call.
+
+    Board-local references work too (``"ENG-14"``) **but only with ``board_id``**: a
+    board key is unique per owner, so ``ENG-14`` names a different card for different
+    people and is only decidable inside a known board. Without a board, use the
+    canonical ``KAN-<n>``, which resolves from anywhere.
 
     **Pass ``fields``** — the keys to keep on each row, e.g.
     ``["ticket_number","title","column","assignee"]`` (aliases: ticket, pts). A full

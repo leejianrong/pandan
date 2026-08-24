@@ -261,3 +261,107 @@ def test_merge_noop_when_autosync_disabled(owner):
     card = _make_card(owner, column="todo")
     _send(owner, "pull_request", _pr_merged(card["ticket_number"]))
     assert owner.get(f"{CARDS}/{card['id']}").json()["column"] == "todo"
+
+
+# --- board-local refs in a branch name (M8 V53, KAN-974) ---------------------
+# The two forms resolve in OPPOSITE directions, and that is the whole of SHAPING D3
+# in one code path: a canonical ``KAN-123`` is globally unique, so the card is found
+# first and the board follows; a board-local ``ENG-42`` means nothing without a board,
+# and a webhook has none of its own — so the *board* is found first, from the set the
+# webhook is willing to touch at all (those that opted into auto-sync), and the card
+# follows. That opt-in flag is not a convenience filter here; it is what supplies the
+# missing board context.
+
+
+def test_a_board_local_branch_name_attaches_the_pr_link(owner):
+    """The card's requirement, verbatim: a branch named ``eng-42-fix-the-thing`` must
+    match."""
+    board = owner.post(BOARDS, json={"name": "Engine Room", "key": "ENG"}).json()
+    _enable_autosync(owner, board["id"])
+    card = _make_card(owner, board_id=board["id"])
+    assert card["ref"] == "ENG-1"
+
+    url = "https://github.com/acme/repo/pull/42"
+    payload = {
+        "action": "opened",
+        "pull_request": {
+            "head": {"ref": "eng-1-fix-the-thing"},
+            "title": "no ticket in here",
+            "html_url": url,
+            "merged": False,
+        },
+    }
+    assert _send(owner, "pull_request", payload).status_code == 200
+    links = owner.get(f"{CARDS}/{card['id']}").json()["links"]
+    assert [link["url"] for link in links] == [url]
+
+
+def test_a_board_local_branch_is_ignored_when_the_board_has_not_opted_in(owner):
+    """The opt-in is the board context, so without it there is no board to resolve
+    against and the webhook is a no-op — the same outcome as the canonical form on a
+    board that never opted in."""
+    board = owner.post(BOARDS, json={"name": "Engine Room", "key": "ENG"}).json()
+    card = _make_card(owner, board_id=board["id"])  # autosync NOT enabled
+
+    payload = {
+        "action": "opened",
+        "pull_request": {
+            "head": {"ref": "eng-1-fix"},
+            "title": "x",
+            "html_url": "https://github.com/acme/repo/pull/9",
+            "merged": False,
+        },
+    }
+    assert _send(owner, "pull_request", payload).status_code == 200
+    assert owner.get(f"{CARDS}/{card['id']}").json()["links"] == []
+
+
+def test_two_opted_in_boards_sharing_a_key_are_skipped_not_guessed(owner, login_as):
+    """SHAPING D3's "never a silent pick", in the one place that cannot ask. A webhook
+    has no user to prompt, so the only honest answers are one board or none."""
+    mine = owner.post(BOARDS, json={"name": "Engine Room", "key": "ENG"}).json()
+    _enable_autosync(owner, mine["id"])
+    my_card = _make_card(owner, board_id=mine["id"])
+
+    other = login_as("other-eng@example.com", "gh-other-eng")
+    theirs = other.post(BOARDS, json={"name": "Engineering", "key": "ENG"}).json()
+    _enable_autosync(other, theirs["id"])
+    other.post(CARDS, json={"title": "theirs", "board_id": theirs["id"]})
+
+    payload = {
+        "action": "opened",
+        "pull_request": {
+            "head": {"ref": "eng-1-ambiguous"},
+            "title": "x",
+            "html_url": "https://github.com/acme/repo/pull/7",
+            "merged": False,
+        },
+    }
+    assert _send(owner, "pull_request", payload).status_code == 200
+    # Neither card touched.
+    assert owner.get(f"{CARDS}/{my_card['id']}").json()["links"] == []
+
+
+def test_the_canonical_form_still_wins_over_a_board_local_one(owner):
+    """Canonical is searched across every candidate before board-local is searched
+    across any: it is the form that cannot be wrong, since it needs no board context.
+    Here the branch carries a board-local ref for a DIFFERENT card and the title
+    carries the canonical one — the canonical must win."""
+    board = owner.post(BOARDS, json={"name": "Engine Room", "key": "ENG"}).json()
+    _enable_autosync(owner, board["id"])
+    first = _make_card(owner, board_id=board["id"])
+    second = _make_card(owner, board_id=board["id"])
+
+    url = "https://github.com/acme/repo/pull/11"
+    payload = {
+        "action": "opened",
+        "pull_request": {
+            "head": {"ref": "eng-1-branch"},
+            "title": f"{second['ticket_number']}: the real one",
+            "html_url": url,
+            "merged": False,
+        },
+    }
+    assert _send(owner, "pull_request", payload).status_code == 200
+    assert owner.get(f"{CARDS}/{second['id']}").json()["links"][0]["url"] == url
+    assert owner.get(f"{CARDS}/{first['id']}").json()["links"] == []

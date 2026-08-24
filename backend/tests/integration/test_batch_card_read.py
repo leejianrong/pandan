@@ -263,3 +263,118 @@ def test_absent_selectors_change_nothing(client):
     assert r.status_code == 200
     assert len(r.json()) == 2
     assert UNRESOLVED not in r.headers
+
+
+# --- board-local refs (M8 V53, KAN-974) ------------------------------------
+# ``ENG-14`` resolves only inside a known board, so this endpoint requires
+# ``board_id`` for it. That is not a limitation of the batch read, it is what
+# "board-local" means: keys are unique per OWNER (ADR 0020), so one ref can name a
+# different card for two people.
+
+BOARDS = "/api/v1/boards"
+
+
+def _keyed_board(client, name: str, key: str) -> dict:
+    return client.post(BOARDS, json={"name": name, "key": key}).json()
+
+
+def test_a_board_local_ref_resolves_within_its_board(client):
+    board = _keyed_board(client, "Engine Room", "ENG")
+    first = _create(client, title="one", board_id=board["id"])
+    second = _create(client, title="two", board_id=board["id"])
+
+    r = client.get(CARDS, params={"board_id": board["id"], "refs": "ENG-2"})
+    assert r.status_code == 200
+    assert [c["id"] for c in r.json()] == [second["id"]]
+    assert UNRESOLVED not in r.headers
+    assert first["id"] not in [c["id"] for c in r.json()]
+
+
+def test_board_local_and_canonical_refs_name_the_same_card(client):
+    """The equivalence the whole slice exists for."""
+    board = _keyed_board(client, "Engine Room", "ENG")
+    card = _create(client, title="one", board_id=board["id"])
+
+    by_local = client.get(CARDS, params={"board_id": board["id"], "refs": "ENG-1"}).json()
+    by_canonical = client.get(
+        CARDS, params={"board_id": board["id"], "refs": card["ticket_number"]}
+    ).json()
+    assert [c["id"] for c in by_local] == [c["id"] for c in by_canonical] == [card["id"]]
+
+
+def test_a_board_local_ref_is_case_insensitive(client):
+    board = _keyed_board(client, "Engine Room", "ENG")
+    card = _create(client, title="one", board_id=board["id"])
+    r = client.get(CARDS, params={"board_id": board["id"], "refs": "eng-1"})
+    assert [c["id"] for c in r.json()] == [card["id"]]
+
+
+def test_a_board_local_ref_without_a_board_is_422(client):
+    """The alternatives were both worse. Resolving across every visible board would
+    silently return two cards for one selector; failing the whole request on one
+    ambiguous selector would contradict this endpoint's own design, where a miss is
+    *reported* rather than fatal. Requiring the board is neither."""
+    _keyed_board(client, "Engine Room", "ENG")
+    r = client.get(CARDS, params={"refs": "ENG-1"})
+    assert r.status_code == 422
+    assert "board-local" in r.json()["detail"]
+    assert "board_id" in r.json()["detail"]
+
+
+def test_an_owner_qualified_ref_is_422_here(client):
+    """With ``board_id`` given the owner is already determined, so the qualifier can
+    only agree redundantly or contradict. The CLI resolves that form; this endpoint
+    does not need to."""
+    board = _keyed_board(client, "Engine Room", "ENG")
+    r = client.get(
+        CARDS, params={"board_id": board["id"], "refs": "someone/ENG-1"}
+    )
+    assert r.status_code == 422
+    assert "owner-qualified" in r.json()["detail"]
+
+
+def test_a_board_local_ref_for_another_board_is_unresolved_not_wrong(client):
+    """Naming board 1's key while asking board 2 must report a miss, never reach across
+    — the board filter and the selector filter are AND-ed, not OR-ed."""
+    one = _keyed_board(client, "Engine Room", "ENG")
+    two = _keyed_board(client, "Platform", "PLT")
+    _create(client, title="on one", board_id=one["id"])
+    r = client.get(CARDS, params={"board_id": two["id"], "refs": "ENG-1"})
+    assert r.status_code == 200
+    assert r.json() == []
+    assert r.headers[UNRESOLVED] == "ENG-1"
+
+
+def test_a_board_local_epic_ref_parses_and_resolves_to_nothing(client):
+    """``ENG-E7`` is a well-formed reference to something that is not a card — the same
+    disposition as ``EPIC-3``: reported, not rejected."""
+    board = _keyed_board(client, "Engine Room", "ENG")
+    _create(client, title="one", board_id=board["id"])
+    r = client.get(CARDS, params={"board_id": board["id"], "refs": "ENG-1,ENG-E7"})
+    assert r.status_code == 200
+    assert len(r.json()) == 1
+    assert r.headers[UNRESOLVED] == "ENG-E7"
+
+
+def test_the_two_forms_mix_in_one_request(client):
+    board = _keyed_board(client, "Engine Room", "ENG")
+    a = _create(client, title="A", board_id=board["id"])
+    b = _create(client, title="B", board_id=board["id"])
+    r = client.get(
+        CARDS,
+        params={"board_id": board["id"], "refs": f"ENG-1,{b['ticket_number']},ENG-9"},
+    )
+    assert sorted(c["id"] for c in r.json()) == sorted([a["id"], b["id"]])
+    assert r.headers[UNRESOLVED] == "ENG-9"
+
+
+def test_a_board_local_ref_cannot_read_across_an_authorization_boundary(client, login_as):
+    """The selector filter is AND-ed with the owner-scoping, so a stranger naming a
+    board they cannot see gets a miss — never a 403, which would confirm the row."""
+    board = _keyed_board(client, "Engine Room", "ENG")
+    _create(client, title="private", board_id=board["id"])
+    stranger = login_as("refs-stranger@example.com", "gh-refs-stranger")
+    r = stranger.get(CARDS, params={"board_id": board["id"], "refs": "ENG-1"})
+    # Naming a board you cannot read is still a 403 — that predates this slice and is
+    # about the *board* parameter, not the ref.
+    assert r.status_code == 403

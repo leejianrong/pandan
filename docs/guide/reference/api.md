@@ -145,8 +145,16 @@ only when something missed, so its absence means you got everything you asked fo
 
 Unknown, trashed and not-yours all report identically — distinguishing them would reveal whether a row
 exists on a board the caller cannot see. Malformed input is a different case and returns `422`:
-`ids=abc`, or a `refs` token that is not a `KAN-`/`EPIC-` ticket. A well-formed `EPIC-3` parses and
-then resolves to nothing, since it is a real ticket that is not a card.
+`ids=abc`, or a `refs` token that is not a reference at all. A well-formed `EPIC-3` parses and then
+resolves to nothing, since it is a real ticket that is not a card.
+
+`refs` takes **board-local references too** (`ENG-14`, and `ENG-E7` which parses and resolves to
+nothing) — but only alongside `board_id`, and a board-local ref without one is a `422`. That is not a
+limitation of this endpoint; it is what board-local means. Keys are unique per owner, so `ENG-14` names
+a different card for different people, and resolving it across every board you can see would silently
+return two cards for one selector. When you have no board in mind, the canonical `KAN-955` is the form
+to use — that is what it is for. An owner-qualified `alice/ENG-14` is also a `422` here, since
+`board_id` already determines the owner; the CLI resolves that form.
 
 Two limits, both `422` rather than silent:
 

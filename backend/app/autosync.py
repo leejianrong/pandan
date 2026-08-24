@@ -29,11 +29,11 @@ payload carries no ``KAN-<n>``.
 from __future__ import annotations
 
 import logging
-import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .board_seq import ParsedRef, find_ref
 from .db import SessionLocal
 from .models import Board, Card, CardComment, CardLink
 from .notifications import record_notification
@@ -47,46 +47,112 @@ logger = logging.getLogger("app.autosync")
 _CI_FAILURE_CONCLUSIONS = frozenset({"failure", "timed_out", "startup_failure"})
 _CI_FAILURE_STATES = frozenset({"failure", "error"})
 
-# A card ticket looks like ``KAN-123``. Matched case-insensitively (branch names
-# are often lowercased) and normalised back to the canonical upper-case form used
-# by ``card.ticket_number``.
-_TICKET_RE = re.compile(r"KAN-(\d+)", re.IGNORECASE)
+# A reference is found in free text (a branch name, a PR title) by
+# :func:`app.board_seq.find_ref`, which knows both forms — the canonical ``KAN-123``
+# and the board-local ``ENG-42`` (V53, KAN-974). Matched case-insensitively, since
+# branch names are usually lowercased.
 
 DONE_COLUMN = "done"
 PR_LINK_LABEL = "PR"
 
 
-def parse_ticket(*candidates: str | None) -> str | None:
-    """Return the first ``KAN-<n>`` found across ``candidates`` (e.g. a branch name
-    then a PR title), normalised to ``KAN-<n>``; ``None`` if none match."""
-    for text in candidates:
-        if not text:
-            continue
-        match = _TICKET_RE.search(text)
-        if match:
-            return f"KAN-{match.group(1)}"
-    return None
+def parse_ticket(*candidates: str | None) -> ParsedRef | None:
+    """The first reference found across ``candidates`` (e.g. a branch name then a PR
+    title), in either form; ``None`` if none match or the match is not a *card*.
+
+    An epic reference is discarded here rather than downstream: auto-sync attaches PR
+    links and moves columns, and an epic has neither. Before V53 this could not arise
+    — the pattern only matched ``KAN-`` — so it is a new case, not a latent one.
+    """
+    ref = find_ref(*candidates)
+    if ref is None or ref.entity != "card":
+        return None
+    return ref
 
 
-def _resolve_synced_board(db: Session, ticket: str) -> tuple[Card, Board] | None:
-    """Resolve the ``(card, board)`` for ``ticket``, or ``None`` when there is no
-    such card, its board is missing, or the board has **not** opted into auto-sync
-    (the per-board opt-out gate)."""
-    # A soft-deleted card (KAN-19) is invisible, so the webhook never resurrects it.
+def _describe(ref: ParsedRef) -> str:
+    """A reference as it appeared, for log lines."""
+    if ref.canonical:
+        return f"KAN-{ref.number}"
+    return f"{ref.board_key}-{ref.number}"
+
+
+def _resolve_synced_board(db: Session, ref: ParsedRef) -> tuple[Card, Board] | None:
+    """Resolve the ``(card, board)`` for ``ref``, or ``None`` when there is no such
+    card, its board is missing, or the board has **not** opted into auto-sync (the
+    per-board opt-out gate).
+
+    **The two forms resolve in opposite directions**, and that asymmetry is the whole
+    of SHAPING D3 in one function:
+
+    * A **canonical** ``KAN-123`` is globally unique, so the card is found first and
+      the board follows from it. Unchanged from before V53.
+    * A **board-local** ``ENG-42`` means nothing without a board, and a webhook has no
+      board context of its own. So the *board* is found first, from the set the
+      webhook is willing to act on at all — boards that opted into auto-sync — and the
+      card follows from ``(board_id, board_seq)``. That opt-in flag is not a
+      convenience filter here; it is what supplies the missing board context, which is
+      why board-local refs are safe in a global endpoint.
+
+    If two opted-in boards share the key, this **skips and logs** rather than guessing.
+    Never a silent pick (D3): a webhook cannot ask, so the only honest answers are one
+    board or none.
+    """
+    if ref.canonical:
+        # A soft-deleted card (KAN-19) is invisible, so the webhook never resurrects it.
+        card = db.scalars(
+            select(Card).where(
+                Card.ticket_number == f"KAN-{ref.number}", Card.deleted_at.is_(None)
+            )
+        ).first()
+        if card is None:
+            logger.info("autosync no card for ref=%s", _describe(ref))
+            return None
+        board = db.get(Board, card.board_id)
+        if board is None or not board.autosync_enabled:
+            logger.info(
+                "autosync skipped ref=%s board=%s (autosync disabled)",
+                _describe(ref),
+                card.board_id,
+            )
+            return None
+        return card, board
+
+    boards = list(
+        db.scalars(
+            select(Board).where(
+                Board.key == ref.board_key, Board.autosync_enabled.is_(True)
+            )
+        ).all()
+    )
+    if not boards:
+        logger.info(
+            "autosync no autosync-enabled board with key=%s (ref=%s)",
+            ref.board_key,
+            _describe(ref),
+        )
+        return None
+    if len(boards) > 1:
+        logger.warning(
+            "autosync ambiguous ref=%s: %d autosync-enabled boards share key=%s "
+            "(%s) — skipping rather than guessing",
+            _describe(ref),
+            len(boards),
+            ref.board_key,
+            ",".join(str(b.id) for b in boards),
+        )
+        return None
+    board = boards[0]
     card = db.scalars(
         select(Card).where(
-            Card.ticket_number == ticket, Card.deleted_at.is_(None)
+            Card.board_id == board.id,
+            Card.board_seq == ref.number,
+            Card.deleted_at.is_(None),
         )
     ).first()
     if card is None:
-        logger.info("autosync no card for ticket=%s", ticket)
-        return None
-    board = db.get(Board, card.board_id)
-    if board is None or not board.autosync_enabled:
         logger.info(
-            "autosync skipped ticket=%s board=%s (autosync disabled)",
-            ticket,
-            card.board_id,
+            "autosync no card for ref=%s on board=%s", _describe(ref), board.id
         )
         return None
     return card, board
