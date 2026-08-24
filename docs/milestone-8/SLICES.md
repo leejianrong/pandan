@@ -38,7 +38,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | Slice | What | Part | Card | Pts | Ends in (demo) |
 |-------|------|:----:|------|:---:|----------------|
 | **V61 · Label management UI** ✅ | the screen that did not exist | C | KAN-982 | 5 | A human creates and recolours a label without touching a terminal |
-| **V55 · `PATCH /cycles/{id}`** | a sprint you can edit | B | KAN-976 | 1 | `pandan cycle update 7 --name 'Sprint 12'` works and the cards stay attached |
+| **V55 · `PATCH /cycles/{id}`** ✅ | a sprint you can edit | B | KAN-976 | 1 | `pandan cycle update 7 --name 'Sprint 12'` works and the cards stay attached |
 | **V51 · Board keys** | `board.key`, unique per owner | A | KAN-972 | 3 | A board has a key; two users can each own an `ENG`; keying a board `KAN` is a clean `422` |
 | **V52 · Per-board sequences** | `board_seq` + backfill 🗄️ | A | KAN-973 | 5 | Every card and epic carries a gapless board-local ref in its payload |
 | **V53 · Resolution** | both forms, everywhere | A | KAN-974 | 5 | `pandan get ENG-42` and `pandan get KAN-1013` return the same card |
@@ -171,12 +171,33 @@ nullable `card.cycle_id`, burndown and velocity via `pandan cycle metrics`, a da
 CRUD-lite from both adapters. "Two weeks per sprint" is expressible today. Part B builds the calendar
 *around* it.
 
-### V55 · `PATCH /cycles/{id}` — KAN-976
+### V55 · `PATCH /cycles/{id}` — KAN-976 ✅
 
-Found while shaping M8; not named in the issue. `routers/cycles.py` has list, create, get, metrics and
-delete — and nothing else. A sprint cannot be renamed and a mistyped date cannot be corrected; the
-only recovery is delete-and-recreate, which detaches every card in it. One afternoon, and the
+Found while shaping M8; not named in the issue. `routers/cycles.py` had list, create, get, metrics and
+delete — and nothing else. A sprint could not be renamed and a mistyped date could not be corrected;
+the only recovery was delete-and-recreate, which detaches every card in it. One afternoon, and the
 milestone's clearest bug.
+
+**Shipped as the endpoint + the CLI, and the MCP tool was deliberately declined.** The card asked for
+`update_cycle` on both adapters; ADR 0019 freezes the MCP surface at 49 tools and
+`mcp/tests/test_schema.py` pins that by name *and* count, so a 50th tool is an ADR amendment and a bug
+fix is not the change that should be spending one. The decline is recorded where R4.3 is actually
+enforced — a `CLI_ONLY` reason-2 entry in `pandan-cli/tests/test_parity.py`, the same disposition
+`label update` got in V61 — and the entry states plainly that the agent case here is the **stronger**
+of the two, since agents do drive cycles. What it is not is blocked: the MCP surface was already
+CRUD-lite on cycles by design, and the cycle mutation an agent makes most often is
+`update_card(cycle_id=…)`.
+
+Three field-level decisions worth keeping, all in `CycleUpdate`'s own docstring:
+
+- `name` rejects an explicit `null` (a cycle with no name cannot be referred to); `starts_on` /
+  `ends_on` accept one, because a cycle with no bounds is already valid and `null` there genuinely
+  means *unschedule*.
+- **Bounds are not order-checked.** `CycleCreate` never checked them, and enforcing the rule on the
+  edit path alone would let an already-stored value refuse the one operation that exists to fix it.
+- The CLI cannot send a `null` — `_clean` drops it, as it does for `epic update --target-date` — so
+  unscheduling is reachable from the API and not the CLI. Left as the existing convention rather than
+  special-cased for one field.
 
 ### V56 · Backlog — KAN-977
 
