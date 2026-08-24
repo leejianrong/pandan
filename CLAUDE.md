@@ -31,13 +31,15 @@ maintainer: **EPIC-122** board-local ticket refs ([#280](https://github.com/leej
 **EPIC-124** epic + label colour ([#278](https://github.com/leejianrong/pandan/issues/278)). One theme:
 the board assumed one user with one board, and all three problems are that assumption breaking.
 **M8 is the first milestone since M6 to change the schema** — M7's no-API/no-schema/no-migration
-constraint expired with it — so five slices carry an additive migration and each lands alone. **Five
+constraint expired with it — so five slices carry an additive migration and each lands alone. **Six
 slices have shipped**: V61 and V62 (label management UI + the measured seven-token palette), V55
 (`PATCH /cycles/{id}`, the edit a sprint never had), **V51 — `board.key`, the head of the four-slice
-identity chain** ([ADR 0020](docs/adr/0020-board-keys.md)) and **V52 — `card.board_seq` /
-`epic.board_seq`, so every card and epic now carries a gapless board-local `ref` in its payload**.
-Nothing *renders* a ref yet, and that is deliberate: V53 teaches every resolver both forms and only
-V54 displays one, so a user never sees a reference something cannot parse.
+identity chain** ([ADR 0020](docs/adr/0020-board-keys.md)), **V52 — `card.board_seq` /
+`epic.board_seq`, so every card and epic carries a gapless board-local `ref` in its payload**, and
+**V53 — every resolver now accepts both forms** (the batch read, autosync's branch-name scan, and the
+CLI's `_resolve_card_id`/`_resolve_epic_id`, plus the owner-qualified `alice/ENG-14`). **Only V54 is
+left in the chain**: nothing *renders* a board-local ref yet, so a user never sees a reference
+something cannot parse.
 Two decisions are settled and load-bearing before anyone starts: **`card.ticket_number` is never
 touched** (the board-local `ENG-14` is added *beside* it, and the canonical `KAN-955` becomes the
 cross-board addressing mode), and **board keys are unique per owner**, which is exactly why a
@@ -542,6 +544,16 @@ is nullable (`ON DELETE SET NULL`). These mechanisms matter and are load-bearing
   immutable, never reused: cards get `KAN-<n>` (`card_ticket_seq`), epics get `EPIC-<n>`
   (`epic_ticket_seq`). Independent — `KAN-1` and `EPIC-1` coexist. Sequences are created in the
   migrations, not by the ORM.
+- **Reference resolution** (M8 V53) has one grammar, in `app/board_seq.py`: `parse_ref` for a whole
+  token, `find_ref` for a scan of free text (a branch name). **Three forms** — canonical `KAN-955`
+  (global), board-local `ENG-14` / `ENG-E7` (only inside a known board), and owner-qualified
+  `alice/ENG-14`. Canonical is always tried first, which is a *total* rule and not a precedence hack
+  because `KAN`/`EPIC` are reserved keys. There is deliberately **no shared resolver**: each call site
+  scopes differently (visible boards / autosync-enabled boards / the configured board), so only the
+  grammar is shared. The CLI keeps its own copy of that grammar (it must not import the backend) and
+  `backend/tests/unit/test_ref_grammar.py` proves the two equal by reading `cli.py` as text.
+  **`ambiguous_ref` is a CLI error code**, not an API one: the API requires `board_id` for a
+  board-local ref (`422` without it), and the CLI is where a menu of candidate boards can be offered.
 - **`card.board_seq` / `epic.board_seq`** (M8 V52) are the board-local numbers a ref renders from —
   the `14` in `ENG-14`, the `7` in `ENG-E7`. Taken from the counter columns
   `board.next_card_seq` / `next_epic_seq` in one row-locked statement inside the insert

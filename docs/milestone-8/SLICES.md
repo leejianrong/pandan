@@ -41,7 +41,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | **V55 · `PATCH /cycles/{id}`** ✅ | a sprint you can edit | B | KAN-976 | 1 | `pandan cycle update 7 --name 'Sprint 12'` works and the cards stay attached |
 | **V51 · Board keys** ✅ | `board.key`, unique per owner 🗄️ | A | KAN-972 | 3 | A board has a key; two users can each own an `ENG`; keying a board `KAN` is a clean `422` |
 | **V52 · Per-board sequences** ✅ | `board_seq` + backfill 🗄️ | A | KAN-973 | 5 | Every card and epic carries a gapless board-local ref in its payload |
-| **V53 · Resolution** | both forms, everywhere | A | KAN-974 | 5 | `pandan get ENG-42` and `pandan get KAN-1013` return the same card |
+| **V53 · Resolution** ✅ | both forms, everywhere | A | KAN-974 | 5 | `pandan get ENG-42` and `pandan get KAN-1013` return the same card |
 | **V54 · Render** | SPA + CLI show the ref | A | KAN-975 | 3 | The board reads `ENG-1…ENG-77` instead of `KAN-530…KAN-971` |
 | **V62 · Dual-theme palette** ✅ | + colour validation | C | KAN-983 | 3 | Every label is readable in both themes; a bad colour is a `422` |
 | **V63 · Epic colour** | 🗄️ | C | KAN-984 | 2 | An epic's stories are recognisable on the board without reading them |
@@ -168,7 +168,7 @@ that migration was head. Adding this one silently changed what `-1` meant and th
 failed on assumptions that were no longer true. Any migration-bracketing test must name
 its revision.
 
-### V53 · Resolution — KAN-974
+### V53 · Resolution — KAN-974 ✅
 
 Every site that parses `KAN-<n>` learns the second form. All verified 2026-08-23:
 
@@ -195,6 +195,55 @@ error	ambiguous_ref	'ENG-14' matches 2 accessible boards	ENG-14
 help: pandan get KAN-207
 help: pandan --board 6 get ENG-14
 ```
+
+**Shipped, with three deliberate departures from the sketch above and one addition.**
+
+1. **The menu is one row, not a block.** The CLI's error line is four tab-separated
+   columns and a consumer greps `cut -f2` (V43/AXI 6), so candidate lines under it would
+   either break that contract or need a second, parallel rendering. Every fact in the
+   sketch survives, semicolon-separated inside the message: board id, key, name, owner,
+   and the canonical ticket that makes the next command copyable.
+2. **The API requires `board_id` for a board-local ref rather than resolving across every
+   visible board.** Both alternatives were worse: resolving broadly returns two cards for
+   one selector *silently*, and failing the whole request on one ambiguous selector
+   contradicts the batch read's own design, where a miss is reported and not fatal.
+   Requiring the board is what "board-local" already means (D3). `ambiguous_ref` is
+   therefore a **CLI** code — which is where V43's contract lives anyway — and the API's
+   answer is a `422` naming the missing `board_id`.
+3. **Auto-sync resolves the two forms in opposite directions**, and this is the sharpest
+   consequence of D3 anywhere in the codebase. Canonical: find the card, the board
+   follows. Board-local: a webhook has *no board context of its own*, so the board is
+   found first — from the boards that opted into auto-sync — and the card follows. That
+   opt-in flag stops being a convenience filter and becomes the thing that supplies the
+   missing context, which is what makes board-local refs safe in a global endpoint. Two
+   opted-in boards sharing a key are **skipped and logged**, never guessed: a webhook
+   cannot ask.
+4. **`board.owner_email` was added** (a transient field on `BoardRead`, like `role`),
+   because `alice/ENG-14` is unresolvable and unprintable without it — `owner_id` is a
+   UUID, not a handle a human types. The privacy question is answered rather than
+   assumed: every board a caller can read is one they own or are a member of, and
+   `MemberRead.email` already shows a board's members their addresses.
+
+**And one behaviour change worth knowing about.** Widening the grammar necessarily
+shrinks the set of strings that are malformed *by shape*: `TASK-1` used to be an argparse
+usage error (exit 2) and is now a well-formed reference to a board that does not exist
+(exit 5, `not_found`). A test that asserted the old behaviour was rewritten to pin where
+it went, rather than deleted.
+
+**The grammar exists in two packages and is proven equal, not trusted.** The CLI must not
+import the backend (that would invert ADR 0005 and break a PyInstaller build), so
+`backend/tests/unit/test_ref_grammar.py` reads `cli.py` as *text* and compares its
+regexes and reserved-key set to `app/board_seq.py`'s — the technique `test_palette.py`
+uses for the palette's four copies. One of those checks is behavioural rather than
+textual, because the two patterns are deliberately different strings (a stored key is
+uppercase; a reference parses case-insensitively): what it asserts is the equivalence,
+that a reference can name exactly the keys a board can hold.
+
+**There is deliberately no shared `resolve_ref(db, ref)`.** An earlier draft had one and
+it was deleted unused: each call site resolves against a different scope — the caller's
+visible boards, the auto-sync-enabled boards, the configured board — and a shared helper
+would take that scope as a parameter, which is to say it would be a wrapper around the two
+lines each caller already writes. The *grammar* is what must not be duplicated.
 
 ### V54 · Render — KAN-975
 

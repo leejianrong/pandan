@@ -50,6 +50,17 @@ EPIC = {
 BOARD = {"id": 2, "name": "Roadmap", "owner_id": None}
 
 
+class Queue(list):
+    """A per-method result *queue*: successive calls to that method get successive
+    entries, and the last one repeats.
+
+    A distinct type rather than a plain list, so a genuinely list-shaped payload is
+    never mistaken for a queue. Needed by V53's board-local resolution, which calls
+    ``list_cards`` once per candidate board and must be able to answer differently
+    for each.
+    """
+
+
 class FakeClient:
     """Records method calls; returns a canned result or raises a canned error."""
 
@@ -78,7 +89,10 @@ class FakeClient:
         if self._error is not None:
             raise self._error
         if method in self._results:
-            return self._results[method]
+            value = self._results[method]
+            if isinstance(value, Queue):
+                return value.pop(0) if len(value) > 1 else value[0]
+            return value
         return self._result
 
     def warmup(self):
@@ -2876,7 +2890,7 @@ def test_card_id_arg_rejects_epic_ticket(monkeypatch, env, capsys):
     assert cli.run(["get", "EPIC-3"]) == cli.EXIT_ERROR
     err = read_error(capsys)
     assert err.code == "invalid_ref"  # wrong KIND of ticket, not a missing card
-    assert "not a card ticket" in err.message
+    assert "not a card reference" in err.message
     assert fake.calls == []  # never lists — the shape is wrong up front
 
 
@@ -2949,7 +2963,7 @@ def test_epic_arg_rejects_kan_ticket(monkeypatch, env, capsys):
     assert cli.run(["epic", "update", "KAN-3", "--name", "x"]) == cli.EXIT_ERROR
     err = read_error(capsys)
     assert err.code == "invalid_ref"
-    assert "not an epic ticket" in err.message
+    assert "not an epic reference" in err.message
     assert fake.calls == []
 
 
@@ -3659,26 +3673,60 @@ def test_link_rm_round_trips_the_printed_link_id(monkeypatch, env, capsys):
     [
         ("42", (42, None)),
         (" 42 ", (42, None)),            # surrounding whitespace is stripped
-        ("KAN-9", (None, "KAN-9")),
-        ("kan-9", (None, "KAN-9")),      # mixed case normalises upward
-        ("Kan-9", (None, "KAN-9")),
-        ("EPIC-3", (None, "EPIC-3")),
-        ("epic-3", (None, "EPIC-3")),
+        ("KAN-9", (None, ("card", 9, None, None))),
+        ("kan-9", (None, ("card", 9, None, None))),   # mixed case normalises upward
+        ("Kan-9", (None, ("card", 9, None, None))),
+        ("EPIC-3", (None, ("epic", 3, None, None))),
+        ("epic-3", (None, ("epic", 3, None, None))),
+        # V53 / KAN-974: the board-local form, and its owner-qualified spelling.
+        ("ENG-14", (None, ("card", 14, "ENG", None))),
+        ("eng-14", (None, ("card", 14, "ENG", None))),
+        ("ENG-E7", (None, ("epic", 7, "ENG", None))),
+        ("alice/ENG-14", (None, ("card", 14, "ENG", "alice"))),
     ],
 )
-def test_parse_id_or_ticket_accepts_ints_and_either_case(raw, expected):
-    assert cli._parse_id_or_ticket(raw) == expected
+def test_parse_id_or_ticket_accepts_ints_and_every_ref_form(raw, expected):
+    """Since V53 the reference half is a ``_Ref`` rather than a normalised string: a
+    board-local ref cannot be flattened to one, because resolving it needs the key and
+    the number apart."""
+    id_, ref = cli._parse_id_or_ticket(raw)
+    assert id_ == expected[0]
+    assert (tuple(ref) if ref is not None else None) == expected[1]
 
 
-@pytest.mark.parametrize("raw", ["#KAN-1", "KAN 1", "KAN-", "-5", "KAN-1x", "TASK-1", ""])
+@pytest.mark.parametrize(
+    "raw",
+    ["alice/KAN-12", "alice/EPIC-3", "/ENG-14", "alice/", "KAN-E7"],
+)
+def test_refs_that_deliberately_do_not_parse(raw):
+    """Two rules, both stated as refusals rather than silent normalisations:
+
+    * an owner qualifier on a **canonical** ref does not parse — the canonical form is
+      already globally unique, so a qualifier could only be redundant, and accepting it
+      would suggest it meant something;
+    * ``KAN-E7`` does not parse — ``KAN`` is a reserved board key (ADR 0020), so there
+      is no board-local reading of it, and its canonical reading is ``EPIC-7``.
+    """
+    assert cli._parse_ref(raw) is None
+
+
+@pytest.mark.parametrize("raw", ["#KAN-1", "KAN 1", "KAN-", "-5", "KAN-1x", ""])
 def test_malformed_refs_are_usage_errors_before_any_request(monkeypatch, env, raw):
-    """A value that is neither a bare int nor a KAN-/EPIC- ticket is rejected by
+    """A value that is neither a bare int nor any reference form is rejected by
     argparse (exit 2) with no network call.
 
     `#KAN-1` is in this list deliberately: the leading `#` is NOT accepted today
     (the CLI never prints that form). Pinned as current behaviour rather than
     changed — accepting it would be a one-line regex tweak, but it is not what
-    KAN-425 asks for, so it's raised in the PR body instead of assumed."""
+    KAN-425 asks for, so it's raised in the PR body instead of assumed.
+
+    **``TASK-1`` used to be in this list and is deliberately no longer.** V53 added the
+    board-local form, and ``TASK`` is a well-formed board key — so ``TASK-1`` is now a
+    *valid reference to something that probably does not exist*, which is a lookup that
+    misses (exit 5), not a usage error (exit 2). Widening the grammar necessarily
+    shrinks the set of strings that are malformed by shape; the test below pins where
+    ``TASK-1`` went instead of letting it quietly change category.
+    """
     fake = patch_client(monkeypatch, FakeClient())
     with pytest.raises(SystemExit) as exc:
         cli.run(["get", raw])
@@ -3727,14 +3775,20 @@ def test_unresolvable_epic_ref_is_not_found(monkeypatch, env, capsys):
 @pytest.mark.parametrize(
     "argv,message",
     [
-        (["get", "EPIC-3"], "not a card ticket"),
-        (["move", "EPIC-3", "done"], "not a card ticket"),
-        (["comment", "add", "EPIC-3", "--body", "x"], "not a card ticket"),
-        (["dep", "add", "KAN-7", "--blocked-by", "EPIC-3"], "not a card ticket"),
-        (["epic", "delete", "KAN-3", "--yes"], "not an epic ticket"),
-        (["list", "--epic", "KAN-3"], "not an epic ticket"),
+        (["get", "EPIC-3"], "not a card reference"),
+        (["move", "EPIC-3", "done"], "not a card reference"),
+        (["comment", "add", "EPIC-3", "--body", "x"], "not a card reference"),
+        (["dep", "add", "KAN-7", "--blocked-by", "EPIC-3"], "not a card reference"),
+        (["epic", "delete", "KAN-3", "--yes"], "not an epic reference"),
+        (["list", "--epic", "KAN-3"], "not an epic reference"),
+        # V53: the board-local spellings mismatch the same way.
+        (["get", "ENG-E7"], "not a card reference"),
+        (["epic", "delete", "ENG-7", "--yes"], "not an epic reference"),
     ],
-    ids=["get", "move", "comment-add", "dep-blocker", "epic-delete", "list-epic-filter"],
+    ids=[
+        "get", "move", "comment-add", "dep-blocker", "epic-delete", "list-epic-filter",
+        "get-board-local-epic", "epic-delete-board-local-card",
+    ],
 )
 def test_wrong_entity_ticket_is_rejected_up_front(monkeypatch, env, capsys, argv, message):
     """An EPIC- ticket handed to a card verb (or vice versa) is caught by shape
@@ -3745,6 +3799,206 @@ def test_wrong_entity_ticket_is_rejected_up_front(monkeypatch, env, capsys, argv
     assert err.code == "invalid_ref"
     assert message in err.message
     assert "add_dependency" not in [c[0] for c in fake.calls]
+
+
+# --- V53 / KAN-974: board-local reference resolution -------------------------
+# `ENG-14` is board-local, so resolving it means finding the board first. The active
+# board (`--board` / PANDAN_BOARD_ID) decides when there is one; with none, more than
+# one match is an `ambiguous_ref` MENU rather than a silent pick (SHAPING D3).
+
+
+def _brd(id_: int, key: str, name: str, owner_email: str | None, role: str = "viewer") -> dict:
+    return {"id": id_, "key": key, "name": name, "owner_email": owner_email, "role": role}
+
+
+def _card_on(board_id: int, ticket: str, board_seq: int, key: str) -> dict:
+    return {
+        "id": board_id * 100 + board_seq,
+        "ticket_number": ticket,
+        "board_id": board_id,
+        "board_seq": board_seq,
+        "ref": f"{key}-{board_seq}",
+        "title": "story",
+        "column": "todo",
+        "labels": [],
+    }
+
+
+def test_a_board_local_ref_resolves_through_the_batch_read(monkeypatch, env):
+    """One request per candidate board — normally exactly one — rather than a walk of
+    every card, which is what the canonical form still has to do."""
+    card = _card_on(6, "KAN-955", 14, "ENG")
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "list_boards": {"boards": [_brd(6, "ENG", "Engine Room", "you@x.com", "owner")]},
+                "list_cards": {"cards": [card]},
+                "get_card": card,
+            }
+        ),
+    )
+    assert cli.run(["get", "ENG-14"]) == cli.EXIT_OK
+    assert [c[0] for c in fake.calls] == ["list_boards", "list_cards", "get_card"]
+    assert fake.calls[1][1] == {"board_id": 6, "refs": "ENG-14"}
+    assert fake.calls[2][1] == {"card_id": card["id"]}
+
+
+def test_a_board_local_ref_is_case_insensitive(monkeypatch, env):
+    card = _card_on(6, "KAN-955", 14, "ENG")
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "list_boards": {"boards": [_brd(6, "ENG", "Engine Room", "you@x.com", "owner")]},
+                "list_cards": {"cards": [card]},
+                "get_card": card,
+            }
+        ),
+    )
+    assert cli.run(["get", "eng-14"]) == cli.EXIT_OK
+    assert fake.calls[1][1]["refs"] == "ENG-14"
+
+
+def test_two_visible_eng_boards_with_no_active_board_is_ambiguous(monkeypatch, env, capsys):
+    """The slice's headline failure, and it must be a **menu**: every candidate named
+    with its board, its owner and — the part that makes the next command typable —
+    the card's own canonical ticket, which needs no board context at all."""
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "list_boards": {
+                    "boards": [
+                        _brd(5, "ENG", "Engineering", "alice@corp.com"),
+                        _brd(6, "ENG", "Engine Room", "you@x.com", "owner"),
+                    ]
+                },
+                "list_cards": Queue(
+                    [
+                        {"cards": [_card_on(5, "KAN-955", 14, "ENG")]},
+                        {"cards": [_card_on(6, "KAN-207", 14, "ENG")]},
+                    ]
+                ),
+            }
+        ),
+    )
+    assert cli.run(["get", "ENG-14"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "ambiguous_ref"
+    assert err.arg == "ENG-14"
+    # Both boards, both owners, both canonical tickets — the menu, not a refusal.
+    for fragment in ("board 5", "board 6", "Engineering", "Engine Room",
+                     "alice@corp.com", "(you)", "KAN-955", "KAN-207"):
+        assert fragment in err.message, fragment
+    assert "get_card" not in [c[0] for c in fake.calls]
+
+
+def test_the_active_board_settles_an_otherwise_ambiguous_ref(monkeypatch, env):
+    """With PANDAN_BOARD_ID set, only that board is even queried — ambiguity is the
+    exception the error exists for, not the common path."""
+    monkeypatch.setenv("PANDAN_BOARD_ID", "6")
+    card = _card_on(6, "KAN-207", 14, "ENG")
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "list_boards": {
+                    "boards": [
+                        _brd(5, "ENG", "Engineering", "alice@corp.com"),
+                        _brd(6, "ENG", "Engine Room", "you@x.com", "owner"),
+                    ]
+                },
+                "list_cards": {"cards": [card]},
+                "get_card": card,
+            }
+        ),
+    )
+    assert cli.run(["get", "ENG-14"]) == cli.EXIT_OK
+    assert [c[1] for c in fake.calls if c[0] == "list_cards"] == [
+        {"board_id": 6, "refs": "ENG-14"}
+    ]
+
+
+def test_an_owner_qualifier_narrows_the_candidates(monkeypatch, env):
+    """``alice/ENG-14`` — the third accepted form, and the one V54 prints when a
+    viewer can see two boards with the same key. Matched on the owner's email or its
+    local part, so both spellings work."""
+    card = _card_on(5, "KAN-955", 14, "ENG")
+    for spelling in ("alice/ENG-14", "alice@corp.com/ENG-14"):
+        fake = patch_client(
+            monkeypatch,
+            FakeClient(
+                results={
+                    "list_boards": {
+                        "boards": [
+                            _brd(5, "ENG", "Engineering", "alice@corp.com"),
+                            _brd(6, "ENG", "Engine Room", "you@x.com", "owner"),
+                        ]
+                    },
+                    "list_cards": {"cards": [card]},
+                    "get_card": card,
+                }
+            ),
+        )
+        assert cli.run(["get", spelling]) == cli.EXIT_OK, spelling
+        assert [c[1] for c in fake.calls if c[0] == "list_cards"] == [
+            {"board_id": 5, "refs": "ENG-14"}
+        ], spelling
+
+
+def test_an_owner_qualifier_that_matches_nobody_finds_nothing(monkeypatch, env, capsys):
+    """A qualifier is a constraint, not a hint: narrowing to nothing is not_found, not
+    a fall back to the unqualified reading."""
+    patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "list_boards": {"boards": [_brd(6, "ENG", "Engine Room", "you@x.com", "owner")]}
+            }
+        ),
+    )
+    assert cli.run(["get", "bob/ENG-14"]) == cli.EXIT_NOT_FOUND
+    assert read_error(capsys).code == "not_found"
+
+
+def test_a_board_local_epic_ref_resolves(monkeypatch, env):
+    epic = {
+        "id": 77,
+        "ticket_number": "EPIC-7",
+        "board_id": 6,
+        "board_seq": 7,
+        "ref": "ENG-E7",
+        "name": "Onboarding",
+        "progress": {"total": 0, "done": 0, "percent": 0},
+    }
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "list_boards": {"boards": [_brd(6, "ENG", "Engine Room", "you@x.com", "owner")]},
+                "list_epics": {"epics": [epic]},
+                "get_epic": epic,
+            }
+        ),
+    )
+    assert cli.run(["epic", "get", "ENG-E7"]) == cli.EXIT_OK
+    assert fake.calls[-1] == ("get_epic", {"epic_id": 77})
+
+
+def test_a_key_nobody_owns_is_not_found_rather_than_a_usage_error(monkeypatch, env, capsys):
+    """Where ``TASK-1`` went when V53 widened the grammar: it is now a well-formed
+    reference to a board that does not exist, so it misses (exit 5) instead of being
+    rejected by argparse (exit 2). Named explicitly because the old test asserted the
+    opposite and the category change is the interesting part."""
+    fake = patch_client(
+        monkeypatch, FakeClient(results={"list_boards": {"boards": []}})
+    )
+    assert cli.run(["get", "TASK-1"]) == cli.EXIT_NOT_FOUND
+    err = read_error(capsys)
+    assert err.code == "not_found"
+    assert "TASK" in err.message
+    assert [c[0] for c in fake.calls] == ["list_boards"]
 
 
 # --- V43 / KAN-426: the error contract (AXI 6) -------------------------------
@@ -3788,6 +4042,7 @@ def test_error_code_vocabulary_is_pinned():
         "confirmation_required": 1,
         "invalid_input": 1,
         "invalid_ref": 1,
+        "ambiguous_ref": 1,
         "unknown_field": 1,
         "no_token": 1,
         "nothing_to_update": 1,

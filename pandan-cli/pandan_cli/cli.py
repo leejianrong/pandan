@@ -123,7 +123,7 @@ import re
 import shlex
 import sys
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 from pandan_client import PandanApiError, PandanClient, split_card_selectors
@@ -169,6 +169,7 @@ ERROR_CODES: dict[str, int] = {
     "confirmation_required": EXIT_ERROR,  # destructive verb without --yes
     "invalid_input": EXIT_ERROR,          # parsed but unusable (bad JSON, wrong shape)
     "invalid_ref": EXIT_ERROR,            # an EPIC- ticket where a card is wanted, etc.
+    "ambiguous_ref": EXIT_ERROR,          # a board-local ref matching >1 visible board
     "unknown_field": EXIT_ERROR,          # --fields named a field the row doesn't have
     "no_token": EXIT_ERROR,               # login/config set got no token to save
     "nothing_to_update": EXIT_ERROR,      # a patch verb given no field to change
@@ -1773,101 +1774,311 @@ def _resolve_board(arg_board: int | None, config: Config) -> int | None:
     return config.board_id
 
 
-# --- id / ticket resolution (KAN-285) ---------------------------------------
-# The CLI displays cards/epics by their ticket (``KAN-<n>`` / ``EPIC-<n>``), so
-# every id-taking command should accept that ticket — not only the numeric DB id.
-# We keep the resolution client-side (API-first: a thin adapter, no new endpoint):
-# a bare integer passes through unchanged; a ticket is looked up via the query API
-# and matched on ``ticket_number``. Ticket sequences are globally unique
-# (``card_ticket_seq`` / ``epic_ticket_seq``), so the lookup spans all your boards
-# (``board_id=None``) and needs no board scope to disambiguate.
+# --- id / reference resolution (KAN-285; three forms since V53, KAN-974) ------
+# The CLI displays cards/epics by reference, so every id-taking command accepts one
+# — not only the numeric DB id. Resolution stays client-side (API-first: a thin
+# adapter, no new endpoint).
+#
+# Three forms, and the scoping differs between them because that is what the forms
+# *mean* (SHAPING D3):
+#
+#   42              a numeric DB id       → passes through unchanged, no request
+#   KAN-12          canonical, global     → spans every board; ticket sequences are
+#                                           globally unique, so no board scope can
+#                                           disambiguate and none is needed
+#   ENG-14          board-local           → resolves inside a board. Board keys are
+#                                           unique per OWNER, so this can name a
+#                                           different card for two people
+#   alice/ENG-14    board-local, owner-qualified
+#
+# A board-local ref uses the active board (``--board`` / ``PANDAN_BOARD_ID``) when
+# there is one. With none, it resolves across every visible board and **more than one
+# match is an ``ambiguous_ref`` error naming the candidates** — never a silent pick.
+#
+# **The grammar is duplicated from ``backend/app/board_seq.py``, deliberately.** The
+# CLI must not depend on the backend package (that would invert ADR 0005 and make a
+# PyInstaller build impossible). So the two copies are proven to agree instead of
+# trusted to: ``backend/tests/unit/test_ref_grammar.py`` parses this file's regexes
+# as text and compares them, the same technique ``test_palette.py`` uses for the
+# palette's four copies.
 
 _TICKET_RE = re.compile(r"^(KAN|EPIC)-(\d+)$", re.IGNORECASE)
+_BOARD_LOCAL_RE = re.compile(r"^([A-Za-z][A-Za-z0-9]{1,9})-(E?)(\d+)$", re.IGNORECASE)
+#: The canonical prefixes are reserved board keys (ADR 0020), which is what makes
+#: "try canonical first" a total rule rather than a precedence hack.
+_RESERVED_KEYS = frozenset({"KAN", "EPIC"})
+
+
+class _Ref(NamedTuple):
+    """A parsed reference. ``key is None`` means the canonical global form."""
+
+    entity: str  # "card" | "epic"
+    number: int
+    key: str | None = None
+    owner: str | None = None
+
+    @property
+    def canonical(self) -> bool:
+        return self.key is None
+
+    def __str__(self) -> str:
+        if self.canonical:
+            return f"{'KAN' if self.entity == 'card' else 'EPIC'}-{self.number}"
+        marker = "" if self.entity == "card" else "E"
+        qualifier = f"{self.owner}/" if self.owner else ""
+        return f"{qualifier}{self.key}-{marker}{self.number}"
+
+
+def _parse_ref(token: str) -> _Ref | None:
+    """Parse one reference in any of the three forms, or ``None`` if it is not one."""
+    token = token.strip()
+    if not token:
+        return None
+    owner: str | None = None
+    if "/" in token:
+        owner, _, token = token.partition("/")
+        owner, token = owner.strip(), token.strip()
+        if not owner or not token:
+            return None
+    canonical = _TICKET_RE.match(token)
+    if canonical:
+        # An owner qualifier on a globally unique ref is meaningless, so it does not
+        # parse rather than being silently dropped.
+        if owner is not None:
+            return None
+        prefix, number = canonical.groups()
+        entity = "card" if prefix.upper() == "KAN" else "epic"
+        return _Ref(entity=entity, number=int(number))
+    local = _BOARD_LOCAL_RE.match(token)
+    if local:
+        key, marker, number = local.groups()
+        if key.upper() in _RESERVED_KEYS:
+            return None
+        return _Ref(
+            entity="epic" if marker else "card",
+            number=int(number),
+            key=key.upper(),
+            owner=owner,
+        )
+    return None
+
+
+def _active_board(config: Config, args: argparse.Namespace) -> int | None:
+    """The board a board-local reference resolves against, or ``None``.
+
+    Deliberately **not** routed through :func:`_resolve_board`: this is a
+    disambiguation hint rather than a target, so ``require_board`` must not fire here.
+    A verb that takes no ``--board`` still gets the configured one, which is how
+    ``pandan get ENG-42`` works with ``PANDAN_BOARD_ID`` set and no flag.
+    """
+    board = getattr(args, "board", None)
+    return board if board is not None else config.board_id
 
 
 def _id_or_ticket_arg(value: str) -> str:
-    """argparse ``type`` for id arguments: accept a numeric DB id **or** a
-    ``KAN-<n>`` / ``EPIC-<n>`` ticket (case-insensitive), both kept as a string for
-    the handler to resolve (KAN-285). Malformed input is a usage error (exit 2)."""
+    """argparse ``type`` for id arguments: accept a numeric DB id **or** any of the
+    three reference forms (case-insensitive), all kept as strings for the handler to
+    resolve (KAN-285, V53). Malformed input is a usage error (exit 2)."""
     v = value.strip()
-    if v.isdigit() or _TICKET_RE.match(v):
+    if v.isdigit() or _parse_ref(v) is not None:
         return v
     raise argparse.ArgumentTypeError(
-        f"expected a numeric id or a KAN-/EPIC- ticket, got {value!r}"
+        f"expected a numeric id or a reference like KAN-12 or ENG-14, got {value!r}"
     )
 
 
-def _parse_id_or_ticket(raw: str) -> tuple[int | None, str | None]:
-    """Split a raw id-or-ticket value: a bare integer → ``(id, None)``; a
-    ``KAN-<n>``/``EPIC-<n>`` ticket → ``(None, "KAN-5")`` (normalised upper-case)."""
+def _parse_id_or_ticket(raw: str) -> tuple[int | None, _Ref | None]:
+    """Split a raw id-or-reference value: a bare integer → ``(id, None)``; a
+    reference → ``(None, _Ref(...))``."""
     v = str(raw).strip()
     if v.isdigit():
         return int(v), None
-    m = _TICKET_RE.match(v)
-    if m is None:
+    ref = _parse_ref(v)
+    if ref is None:
         raise CliError(
-            f"expected a numeric id or a KAN-/EPIC- ticket, got {raw!r}",
+            f"expected a numeric id or a reference like KAN-12 or ENG-14, got {raw!r}",
             code="invalid_ref",
             arg=str(raw),
         )
-    return None, f"{m.group(1).upper()}-{m.group(2)}"
+    return None, ref
 
 
-def _resolve_card_id(client: PandanClient, raw: str | int) -> int:
-    """Resolve a card id-or-ticket to its numeric DB id (KAN-285). A bare integer is
-    returned as-is (no request); a ``KAN-<n>`` ticket is looked up via the query API
-    (paging its keyset cursor) and matched on ``ticket_number``."""
-    id_, ticket = _parse_id_or_ticket(raw)
+def _candidate_boards(client: PandanClient, ref: _Ref, board_id: int | None) -> list[dict]:
+    """The boards a board-local ``ref`` could name, most specific first (V53).
+
+    Three narrowings, in order, and each is a decision:
+
+    1. **The key must match.** Case-insensitively, since the CLI accepts what it
+       prints and a user retyping ``eng-14`` should not be punished.
+    2. **The owner qualifier, if given.** Matched against the board's ``owner_email``
+       in full or by its local part, so both ``alice/ENG-14`` and
+       ``alice@corp.com/ENG-14`` work. A qualifier that matches nothing narrows to
+       nothing — it is a constraint, not a hint.
+    3. **The active board wins outright** when it is among the candidates. That is
+       what makes ``pandan get ENG-42`` unambiguous for anyone with
+       ``PANDAN_BOARD_ID`` set, which is the normal case; ambiguity is the exception
+       this exists to report, not the common path.
+    """
+    boards = client.list_boards().get("boards", [])
+    matches = [b for b in boards if str(b.get("key", "")).upper() == ref.key]
+    if ref.owner:
+        owner = ref.owner.lower()
+        matches = [b for b in matches if _owner_matches(b.get("owner_email"), owner)]
+    if board_id is not None:
+        active = [b for b in matches if int(b.get("id", -1)) == board_id]
+        if active:
+            return active
+    return matches
+
+
+def _owner_matches(owner_email: str | None, owner: str) -> bool:
+    """Whether ``owner`` names ``owner_email`` — the whole address or its local part."""
+    if not owner_email:
+        return False
+    email = owner_email.lower()
+    return email == owner or email.split("@", 1)[0] == owner
+
+
+def _ambiguous_ref(ref: _Ref, boards: list[dict], hits: list[dict]) -> CliError:
+    """The ``ambiguous_ref`` error: a **menu, not a refusal** (SHAPING D3).
+
+    Every candidate is named with its board, key, name, owner and — the part that
+    makes the next command typable rather than guessable — the card's own canonical
+    ``KAN-…``, which resolves from anywhere and needs no board context at all.
+
+    **The menu is one row, not the shape's mock-up block**, and the reason is the row
+    contract (V43/AXI 6): the CLI's error line is four tab-separated columns and a
+    consumer greps ``cut -f2``, so candidate lines below it would either break that or
+    need a second, parallel rendering. Semicolon-separated inside the message keeps
+    every fact in the machine-readable place it already lives.
+    """
+    by_board = {int(b["id"]): b for b in boards}
+    parts = []
+    for card in hits:
+        board = by_board.get(int(card.get("board_id", -1)), {})
+        owner = board.get("owner_email") or "unclaimed"
+        if board.get("role") == "owner":
+            owner = "you"
+        parts.append(
+            f"board {board.get('id', '?')} {board.get('key', '?')} "
+            f"{board.get('name', '?')!r} ({owner}) → {card.get('ticket_number', '?')}"
+        )
+    return CliError(
+        f"{ref} matches {len(hits)} accessible boards: " + "; ".join(parts) +
+        f". Use the canonical ticket, or pass --board <id> with {ref}",
+        code="ambiguous_ref",
+        arg=str(ref),
+    )
+
+
+def _resolve_card_id(
+    client: PandanClient, raw: str | int, board_id: int | None = None
+) -> int:
+    """Resolve a card id-or-reference to its numeric DB id (KAN-285, V53).
+
+    A bare integer is returned as-is (no request). A canonical ``KAN-<n>`` is looked
+    up across every board, paging the keyset cursor — ticket sequences are globally
+    unique so no board scope could help. A board-local ``ENG-14`` resolves through the
+    API's batch read against each candidate board, which is one request per candidate
+    (normally exactly one) rather than a walk of every card.
+    """
+    id_, ref = _parse_id_or_ticket(raw)
     if id_ is not None:
         return id_
-    if not ticket.startswith("KAN-"):
+    if ref.entity != "card":
         raise CliError(
-            f"{ticket} is not a card ticket (cards are KAN-…)",
+            f"{ref} is not a card reference (cards are KAN-… or <KEY>-<n>)",
             code="invalid_ref",
-            arg=ticket,
+            arg=str(ref),
         )
-    cursor: str | None = None
-    while True:
-        result = (
-            client.list_cards(board_id=None, cursor=cursor)
-            if cursor
-            else client.list_cards(board_id=None)
-        )
-        for card in result.get("cards", []):
-            if str(card.get("ticket_number", "")).upper() == ticket:
-                return int(card["id"])
-        cursor = result.get("next_cursor")
-        if not cursor:
-            # not_found → exit 5, the same code the API returns for `get <numeric id>`
-            # of a card that doesn't exist. Before V43 this was exit 1, so one logical
-            # failure reported two different codes depending on the identifier form.
-            raise CliError(
-                f"no card found with ticket {ticket}", code="not_found", arg=ticket
+    if ref.canonical:
+        cursor: str | None = None
+        while True:
+            result = (
+                client.list_cards(board_id=None, cursor=cursor)
+                if cursor
+                else client.list_cards(board_id=None)
             )
+            for card in result.get("cards", []):
+                if str(card.get("ticket_number", "")).upper() == str(ref):
+                    return int(card["id"])
+            cursor = result.get("next_cursor")
+            if not cursor:
+                # not_found → exit 5, the same code the API returns for
+                # `get <numeric id>` of a card that doesn't exist. Before V43 this was
+                # exit 1, so one logical failure reported two different codes
+                # depending on the identifier form.
+                raise CliError(
+                    f"no card found with ticket {ref}", code="not_found", arg=str(ref)
+                )
+
+    boards = _candidate_boards(client, ref, board_id)
+    if not boards:
+        raise CliError(
+            f"no board you can see has the key {ref.key}", code="not_found", arg=str(ref)
+        )
+    hits = []
+    for board in boards:
+        found = client.list_cards(
+            board_id=int(board["id"]), refs=f"{ref.key}-{ref.number}"
+        ).get("cards", [])
+        hits.extend(found)
+    if not hits:
+        raise CliError(f"no card found for {ref}", code="not_found", arg=str(ref))
+    if len(hits) > 1:
+        raise _ambiguous_ref(ref, boards, hits)
+    return int(hits[0]["id"])
 
 
-def _resolve_epic_id(client: PandanClient, raw: str | int) -> int:
-    """Resolve an epic id-or-ticket to its numeric DB id (KAN-285). A bare integer is
-    returned as-is; an ``EPIC-<n>`` ticket is looked up via ``list_epics`` and
-    matched on ``ticket_number``."""
-    id_, ticket = _parse_id_or_ticket(raw)
+def _resolve_epic_id(
+    client: PandanClient, raw: str | int, board_id: int | None = None
+) -> int:
+    """Resolve an epic id-or-reference to its numeric DB id (KAN-285, V53).
+
+    The epic twin of :func:`_resolve_card_id`. Board-local epic refs (``ENG-E7``)
+    resolve by listing each candidate board's epics and matching the ``ref`` the API
+    renders — epics have no batch-read endpoint, and a board's epic count is small
+    enough that one list per candidate is the cheaper thing to build than one.
+    """
+    id_, ref = _parse_id_or_ticket(raw)
     if id_ is not None:
         return id_
-    if not ticket.startswith("EPIC-"):
+    if ref.entity != "epic":
         raise CliError(
-            f"{ticket} is not an epic ticket (epics are EPIC-…)",
+            f"{ref} is not an epic reference (epics are EPIC-… or <KEY>-E<n>)",
             code="invalid_ref",
-            arg=ticket,
+            arg=str(ref),
         )
-    for epic in client.list_epics(board_id=None).get("epics", []):
-        if str(epic.get("ticket_number", "")).upper() == ticket:
-            return int(epic["id"])
-    raise CliError(f"no epic found with ticket {ticket}", code="not_found", arg=ticket)
+    if ref.canonical:
+        for epic in client.list_epics(board_id=None).get("epics", []):
+            if str(epic.get("ticket_number", "")).upper() == str(ref):
+                return int(epic["id"])
+        raise CliError(f"no epic found with ticket {ref}", code="not_found", arg=str(ref))
+
+    boards = _candidate_boards(client, ref, board_id)
+    if not boards:
+        raise CliError(
+            f"no board you can see has the key {ref.key}", code="not_found", arg=str(ref)
+        )
+    wanted = f"{ref.key}-E{ref.number}"
+    hits = [
+        epic
+        for board in boards
+        for epic in client.list_epics(board_id=int(board["id"])).get("epics", [])
+        if str(epic.get("ref", "")).upper() == wanted
+    ]
+    if not hits:
+        raise CliError(f"no epic found for {ref}", code="not_found", arg=str(ref))
+    if len(hits) > 1:
+        raise _ambiguous_ref(ref, boards, hits)
+    return int(hits[0]["id"])
 
 
-def _resolve_epic_opt(client: PandanClient, raw: str | int | None) -> int | None:
+def _resolve_epic_opt(
+    client: PandanClient, raw: str | int | None, board_id: int | None = None
+) -> int | None:
     """Resolve an optional ``--epic`` value (``None`` stays ``None``)."""
-    return None if raw is None else _resolve_epic_id(client, raw)
+    return None if raw is None else _resolve_epic_id(client, raw, board_id)
 
 
 # --- command handlers -------------------------------------------------------
@@ -1888,7 +2099,7 @@ def _cmd_list(client: PandanClient, config: Config, args: argparse.Namespace) ->
         ids=ids,
         refs=refs,
         column=args.column,
-        epic_id=_resolve_epic_opt(client, args.epic),
+        epic_id=_resolve_epic_opt(client, args.epic, _active_board(config, args)),
         cycle_id=args.cycle,
         priority=args.priority,
         label=args.label,
@@ -1904,7 +2115,7 @@ def _cmd_list(client: PandanClient, config: Config, args: argparse.Namespace) ->
 
 
 def _cmd_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.get_card(_resolve_card_id(client, args.card_id))
+    return client.get_card(_resolve_card_id(client, args.card_id, _active_board(config, args)))
 
 
 def _cmd_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -1915,7 +2126,7 @@ def _cmd_create(client: PandanClient, config: Config, args: argparse.Namespace) 
         column=args.column,
         story_points=args.points,
         assignee=args.assignee,
-        epic_id=_resolve_epic_opt(client, args.epic),
+        epic_id=_resolve_epic_opt(client, args.epic, _active_board(config, args)),
         cycle_id=args.cycle,
         priority=args.priority,
         due_date=args.due,
@@ -1925,12 +2136,12 @@ def _cmd_create(client: PandanClient, config: Config, args: argparse.Namespace) 
 
 def _cmd_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.update_card(
-        _resolve_card_id(client, args.card_id),
+        _resolve_card_id(client, args.card_id, _active_board(config, args)),
         title=args.title,
         description=args.description,
         story_points=args.points,
         assignee=args.assignee,
-        epic_id=_resolve_epic_opt(client, args.epic),
+        epic_id=_resolve_epic_opt(client, args.epic, _active_board(config, args)),
         cycle_id=args.cycle,
         priority=args.priority,
         due_date=args.due,
@@ -1940,7 +2151,9 @@ def _cmd_update(client: PandanClient, config: Config, args: argparse.Namespace) 
 
 def _cmd_move(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.move_card(
-        _resolve_card_id(client, args.card_id), args.column, position=args.position
+        _resolve_card_id(client, args.card_id, _active_board(config, args)),
+        args.column,
+        position=args.position,
     )
 
 
@@ -1951,7 +2164,7 @@ def _cmd_delete(client: PandanClient, config: Config, args: argparse.Namespace) 
             code="confirmation_required",
             arg="--yes",
         )
-    return client.delete_card(_resolve_card_id(client, args.card_id))
+    return client.delete_card(_resolve_card_id(client, args.card_id, _active_board(config, args)))
 
 
 def _cmd_next(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -1982,17 +2195,20 @@ def _cmd_claim(client: PandanClient, config: Config, args: argparse.Namespace) -
     the shared client's ``claim_card`` PATCHes the assignee it is handed, and the
     board API has no "the caller" default on that path (only ``dispatch`` does, which
     is what ``next --claim`` uses). Not transactional — see the client's docstring."""
-    return client.claim_card(_resolve_card_id(client, args.card_id), args.assignee)
+    return client.claim_card(
+        _resolve_card_id(client, args.card_id, _active_board(config, args)), args.assignee
+    )
 
 
 def _cmd_needs_human(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.flag_needs_human(
-        _resolve_card_id(client, args.card_id), attention_note=args.note
+        _resolve_card_id(client, args.card_id, _active_board(config, args)),
+        attention_note=args.note,
     )
 
 
 def _cmd_resolve(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.resolve_card(_resolve_card_id(client, args.card_id))
+    return client.resolve_card(_resolve_card_id(client, args.card_id, _active_board(config, args)))
 
 
 def _cmd_metrics(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -2175,7 +2391,7 @@ def _cmd_epic_get(client: PandanClient, config: Config, args: argparse.Namespace
     """Read a single epic by id or ``EPIC-<n>`` (KAN-502). A verb gap rather than a
     capability gap — ``epic list`` could already show it — but ``get_epic`` had no
     twin, and the one-epic read is what an agent following a card's ``epic_id`` wants."""
-    return client.get_epic(_resolve_epic_id(client, args.epic_id))
+    return client.get_epic(_resolve_epic_id(client, args.epic_id, _active_board(config, args)))
 
 
 def _cmd_epic_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -2190,7 +2406,7 @@ def _cmd_epic_create(client: PandanClient, config: Config, args: argparse.Namesp
 
 def _cmd_epic_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.update_epic(
-        _resolve_epic_id(client, args.epic_id),
+        _resolve_epic_id(client, args.epic_id, _active_board(config, args)),
         name=args.name,
         description=args.description,
         target_date=args.target_date,
@@ -2205,7 +2421,7 @@ def _cmd_epic_delete(client: PandanClient, config: Config, args: argparse.Namesp
             code="confirmation_required",
             arg="--yes",
         )
-    return client.delete_epic(_resolve_epic_id(client, args.epic_id))
+    return client.delete_epic(_resolve_epic_id(client, args.epic_id, _active_board(config, args)))
 
 
 # --- label handlers ---------------------------------------------------------
@@ -2267,7 +2483,9 @@ def _cmd_label_delete(client: PandanClient, config: Config, args: argparse.Names
 # stored query (the filter+sort grammar), so a view is "the current list, saved".
 
 
-def _build_view_query(client: PandanClient, args: argparse.Namespace) -> dict[str, Any]:
+def _build_view_query(
+    client: PandanClient, config: Config, args: argparse.Namespace
+) -> dict[str, Any]:
     """Assemble a saved view's stored query (the filter+sort grammar) from the
     list-style flags — only the ones the caller set. Field names match the GET
     /cards params exactly, so the stored query replays verbatim. ``--epic`` accepts
@@ -2276,7 +2494,7 @@ def _build_view_query(client: PandanClient, args: argparse.Namespace) -> dict[st
     if args.column:
         query["column"] = args.column
     if args.epic is not None:
-        query["epic_id"] = _resolve_epic_id(client, args.epic)
+        query["epic_id"] = _resolve_epic_id(client, args.epic, _active_board(config, args))
     if args.priority:
         query["priority"] = args.priority
     if args.label is not None:
@@ -2311,7 +2529,7 @@ def _cmd_view_list(client: PandanClient, config: Config, args: argparse.Namespac
 
 def _cmd_view_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_view(
-        _require_view_board(args, config), args.name, _build_view_query(client, args)
+        _require_view_board(args, config), args.name, _build_view_query(client, config, args)
     )
 
 
@@ -2504,37 +2722,41 @@ def _link_facet(card: dict[str, Any], card_id: int) -> dict[str, Any]:
 
 
 def _cmd_dep_add(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    card_id = _resolve_card_id(client, args.card_id)
-    blocker_id = _resolve_card_id(client, args.blocked_by)
+    card_id = _resolve_card_id(client, args.card_id, _active_board(config, args))
+    blocker_id = _resolve_card_id(client, args.blocked_by, _active_board(config, args))
     return _dep_facet(client.add_dependency(card_id, blocker_id), card_id)
 
 
 def _cmd_dep_rm(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    card_id = _resolve_card_id(client, args.card_id)
-    blocker_id = _resolve_card_id(client, args.blocked_by)
+    card_id = _resolve_card_id(client, args.card_id, _active_board(config, args))
+    blocker_id = _resolve_card_id(client, args.blocked_by, _active_board(config, args))
     return _dep_facet(client.remove_dependency(card_id, blocker_id), card_id)
 
 
 def _cmd_dep_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.list_dependencies(_resolve_card_id(client, args.card_id))
+    return client.list_dependencies(
+        _resolve_card_id(client, args.card_id, _active_board(config, args))
+    )
 
 
 def _cmd_link_add(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    card_id = _resolve_card_id(client, args.card_id)
+    card_id = _resolve_card_id(client, args.card_id, _active_board(config, args))
     return _link_facet(client.add_link(card_id, args.label, args.url), card_id)
 
 
 def _cmd_link_rm(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    card_id = _resolve_card_id(client, args.card_id)
+    card_id = _resolve_card_id(client, args.card_id, _active_board(config, args))
     return _link_facet(client.remove_link(card_id, args.link_id), card_id)
 
 
 def _cmd_comment_add(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.add_comment(_resolve_card_id(client, args.card_id), args.body)
+    return client.add_comment(
+        _resolve_card_id(client, args.card_id, _active_board(config, args)), args.body
+    )
 
 
 def _cmd_comment_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.list_comments(_resolve_card_id(client, args.card_id))
+    return client.list_comments(_resolve_card_id(client, args.card_id, _active_board(config, args)))
 
 
 # --- who am I (KAN-614) -----------------------------------------------------

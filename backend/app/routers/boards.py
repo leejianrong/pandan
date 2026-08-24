@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -116,7 +117,25 @@ def list_boards(
         board.role = (
             "owner" if board.owner_id == principal.id else member_roles.get(board.id)
         )
+    _attach_owner_emails(db, boards)
     return boards
+
+
+def _attach_owner_emails(db: Session, boards: Sequence[Board]) -> None:
+    """Populate the transient ``owner_email`` on each board (V53, KAN-974).
+
+    One query for the owners involved, so a list of N boards costs a single
+    round-trip no matter how many distinct owners it spans (mirrors the card router's
+    ``_attach_labels``). An unclaimed board (``owner_id`` NULL) gets ``None``.
+    """
+    owner_ids = {b.owner_id for b in boards if b.owner_id is not None}
+    emails: dict = {}
+    if owner_ids:
+        emails = dict(
+            db.execute(select(User.id, User.email).where(User.id.in_(owner_ids))).all()
+        )
+    for board in boards:
+        board.owner_email = emails.get(board.owner_id)
 
 
 def _owner_keys(
@@ -199,6 +218,7 @@ def create_board(
         summary=f"created board {board.name}",
     )
     db.commit()
+    _attach_owner_emails(db, [board])
     return board
 
 
@@ -208,7 +228,9 @@ def get_board(
     db: Session = Depends(get_db),
     principal: User = Depends(get_principal),
 ) -> Board:
-    return authorize_board(db, principal, board_id, Access.READ)
+    board = authorize_board(db, principal, board_id, Access.READ)
+    _attach_owner_emails(db, [board])
+    return board
 
 
 @router.patch("/{board_id}", response_model=BoardRead)
@@ -244,6 +266,7 @@ def update_board(
     )
     db.commit()  # updated_at bumped server-side via onupdate
     db.refresh(board)
+    _attach_owner_emails(db, [board])
     return board
 
 

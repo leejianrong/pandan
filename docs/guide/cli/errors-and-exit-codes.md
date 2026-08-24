@@ -91,6 +91,32 @@ $ echo $?
     You never have to merge streams with `2>&1` to catch an error. Deprecation notices are the only
     thing written to stderr, so stdout stays parseable.
 
+### `ambiguous_ref` — when a board-local reference could mean two things
+
+A board key is unique among *your* boards, not everybody's, so `ENG-14` can name a different card for
+two different people. If you can see two `ENG` boards and have not said which you mean, pandan will
+not choose for you:
+
+```console
+$ pandan get ENG-14
+error	ambiguous_ref	ENG-14 matches 2 accessible boards: board 5 ENG 'Engineering' (alice@corp.com) → KAN-955; board 6 ENG 'Engine Room' (you) → KAN-207. Use the canonical ticket, or pass --board <id> with ENG-14	ENG-14
+$ echo $?
+1
+```
+
+It is a menu rather than a refusal: every candidate is named with its board, its owner and the card's
+own `KAN-…` ticket, so the next command is something you can copy rather than guess. Any of these
+works:
+
+```bash
+pandan get KAN-207                 # the canonical ticket resolves from anywhere
+pandan --board 6 get ENG-14        # name the board for this call
+pandan get alice/ENG-14            # qualify by the board's owner
+```
+
+Setting `PANDAN_BOARD_ID` removes the question entirely, which is why most people never see this: with
+an active board, a board-local reference resolves against it.
+
 ## Structured errors
 
 Under `--format json` the same failure comes back as an object:

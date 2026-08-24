@@ -19,7 +19,6 @@ boards. See :mod:`app.authz`.
 """
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import datetime
@@ -31,7 +30,7 @@ from sqlalchemy.orm import Session, aliased
 from ..activity import record_activity
 from ..auth_models import User
 from ..authz import Access, authorize_board, get_principal, visible_board_ids
-from ..board_seq import allocate_card_seqs, card_ref
+from ..board_seq import allocate_card_seqs, card_ref, parse_ref
 from ..card_query import sort_order_by
 from ..db import get_db
 from ..models import (
@@ -75,11 +74,19 @@ router = APIRouter(prefix="/cards", tags=["cards"])
 # and the SPA depends on that shape; ``X-Next-Cursor`` set the same precedent.
 UNRESOLVED_HEADER = "X-Unresolved-Selectors"
 
-# A ticket ref as the CLI displays it. Both prefixes parse, because a well-formed
-# ``EPIC-3`` is a real ticket that simply is not a card — that is an *unresolved*
-# selector (reported), not malformed input (rejected). Anything else is a client
-# bug and 422s.
-_TICKET_RE = re.compile(r"^(KAN|EPIC)-\d+$", re.IGNORECASE)
+# A reference as the CLI displays it. Three forms parse (V53, KAN-974):
+#
+#   KAN-12   canonical, global      → resolves from anywhere
+#   EPIC-3   canonical, global      → a real ticket that is not a card
+#   ENG-14   board-local            → needs ``board_id`` (SHAPING D3)
+#   ENG-E7   board-local, an epic   → parses, is not a card
+#
+# The two canonical prefixes and the epic forms all parse rather than 422, because a
+# well-formed reference to something that is not a card is an *unresolved* selector
+# (reported in the header), not malformed input (rejected). Anything that is not a
+# reference at all is a client bug and 422s.
+#
+# Parsing lives in :mod:`app.board_seq` so the one grammar serves every call site.
 
 
 def _split_selectors(raw: str, *, param: str) -> list[str]:
@@ -108,17 +115,34 @@ def _split_selectors(raw: str, *, param: str) -> list[str]:
 
 
 def _parse_card_selectors(
-    ids: str | None, refs: str | None
-) -> tuple[list[str], list[int], list[str]]:
-    """Parse ``ids``/``refs`` into (original tokens, numeric ids, ticket refs).
+    ids: str | None, refs: str | None, board_id: int | None
+) -> tuple[list[str], list[int], list[str], list[int]]:
+    """Parse ``ids``/``refs`` into (original tokens, numeric ids, canonical tickets,
+    board-local card numbers).
 
     Malformed input 422s rather than silently resolving to nothing: ``ids=abc`` is a
     client bug, and reporting it as "unresolved" would let a broken caller look like
     one asking about a deleted card.
+
+    **A board-local ref requires ``board_id``** (V53, KAN-974). That is not a
+    limitation of this endpoint, it is what "board-local" means: keys are unique per
+    *owner* (ADR 0020), so ``ENG-14`` can name a different card for two different
+    people and is only decidable inside a known board (SHAPING D3). The alternatives
+    were worse — resolving across every visible board would silently return two cards
+    for one selector, and failing the whole request on one ambiguous selector would
+    contradict this endpoint's own design, where a selector that misses is *reported*
+    rather than fatal. Requiring the board is the only answer that is neither. A
+    caller with no board in mind has the canonical ``KAN-955``, which is exactly what
+    it is for.
+
+    An owner-qualified ``alice/ENG-14`` also 422s here: with ``board_id`` given the
+    owner is already determined, so the qualifier can only agree redundantly or
+    contradict, and neither is worth a code path.
     """
     tokens: list[str] = []
     numeric: list[int] = []
     tickets: list[str] = []
+    local_seqs: list[int] = []
 
     if ids is not None:
         for token in _split_selectors(ids, param="ids"):
@@ -132,13 +156,39 @@ def _parse_card_selectors(
 
     if refs is not None:
         for token in _split_selectors(refs, param="refs"):
-            if not _TICKET_RE.match(token):
+            parsed = parse_ref(token)
+            if parsed is None:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail=f"refs must be tickets like 'KAN-12', got {token!r}",
+                    detail=(
+                        f"refs must be references like 'KAN-12' or 'ENG-14', "
+                        f"got {token!r}"
+                    ),
+                )
+            if parsed.owner is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=(
+                        f"an owner-qualified ref is not accepted here, got {token!r} "
+                        "— board_id already determines the owner"
+                    ),
+                )
+            if not parsed.canonical and board_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=(
+                        f"{token!r} is a board-local ref, which resolves only within "
+                        "a known board — pass board_id, or use the canonical "
+                        "'KAN-<n>' form"
+                    ),
                 )
             tokens.append(token)
-            tickets.append(token.upper())
+            if parsed.canonical:
+                tickets.append(token.upper())
+            elif parsed.entity == "card":
+                local_seqs.append(parsed.number)
+            # A board-local *epic* ref (``ENG-E7``) parses and matches no card, so it
+            # falls through to the unresolved report — exactly like ``EPIC-3``.
 
     # Capped, and a documented 422 rather than a silent truncation — a caller that
     # asked for 150 refs and got 100 cards has no way to tell that from 50 misses.
@@ -150,7 +200,7 @@ def _parse_card_selectors(
                 "Split the read into batches."
             ),
         )
-    return tokens, numeric, tickets
+    return tokens, numeric, tickets, local_seqs
 
 
 def _unresolved_selectors(tokens: Sequence[str], cards: Sequence[Card]) -> list[str]:
@@ -161,14 +211,16 @@ def _unresolved_selectors(tokens: Sequence[str], cards: Sequence[Card]) -> list[
     board the caller cannot see. Deliberately *not* distinguished — telling an
     outsider "that id exists but is not yours" would leak the row's existence, which
     is exactly what the owner-scoping in the query is there to prevent.
+
+    A board-local selector is matched against the card's rendered ``ref`` (V53), which
+    is why the caller attaches refs **before** calling this. Doing it the other way —
+    re-deriving the expected ref here — would put a second copy of the rendering rule
+    one function away from the first.
     """
     found_ids = {str(card.id) for card in cards}
-    found_tickets = {card.ticket_number.upper() for card in cards}
-    return [
-        token
-        for token in tokens
-        if token not in found_ids and token.upper() not in found_tickets
-    ]
+    found = {card.ticket_number.upper() for card in cards}
+    found |= {card.ref.upper() for card in cards if getattr(card, "ref", None)}
+    return [token for token in tokens if token not in found_ids and token.upper() not in found]
 
 
 def _get_or_404(db: Session, card_id: int) -> Card:
@@ -531,9 +583,15 @@ def list_cards(
     selector_tokens: list[str] = []
     selector_ids: list[int] = []
     selector_refs: list[str] = []
+    selector_local_seqs: list[int] = []
     batch_read = ids is not None or refs is not None
     if batch_read:
-        selector_tokens, selector_ids, selector_refs = _parse_card_selectors(ids, refs)
+        (
+            selector_tokens,
+            selector_ids,
+            selector_refs,
+            selector_local_seqs,
+        ) = _parse_card_selectors(ids, refs, board_id)
         # Pagination would corrupt the unresolved report: a page cut short leaves
         # real, visible cards looking like misses, and the caller cannot tell the
         # difference. The selector list is already capped, so paging it is
@@ -575,9 +633,20 @@ def list_cards(
         # AND-ed with every other filter and with the owner-scoping above — so a
         # selector for a board you cannot see resolves to nothing and is reported as
         # unresolved, never as a 403 that would confirm the row exists.
-        query = query.where(
-            or_(Card.id.in_(selector_ids), Card.ticket_number.in_(selector_refs))
-        )
+        # OR across the selector kinds (a card matches by id, canonical ticket *or*
+        # board-local number), AND-ed with every other filter and with the
+        # owner-scoping above. A board-local number is only reachable here when
+        # ``board_id`` was given (the parser enforces that), and the ``board_id``
+        # filter above has already narrowed to that board — so ``board_seq`` needs no
+        # further qualification, and a number belonging to some other board can never
+        # leak in.
+        selector_predicates = [
+            Card.id.in_(selector_ids),
+            Card.ticket_number.in_(selector_refs),
+        ]
+        if selector_local_seqs:
+            selector_predicates.append(Card.board_seq.in_(selector_local_seqs))
+        query = query.where(or_(*selector_predicates))
     if column is not None:
         query = query.where(Card.column == column.value)
     if epic_id is not None:
@@ -684,12 +753,15 @@ def list_cards(
     # Name the selectors that came back with nothing (issue #254). Emitted only when
     # something actually missed, so its presence is the signal — a caller can treat
     # "header absent" as "you got everything you asked for" without parsing it.
+    _attach_dependencies(db, cards)
+
     if batch_read:
+        # After the attach, so a board-local selector can be matched against the
+        # card's own rendered ``ref`` rather than a second copy of the rule.
         missing = _unresolved_selectors(selector_tokens, cards)
         if missing:
             response.headers[UNRESOLVED_HEADER] = ",".join(missing)
 
-    _attach_dependencies(db, cards)
     return cards
 
 

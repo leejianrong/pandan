@@ -648,6 +648,19 @@ class BoardRead(BaseModel):
     # list router (not an ORM column), mirroring MemberRead.email; the switcher
     # uses it to badge shared boards. Null when the router doesn't compute it.
     role: RoleEnum | None = None
+    # The board owner's email (V53, KAN-974), attached transiently like ``role``.
+    # Null for an unclaimed board, and null when the router doesn't compute it.
+    #
+    # It exists because a board key is unique per *owner*, so a viewer who can see
+    # two `ENG` boards needs the owner to tell them apart — that is the
+    # ``alice/ENG-14`` qualifier V53 resolves and V54 prints, and neither is possible
+    # from ``owner_id`` alone (a UUID is not a handle a human types).
+    #
+    # **The privacy question, answered rather than assumed:** every board a caller can
+    # read is one they own or are a member of, and ``MemberRead.email`` already shows
+    # a board's members their addresses. So this exposes nothing that co-membership
+    # did not already expose. It is not on any unauthenticated or cross-board path.
+    owner_email: str | None = None
     created_at: datetime
     updated_at: datetime
 
