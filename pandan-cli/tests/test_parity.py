@@ -213,7 +213,7 @@ MCP_ONLY: dict[str, str] = {}
 CLI_ONLY: dict[tuple[str, ...], str] = {
     ("overview",): "the CLI's content-first bare invocation (V46) — board state, no new capability",
     ("login",): "writes the local config file; a PAT never travels over MCP",
-    # Reason 2 — declined tools, not missing ones. Two instances.
+    # Reason 2 — declined tools, not missing ones. Three instances.
     ("me",): (
         "reason 2 (KAN-614): `GET /api/v1/me` IS a board API call, so this is a "
         "declined tool and not a missing one. No `me` tool is added because ADR 0019 "
@@ -230,6 +230,20 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
         "agent. What an agent actually does with labels is attach them, via `label_ids` "
         "on create_card/update_card, which is unchanged. Re-opening this is an ADR 0019 "
         "amendment, not an edit here."
+    ),
+    ("cycle", "update"): (
+        "reason 2 (KAN-976): `PATCH /boards/{b}/cycles/{id}` IS a board API call, so "
+        "this is a declined tool and not a missing one. ADR 0019 freezes the MCP "
+        "surface at 49 and `mcp/tests/test_schema.py` pins it by name and count, so a "
+        "50th tool is an amendment — and V55 is a bug fix, which is not the change "
+        "that should be spending an ADR. Stated honestly, the agent case here is "
+        "stronger than it was for `label update`: agents do drive cycles. What it is "
+        "not is *blocked* — the MCP surface is already CRUD-lite on cycles by design "
+        "(list/create/delete/metrics, no get), the CLI is an agent's primary interface "
+        "per the packaged skill, and the cycle mutation an agent makes most often "
+        "(assigning a card) goes through `update_card(cycle_id=...)`, untouched. If "
+        "`update_cycle` is wanted on MCP, that is an ADR 0019 amendment naming it, not "
+        "an edit here."
     ),
     ("config", "set"): "local config file",
     ("config", "unset"): "local config file (issue #277)",

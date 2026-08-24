@@ -162,3 +162,102 @@ def test_non_member_cannot_touch_a_board_cycle(client, login_as):
 def test_cycles_on_unknown_board_is_404(client):
     assert client.get(_cycles(9999)).status_code == 404
     assert client.post(_cycles(9999), json={"name": "x"}).status_code == 404
+
+
+# --- PATCH: the non-destructive edit (V55, KAN-976) -------------------------
+
+
+def test_update_cycle_renames_and_recorrects_bounds(client):
+    cycle = client.post(
+        _cycles(1),
+        json={
+            "name": "Sprint 1",
+            "starts_on": "2026-01-01T00:00:00Z",
+            "ends_on": "2026-01-14T00:00:00Z",
+        },
+    ).json()
+
+    r = client.patch(
+        f"{_cycles(1)}/{cycle['id']}",
+        json={"name": "Sprint 12", "ends_on": "2026-09-05T00:00:00Z"},
+    )
+    assert r.status_code == 200
+    updated = r.json()
+    assert updated["id"] == cycle["id"]
+    assert updated["name"] == "Sprint 12"
+    assert updated["ends_on"].startswith("2026-09-05")
+    # Unsent fields are untouched (exclude_unset), not reset to null.
+    assert updated["starts_on"] == cycle["starts_on"]
+
+    assert client.get(f"{_cycles(1)}/{cycle['id']}").json()["name"] == "Sprint 12"
+
+
+def test_update_cycle_keeps_its_cards(client):
+    """The reason the endpoint exists. Before V55 the only way to fix a cycle's
+    name was delete-and-recreate, which detaches every story in it."""
+    cycle = client.post(_cycles(1), json={"name": "typo"}).json()
+    card = _create_card(client, title="story", cycle_id=cycle["id"])
+
+    client.patch(f"{_cycles(1)}/{cycle['id']}", json={"name": "fixed"})
+
+    assert client.get(f"{CARDS}/{card['id']}").json()["cycle_id"] == cycle["id"]
+    listed = client.get(f"{CARDS}?cycle_id={cycle['id']}").json()
+    assert [c["id"] for c in listed] == [card["id"]]
+
+
+def test_update_cycle_can_unschedule_bounds(client):
+    """``starts_on``/``ends_on`` are genuinely nullable — a cycle with no bounds is
+    already valid (create makes both optional), so an explicit null means unschedule."""
+    cycle = client.post(
+        _cycles(1),
+        json={
+            "name": "Sprint 1",
+            "starts_on": "2026-01-01T00:00:00Z",
+            "ends_on": "2026-01-14T00:00:00Z",
+        },
+    ).json()
+    updated = client.patch(
+        f"{_cycles(1)}/{cycle['id']}", json={"starts_on": None, "ends_on": None}
+    ).json()
+    assert updated["starts_on"] is None
+    assert updated["ends_on"] is None
+    assert updated["name"] == "Sprint 1"
+
+
+def test_update_cycle_empty_body_is_a_noop(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    r = client.patch(f"{_cycles(1)}/{cycle['id']}", json={})
+    assert r.status_code == 200
+    assert r.json()["name"] == "Sprint 1"
+
+
+def test_update_cycle_rejects_null_or_blank_name(client):
+    """``name`` is not clearable. A null must be a clean 422 and not a NOT NULL
+    violation at COMMIT — the trap LabelUpdate documents (V61)."""
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    assert (
+        client.patch(f"{_cycles(1)}/{cycle['id']}", json={"name": None}).status_code
+        == 422
+    )
+    assert (
+        client.patch(f"{_cycles(1)}/{cycle['id']}", json={"name": "  "}).status_code
+        == 422
+    )
+    assert client.get(f"{_cycles(1)}/{cycle['id']}").json()["name"] == "Sprint 1"
+
+
+def test_update_missing_or_cross_board_cycle_is_404(client):
+    other = client.post("/api/v1/boards", json={"name": "Other"}).json()
+    cycle = client.post(_cycles(1), json={"name": "on-1"}).json()
+    assert client.patch(f"{_cycles(1)}/9999", json={"name": "x"}).status_code == 404
+    r = client.patch(f"{_cycles(other['id'])}/{cycle['id']}", json={"name": "x"})
+    assert r.status_code == 404
+    assert client.get(f"{_cycles(1)}/{cycle['id']}").json()["name"] == "on-1"
+
+
+def test_non_member_cannot_update_a_cycle(client, login_as):
+    cycle = client.post(_cycles(1), json={"name": "private"}).json()
+    stranger = login_as("stranger2@example.com", "gh-stranger2")
+    r = stranger.patch(f"{_cycles(1)}/{cycle['id']}", json={"name": "mine now"})
+    assert r.status_code == 403
+    assert client.get(f"{_cycles(1)}/{cycle['id']}").json()["name"] == "private"

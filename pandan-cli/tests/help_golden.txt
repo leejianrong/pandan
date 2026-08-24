@@ -26,7 +26,7 @@ positional arguments:
     epic          manage epics (list / get / create / update / delete)
     label         manage labels (list / create / update / delete)
     view          manage saved views (list / create / delete)
-    cycle         manage cycles / iterations (list / create / delete)
+    cycle         manage cycles / iterations (list / create / update / delete)
     batch-create  create several cards in one call (JSON array; fail-fast, NOT
                   atomic)
     batch-update  atomically PATCH several cards (JSON array of {id,

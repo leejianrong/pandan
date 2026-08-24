@@ -2336,6 +2336,28 @@ def _cmd_cycle_create(client: PandanClient, config: Config, args: argparse.Names
     )
 
 
+def _cmd_cycle_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """Rename a cycle / correct its bounds (V55, KAN-976).
+
+    The `label update` shape (KAN-982): a PATCH with nothing set is a server-side
+    no-op, so refuse it here rather than let a command silently do nothing. Clearing
+    a bound is not offered — ``_clean`` drops a ``None``, which is the convention
+    every other update verb here follows (`epic update --target-date` included)."""
+    if args.name is None and args.starts_on is None and args.ends_on is None:
+        raise CliError(
+            "nothing to update; pass --name, --starts-on and/or --ends-on",
+            code="nothing_to_update",
+            arg="--name/--starts-on/--ends-on",
+        )
+    return client.update_cycle(
+        _require_view_board(args, config),
+        args.cycle_id,
+        name=args.name,
+        starts_on=args.starts_on,
+        ends_on=args.ends_on,
+    )
+
+
 def _cmd_cycle_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
         raise CliError(
@@ -3458,7 +3480,9 @@ def build_parser() -> argparse.ArgumentParser:
     # --- cycle subcommands (V33 / KAN-297): board iterations ----------------
     # Board-scoped, named iterations. Assign a card to one with
     # `pandan update <card> --cycle <id>`; filter with `pandan list --cycle <id>`.
-    p_cycle = sub.add_parser("cycle", help="manage cycles / iterations (list / create / delete)")
+    p_cycle = sub.add_parser(
+        "cycle", help="manage cycles / iterations (list / create / update / delete)"
+    )
     cycle_sub = p_cycle.add_subparsers(
         dest="cycle_command", metavar="<subcommand>", required=True
     )
@@ -3480,6 +3504,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="iteration end (ISO-8601 timestamp)",
     )
     p_cycle_create.set_defaults(func=_cmd_cycle_create, noun="cycle")
+
+    p_cycle_update = cycle_sub.add_parser(
+        "update", parents=[common], help="rename a cycle or correct its dates"
+    )
+    p_cycle_update.add_argument("cycle_id", type=int)
+    p_cycle_update.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_cycle_update.add_argument("--name", help="new cycle name")
+    p_cycle_update.add_argument(
+        "--starts-on", dest="starts_on", metavar="ISO",
+        help="new start of the iteration (ISO-8601 timestamp)",
+    )
+    p_cycle_update.add_argument(
+        "--ends-on", dest="ends_on", metavar="ISO",
+        help="new end of the iteration (ISO-8601 timestamp)",
+    )
+    p_cycle_update.set_defaults(func=_cmd_cycle_update, noun="cycle")
 
     p_cycle_delete = cycle_sub.add_parser("delete", parents=[common], help="delete a cycle")
     p_cycle_delete.add_argument("cycle_id", type=int)

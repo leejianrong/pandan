@@ -104,6 +104,15 @@ pandan create "Ship the docs" --cycle 3
 pandan list --cycle 3
 ```
 
+Got the name or a date wrong? Fix it in place — the cycle keeps every card assigned to it:
+
+```bash
+pandan cycle update 3 --name "Sprint 12 (extended)" --ends-on 2026-09-05
+```
+
+Deleting a cycle is the destructive option: the cards survive, but each one is detached from the
+cycle, so a delete-and-recreate loses the membership you built up.
+
 A card belongs to zero or one cycle, the same way it belongs to zero or one epic. The two are
 independent: a card can be in Sprint 12 and under the Onboarding epic at once, which is usually what you
 want, because an epic spans cycles.

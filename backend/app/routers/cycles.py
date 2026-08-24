@@ -9,6 +9,7 @@ mirroring the flat structure of the saved-views / card-templates routers
 - POST   /boards/{board_id}/cycles                    — create a cycle (editor+)
 - GET    /boards/{board_id}/cycles/{cycle_id}         — read one cycle (viewer+)
 - GET    /boards/{board_id}/cycles/{cycle_id}/metrics — burndown/velocity (viewer+, V34)
+- PATCH  /boards/{board_id}/cycles/{cycle_id}         — edit a cycle (editor+, V55)
 - DELETE /boards/{board_id}/cycles/{cycle_id}         — delete a cycle (editor+)
 
 Every cycle is addressed under its board (``/boards/{id}/cycles``); the board
@@ -17,6 +18,11 @@ cycle whose ``board_id`` doesn't match the path board **404s** — so a cross-bo
 id is never reachable through another board you happen to own. Deleting a cycle
 detaches its stories (``card.cycle_id`` is ``ON DELETE SET NULL``), it never
 cascades them away.
+
+**PATCH arrived late (V55, KAN-976)**, exactly as it did for labels in V61: cycles
+shipped in V33 with create/list/get/metrics/delete and no edit, so a mistyped date
+or name could only be fixed by delete-and-recreate — which detaches every card in
+the cycle. This is the non-destructive edit; membership is untouched by it.
 """
 from __future__ import annotations
 
@@ -31,7 +37,7 @@ from ..authz import Access, authorize_board, get_principal
 from ..db import get_db
 from ..metrics import compute_cycle_metrics, move_target
 from ..models import Activity, Card, Cycle
-from ..schemas import CycleCreate, CycleMetricsRead, CycleRead
+from ..schemas import CycleCreate, CycleMetricsRead, CycleRead, CycleUpdate
 
 router = APIRouter(tags=["cycles"])
 
@@ -181,6 +187,40 @@ def cycle_metrics(
         ends_on=cycle.ends_on,
         **metrics,
     )
+
+
+@router.patch("/boards/{board_id}/cycles/{cycle_id}", response_model=CycleRead)
+def update_cycle(
+    board_id: int,
+    cycle_id: int,
+    payload: CycleUpdate,
+    db: Session = Depends(get_db),
+    principal: User = Depends(get_principal),
+) -> Cycle:
+    """Rename a cycle and/or correct its bounds (editor or above on its board).
+
+    Only the fields actually sent are applied (``exclude_unset``), so a PATCH
+    carrying just ``ends_on`` leaves the name alone. An empty body is a no-op that
+    returns the cycle unchanged rather than an error — a PATCH with nothing to
+    change has already achieved it.
+
+    ``starts_on``/``ends_on`` accept an explicit ``null`` to *unschedule* the cycle;
+    ``name`` does not (see :class:`~app.schemas.CycleUpdate`). **404** if the cycle
+    doesn't exist or isn't on this board — the same ``_get_cycle_or_404`` every other
+    route here uses, so a cross-board id stays unreachable through a board you own;
+    **403** if the board isn't yours.
+
+    **The cycle keeps its cards.** That is the whole point of the endpoint: the only
+    previous way to fix a cycle was to delete it, and deleting detaches every story
+    assigned to it. Nothing here touches ``card.cycle_id``.
+    """
+    authorize_board(db, principal, board_id, Access.WRITE)
+    cycle = _get_cycle_or_404(db, board_id, cycle_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(cycle, field, value)
+    db.commit()
+    db.refresh(cycle)
+    return cycle
 
 
 @router.delete(

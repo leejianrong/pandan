@@ -202,8 +202,12 @@ pandan view delete 2
 ```bash
 pandan cycle create "Sprint 12" --starts-on 2026-08-11 --ends-on 2026-08-25
 pandan cycle list
+pandan cycle update 3 --name "Sprint 12 (extended)" --ends-on 2026-09-05
 pandan create "Ship the docs" --cycle 3
 ```
+
+`cycle update` is a partial edit: pass only what changes, and the cycle keeps its cards. Deleting a
+cycle detaches them.
 
 ## Templates
 
