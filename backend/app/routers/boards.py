@@ -31,6 +31,7 @@ See :mod:`app.board_keys` for the shape, the reserved words and the derivation.
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -118,7 +119,9 @@ def list_boards(
     return boards
 
 
-def _owner_keys(db: Session, owner_id, *, excluding: int | None = None) -> set[str]:
+def _owner_keys(
+    db: Session, owner_id: uuid.UUID | None, *, excluding: int | None = None
+) -> set[str]:
     """The board keys already used by one owner (V51, KAN-972).
 
     Scoped to the owner because that is the scope of the uniqueness constraint
@@ -132,7 +135,13 @@ def _owner_keys(db: Session, owner_id, *, excluding: int | None = None) -> set[s
     return set(db.scalars(query).all())
 
 
-def _reject_taken_key(db: Session, owner_id, key: str, *, excluding: int | None = None) -> None:
+def _reject_taken_key(
+    db: Session,
+    owner_id: uuid.UUID | None,
+    key: str,
+    *,
+    excluding: int | None = None,
+) -> None:
     """409 if ``key`` is already used by this owner. Only ever called for a key the
     caller *named*: a derived key resolves a collision by suffixing instead."""
     if key in _owner_keys(db, owner_id, excluding=excluding):
