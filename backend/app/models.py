@@ -97,6 +97,16 @@ class Board(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # The short prefix a board-local ticket ref is built from — the ``ENG`` in
+    # ``ENG-14`` (M8 V51, KAN-972; ADR 0020). NOT NULL: V52 numbers every card and
+    # epic per board, and a board with no key could not render those refs at all.
+    # Derived from the name at create when the caller supplies none, so creating a
+    # board never blocks on naming (R1.4); see :mod:`app.board_keys`.
+    #
+    # Guarded like ``card.column`` is (ADR 0008) — a varchar plus a CHECK, not a
+    # native type — so the shape lives in the migration as well as in
+    # ``board_keys.BOARD_KEY_PATTERN`` and the Pydantic schemas.
+    key: Mapped[str] = mapped_column(String(10), nullable=False)
     # FK → user.id (a UUID). ON DELETE SET NULL: deleting a user unclaims their
     # boards rather than cascading away the boards + all their cards.
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -137,6 +147,23 @@ class Board(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        # Board keys are unique **per owner**, not globally (SHAPING D2, ADR 0020).
+        # Two users may each own an ``ENG``; at a hundred users a global namespace
+        # would have them fighting over it.
+        #
+        # ``owner_id`` is nullable (a board is unclaimed until someone takes it) and
+        # Postgres treats NULLs as distinct in a unique index, so unclaimed boards
+        # can never collide with each other and this needs no partial index. That is
+        # a property of the DB rather than of this design, which is why it is written
+        # down here.
+        UniqueConstraint("owner_id", "key", name="uq_board_owner_key"),
+        CheckConstraint(
+            "key ~ '^[A-Z][A-Z0-9]{1,9}$'",
+            name="ck_board_key_shape",
+        ),
     )
 
 

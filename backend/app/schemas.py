@@ -13,7 +13,34 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .board_keys import (
+    MAX_BOARD_KEY_LEN,
+    board_key_error,
+    is_reserved_board_key,
+    is_valid_board_key,
+    reserved_board_key_error,
+)
 from .palette import is_valid_label_color, label_color_error
+
+
+def _validate_board_key(v: str | None) -> str | None:
+    """Shared board-key field validator for :class:`BoardCreate` /
+    :class:`BoardUpdate` (V51, KAN-972).
+
+    Two *different* rejections, kept apart because they need different messages:
+    malformed (the shape) and reserved (it would shadow a canonical ticket prefix).
+    Uniqueness is deliberately **not** checked here — it needs the database and the
+    caller's identity, so it lives in the router as a ``409``, not a ``422``. A
+    schema cannot answer "is this taken", and pretending otherwise is how a
+    validation layer starts needing a session.
+    """
+    if v is None:
+        return None
+    if not is_valid_board_key(v):
+        raise ValueError(board_key_error())
+    if is_reserved_board_key(v):
+        raise ValueError(reserved_board_key_error(v))
+    return v
 
 # --- Payload hardening caps (V28, KAN-292) ---------------------------------
 # ``max_length`` bounds on the write contract so no single string field can carry an
@@ -490,10 +517,19 @@ class EpicTrashRead(EpicRead):
 
 
 class BoardCreate(BaseModel):
-    """Create a board (M3 V7, ADR 0012). Carries only a name; the owner is set
-    from the session, not the request body."""
+    """Create a board (M3 V7, ADR 0012). The owner is set from the session, not the
+    request body.
+
+    ``key`` (M8 V51, KAN-972) is the short prefix a board-local ticket ref is built
+    from — the ``ENG`` in ``ENG-14``. **Optional, and omitting it is the normal
+    case**: the router derives one from the name and suffixes on collision, because
+    creating a board must never block on naming (R1.4). Supplying one asks for that
+    exact key, so it is the only path that can fail — a malformed or reserved key is
+    a ``422`` here, and a key already used by this owner is a ``409`` in the router.
+    """
 
     name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
+    key: Annotated[str | None, Field(max_length=MAX_BOARD_KEY_LEN)] = None
 
     @field_validator("name")
     @classmethod
@@ -501,6 +537,11 @@ class BoardCreate(BaseModel):
         if not v.strip():
             raise ValueError("name must not be empty")
         return v
+
+    @field_validator("key")
+    @classmethod
+    def key_well_formed(cls, v: str | None) -> str | None:
+        return _validate_board_key(v)
 
 
 class BoardUpdate(BaseModel):
@@ -517,6 +558,7 @@ class BoardUpdate(BaseModel):
     ``BoardRead``). Send ``null`` for the url/secret to clear it."""
 
     name: Annotated[str | None, Field(max_length=MAX_NAME_LEN)] = None
+    key: Annotated[str | None, Field(max_length=MAX_BOARD_KEY_LEN)] = None
     autosync_enabled: bool | None = None
     autosync_advance_to_done: bool | None = None
     outbound_webhook_url: Annotated[str | None, Field(max_length=MAX_URL_LEN)] = None
@@ -540,6 +582,23 @@ class BoardUpdate(BaseModel):
             raise ValueError("must not be empty (send null to clear)")
         return v
 
+    @field_validator("key")
+    @classmethod
+    def key_well_formed(cls, v: str | None) -> str | None:
+        """A board key is **not clearable** — unlike the webhook fields above.
+
+        Every board has a key (the column is NOT NULL, because V52's board-local
+        refs cannot render without one), so ``null`` here can only mean "not sent".
+        Relying on the same Pydantic behaviour :class:`LabelUpdate` documents: a
+        field validator does not run for a field left at its default, so this fires
+        only when the key was really sent, which is what lets one optional field
+        mean "unchanged" while still refusing an explicit ``null``."""
+        if v is None:
+            raise ValueError(
+                "key must not be null; omit the field to leave it unchanged"
+            )
+        return _validate_board_key(v)
+
 
 class RoleEnum(str, Enum):
     viewer = "viewer"
@@ -552,6 +611,10 @@ class BoardRead(BaseModel):
 
     id: int
     name: str
+    # The board's short ref prefix (V51) — the ``ENG`` in ``ENG-14``. Unique per
+    # owner, not globally (ADR 0020), so this value alone does not identify a board
+    # across users; the canonical ``KAN-…`` ticket remains the cross-board address.
+    key: str
     # The owning user (UUID), or null for an unclaimed board (e.g. the migrated
     # default board). Server-enforced ownership checks arrive in V8.
     owner_id: uuid.UUID | None

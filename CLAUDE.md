@@ -31,7 +31,13 @@ maintainer: **EPIC-122** board-local ticket refs ([#280](https://github.com/leej
 **EPIC-124** epic + label colour ([#278](https://github.com/leejianrong/pandan/issues/278)). One theme:
 the board assumed one user with one board, and all three problems are that assumption breaking.
 **M8 is the first milestone since M6 to change the schema** — M7's no-API/no-schema/no-migration
-constraint expired with it — so five slices carry an additive migration and each lands alone.
+constraint expired with it — so five slices carry an additive migration and each lands alone. **Four
+slices have shipped**: V61 and V62 (label management UI + the measured seven-token palette), V55
+(`PATCH /cycles/{id}`, the edit a sprint never had) and **V51 — `board.key`, the head of the four-slice
+identity chain and the first M8 migration** ([ADR 0020](docs/adr/0020-board-keys.md)). Nothing renders
+a board-local ref yet, and that is deliberate: V52 adds the per-board numbers, V53 teaches every
+resolver both forms, and only V54 displays one, so a user never sees a reference something cannot
+parse.
 Two decisions are settled and load-bearing before anyone starts: **`card.ticket_number` is never
 touched** (the board-local `ENG-14` is added *beside* it, and the canonical `KAN-955` becomes the
 cross-board addressing mode), and **board keys are unique per owner**, which is exactly why a
@@ -48,9 +54,11 @@ CLI was ~11× cheaper. **That gap is now largely closed from the MCP side** (KAN
 the tokens measurably were take `fields` + `full`, worth **−82% across five real reads** for **+552
 resident tokens**. **KAN-517** then measured the nine reads KAN-501 left raw and extended exactly three
 more — `list_notifications` (an unpaginated inbox: 14,326 tokens over 127 rows), `list_boards` and
-`get_epic` — for a further +222. The resident figure is now **8,391**, and the number written here has
-drifted before — it read 8,162 while `main` measured 8,266, so **re-run the script rather than quoting
-this line** (the +125 of that gap is issue #254's `refs` argument, the rest predates it). The other six
+`get_epic` — for a further +222. The resident figure was written here as **8,391** and has since drifted
+twice more: on 2026-08-25 `main` measured **8,426** before M8 V51 and **8,641** after it (the `key`
+argument on `create_board`/`update_board`, +215). It also read 8,162 once while `main` measured 8,266.
+**Re-run the script rather than quoting this line** — three recorded drifts is enough to treat the
+number as an order of magnitude and nothing finer. The other six
 stay raw *on measurement*, at 7–474 tokens each: shaping a small payload is the opposite of the trade
 ADR 0019 endorsed, and a test pins them that way. That figure counts `{name, description, input_schema}` per
 tool; a `tools/list` entry also carries an **`outputSchema`** worth a further **836** compact if your
@@ -534,6 +542,13 @@ is nullable (`ON DELETE SET NULL`). These mechanisms matter and are load-bearing
   immutable, never reused: cards get `KAN-<n>` (`card_ticket_seq`), epics get `EPIC-<n>`
   (`epic_ticket_seq`). Independent — `KAN-1` and `EPIC-1` coexist. Sequences are created in the
   migrations, not by the ORM.
+- **`board.key`** (M8 V51, ADR 0020) is the short ref prefix a board-local `ENG-14` is built from —
+  `varchar(10)` + a shape `CHECK`, `UNIQUE(owner_id, key)`. **Per owner, not global**, which is exactly
+  why a board-local ref resolves only inside a known board and why the canonical `KAN-955` stays the
+  cross-board address. `owner_id` is nullable and Postgres treats NULLs as distinct in a unique index,
+  so unclaimed boards cannot collide and no partial index is needed. Derived from the name in
+  `app/board_keys.py` when the caller supplies none; a named key that is malformed or reserved is a
+  `422`, one already used by that owner a `409`.
 - **`column`** is a plain `varchar` guarded by a `CHECK` constraint (not a native PG enum), so
   adding a column value later needs no `ALTER TYPE` migration. Valid values live in three places
   that must stay in sync: `VALID_COLUMNS`/CHECK (models), `ColumnEnum` (schemas), `Column` (api.ts).
@@ -639,7 +654,7 @@ intended behavior:
 `SHAPING.md` (selects Shape A) → `BREADBOARD.md` (UI places & wiring) → build in slices.
 
 - **[docs/CONTEXT.md](docs/CONTEXT.md)** — canonical glossary and domain model. Use these terms exactly.
-- **[docs/adr/](docs/adr/)** (0001–0019; all Accepted except 0010, superseded) — the *why* behind each decision: monorepo &
+- **[docs/adr/](docs/adr/)** (0001–0020; all Accepted except 0010, superseded) — the *why* behind each decision: monorepo &
   stack (0001), Postgres+Alembic from day one (0002), single-artifact serving (0003), Fly.io+Neon
   CI/CD (0004), API-first/MCP-ready (0005), data model (0006), no-auth/LWW/no-realtime (0007),
   sync-SQLAlchemy + psycopg v3 + varchar-CHECK column + Vite dev-proxy (0008), epic as a first-class
@@ -667,4 +682,7 @@ intended behavior:
   have since landed** — payload shaping in KAN-501 and the four CLI gaps in KAN-502, which also pins
   parity **both ways** via `pandan-cli/tests/test_parity.py`. ADR 0019 still stands, because the
   single-exec-tool option needs a second precondition that remains unmet: the published ghcr image
-  carries no `pandan` binary to exec.
+  carries no `pandan` binary to exec. Newest is **board keys** — `board.key`, `^[A-Z][A-Z0-9]{1,9}$`,
+  unique **per owner** so two users can each hold `ENG`, with `KAN`/`EPIC` reserved and no hyphens
+  (which is what lets a ref split on its first one); derived at create so creation never blocks on
+  naming, and editable because nothing about a card is stored per key (0020, M8 V51).

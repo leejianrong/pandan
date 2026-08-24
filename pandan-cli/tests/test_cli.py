@@ -105,8 +105,8 @@ class FakeClient:
     def list_boards(self):
         return self._call("list_boards")
 
-    def create_board(self, name):
-        return self._call("create_board", name=name)
+    def create_board(self, name, **kw):
+        return self._call("create_board", name=name, **kw)
 
     def get_board(self, board_id):
         return self._call("get_board", board_id=board_id)
@@ -1353,7 +1353,46 @@ def test_board_list_calls_client(monkeypatch, env):
 def test_board_create_passes_name(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result=BOARD))
     assert cli.run(["board", "create", "Roadmap"]) == 0
-    assert fake.calls == [("create_board", {"name": "Roadmap"})]
+    # ``key`` rides along as None (V51): the server derives one, so the normal
+    # create is still a one-argument call from the user's point of view.
+    assert fake.calls == [("create_board", {"name": "Roadmap", "key": None})]
+
+
+def test_board_create_passes_an_explicit_key(monkeypatch, env):
+    """V51 / KAN-972. Naming the key is the path that can fail (409 if taken), which
+    is exactly why it has to reach the API rather than be derived over the top."""
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD))
+    assert cli.run(["board", "create", "Engineering", "--key", "ENG"]) == 0
+    assert fake.calls == [("create_board", {"name": "Engineering", "key": "ENG"})]
+
+
+def test_board_update_can_change_just_the_key(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    assert cli.run(["board", "update", "5", "--key", "PDN"]) == 0
+    sent = fake.calls[0][1]
+    assert sent["key"] == "PDN"
+    # Everything else arrives as None so the client's ``_clean`` drops it — a key
+    # change must not disturb the webhook trio or the autosync pair.
+    assert sent["name"] is None
+    assert all(
+        sent[field] is None
+        for field in (
+            "autosync_enabled",
+            "autosync_advance_to_done",
+            "outbound_webhook_url",
+            "outbound_webhook_secret",
+            "outbound_webhook_enabled",
+        )
+    )
+
+
+def test_board_update_with_only_a_key_is_not_nothing_to_update(monkeypatch, env, capsys):
+    """The no-op guard counts ``--key`` as something. Asserted because the guard is a
+    hand-maintained list of field names, and a new field that is not added to it turns
+    a working command into a usage error."""
+    patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
+    assert cli.run(["board", "update", "5", "--key", "PDN"]) == 0
+    assert "invalid_input" not in capsys.readouterr().out
 
 
 def test_board_list_human_output(monkeypatch, env, capsys):
@@ -1462,6 +1501,7 @@ def test_board_update_sends_only_the_flags_passed(monkeypatch, env):
         ("update_board", {
             "board_id": 5,
             "name": "Pandan Roadmap",
+            "key": None,
             "autosync_enabled": None,
             "autosync_advance_to_done": None,
             "outbound_webhook_url": None,
@@ -1484,6 +1524,7 @@ def test_board_update_carries_the_whole_outbound_webhook_trio(monkeypatch, env):
         ("update_board", {
             "board_id": 5,
             "name": None,
+            "key": None,
             "autosync_enabled": None,
             "autosync_advance_to_done": None,
             "outbound_webhook_url": "https://hooks.example/pandan",
@@ -1559,6 +1600,7 @@ def test_board_update_autosync_does_not_disturb_the_webhook_trio(monkeypatch, en
         ("update_board", {
             "board_id": 5,
             "name": None,
+            "key": None,
             "autosync_enabled": True,
             "autosync_advance_to_done": True,
             "outbound_webhook_url": None,
@@ -1569,14 +1611,16 @@ def test_board_update_autosync_does_not_disturb_the_webhook_trio(monkeypatch, en
 
 
 def test_board_update_covers_every_boardupdate_field(monkeypatch, env):
-    """The card's claim, asserted: `BoardUpdate` has **six** fields
-    (backend/app/schemas.py:436-443) and `pandan board update` now reaches all six in one
-    invocation. Counts on this project have been wrong before, so this pins the set by
-    name rather than by a number in a docstring."""
+    """The card's claim, asserted: `pandan board update` reaches every field of the
+    API's `BoardUpdate` in one invocation. The set is pinned **by name, not by a
+    number**, because counts on this project have been wrong before — and this test
+    has now earned that: V51 (KAN-972) added `key`, taking the set from six to seven,
+    and it was this assertion that said so rather than a stale docstring."""
     fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
     code = cli.run([
         "board", "update", "5",
         "--name", "Pandan Roadmap",
+        "--key", "PDN",
         "--autosync-enabled",
         "--autosync-advance-to-done",
         "--outbound-webhook-url", "https://hooks.example/pandan",
@@ -1587,12 +1631,14 @@ def test_board_update_covers_every_boardupdate_field(monkeypatch, env):
     sent = fake.calls[0][1]
     assert set(sent) - {"board_id"} == {
         "name",
+        "key",
         "autosync_enabled",
         "autosync_advance_to_done",
         "outbound_webhook_url",
         "outbound_webhook_secret",
         "outbound_webhook_enabled",
     }
+    assert sent["key"] == "PDN"
     assert not any(value is None for value in sent.values())
 
 
