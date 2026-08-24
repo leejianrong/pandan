@@ -16,6 +16,15 @@ export interface Card {
   id: number;
   ticket_number: string;
   board_id: number;
+  // Board-local numbering (M8 V52, KAN-973). `board_seq` is the `14` in `ENG-14`,
+  // gapless within its board; `ref` is the rendered form, built server-side from the
+  // board's key. `ref` can be null in principle (the server attaches it rather than
+  // storing it), so treat it as optional and fall back to `ticket_number`.
+  //
+  // Nothing renders these yet — V54 owns the display, and the chain's rule is that
+  // no ref appears until every resolver understands it (V53).
+  board_seq: number;
+  ref: string | null;
   title: string;
   description: string | null;
   column: Column;
@@ -167,6 +176,11 @@ export interface Epic {
   id: number;
   ticket_number: string;
   board_id: number;
+  // Board-local numbering on the epic's own per-board sequence (M8 V52, KAN-973):
+  // `ref` renders as `ENG-E7`. Same optionality and same not-yet-rendered note as
+  // `Card`.
+  board_seq: number;
+  ref: string | null;
   name: string;
   description: string | null;
   // Lightweight project fields (V31, KAN-295) — optional target/ship date + lead.

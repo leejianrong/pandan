@@ -31,13 +31,13 @@ maintainer: **EPIC-122** board-local ticket refs ([#280](https://github.com/leej
 **EPIC-124** epic + label colour ([#278](https://github.com/leejianrong/pandan/issues/278)). One theme:
 the board assumed one user with one board, and all three problems are that assumption breaking.
 **M8 is the first milestone since M6 to change the schema** — M7's no-API/no-schema/no-migration
-constraint expired with it — so five slices carry an additive migration and each lands alone. **Four
+constraint expired with it — so five slices carry an additive migration and each lands alone. **Five
 slices have shipped**: V61 and V62 (label management UI + the measured seven-token palette), V55
-(`PATCH /cycles/{id}`, the edit a sprint never had) and **V51 — `board.key`, the head of the four-slice
-identity chain and the first M8 migration** ([ADR 0020](docs/adr/0020-board-keys.md)). Nothing renders
-a board-local ref yet, and that is deliberate: V52 adds the per-board numbers, V53 teaches every
-resolver both forms, and only V54 displays one, so a user never sees a reference something cannot
-parse.
+(`PATCH /cycles/{id}`, the edit a sprint never had), **V51 — `board.key`, the head of the four-slice
+identity chain** ([ADR 0020](docs/adr/0020-board-keys.md)) and **V52 — `card.board_seq` /
+`epic.board_seq`, so every card and epic now carries a gapless board-local `ref` in its payload**.
+Nothing *renders* a ref yet, and that is deliberate: V53 teaches every resolver both forms and only
+V54 displays one, so a user never sees a reference something cannot parse.
 Two decisions are settled and load-bearing before anyone starts: **`card.ticket_number` is never
 touched** (the board-local `ENG-14` is added *beside* it, and the canonical `KAN-955` becomes the
 cross-board addressing mode), and **board keys are unique per owner**, which is exactly why a
@@ -542,6 +542,17 @@ is nullable (`ON DELETE SET NULL`). These mechanisms matter and are load-bearing
   immutable, never reused: cards get `KAN-<n>` (`card_ticket_seq`), epics get `EPIC-<n>`
   (`epic_ticket_seq`). Independent — `KAN-1` and `EPIC-1` coexist. Sequences are created in the
   migrations, not by the ORM.
+- **`card.board_seq` / `epic.board_seq`** (M8 V52) are the board-local numbers a ref renders from —
+  the `14` in `ENG-14`, the `7` in `ENG-E7`. Taken from the counter columns
+  `board.next_card_seq` / `next_epic_seq` in one row-locked statement inside the insert
+  transaction (`app/board_seq.py`), which is **a counter column and not a sequence on purpose**:
+  a sequence never blocks and always gaps on rollback, a counter briefly serialises writers to one
+  board and is **gapless** — and gapless is the thing issue #280 asked for. Two independent
+  sequences, cards and epics, mirroring ADR 0009. Never decremented, so a trashed card keeps its
+  number and a restore cannot collide. **The columns are named `next_*` but store the *last* number
+  issued** (the `+1 … RETURNING` is what makes the returned value the next one) — the shape pins
+  both, so the wart is documented rather than renamed. `ref` is **attached per read, not stored**,
+  which is what makes `board.key` editable.
 - **`board.key`** (M8 V51, ADR 0020) is the short ref prefix a board-local `ENG-14` is built from —
   `varchar(10)` + a shape `CHECK`, `UNIQUE(owner_id, key)`. **Per owner, not global**, which is exactly
   why a board-local ref resolves only inside a known board and why the canonical `KAN-955` stays the

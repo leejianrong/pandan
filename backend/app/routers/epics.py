@@ -29,9 +29,10 @@ from sqlalchemy.orm import Session
 from ..activity import record_activity
 from ..auth_models import User
 from ..authz import Access, authorize_board, get_principal, visible_board_ids
+from ..board_seq import allocate_epic_seqs, epic_ref
 from ..db import get_db
 from ..epic_rollup import compute_rollup
-from ..models import Card, Epic
+from ..models import Board, Card, Epic
 from ..schemas import EpicCreate, EpicProgress, EpicRead, EpicTrashRead, EpicUpdate
 from .boards import resolve_board_id
 
@@ -58,12 +59,23 @@ def _attach_rollups(db: Session, epics: list[Epic]) -> list[Epic]:
             .group_by(Card.epic_id)
         ).all()
         counts = {row.epic_id: (row.total, row.done) for row in rows}
+    # Board-local refs (M8 V52, KAN-973): one query for the boards involved, so a
+    # list spanning N boards still costs a single round-trip. An epic carries
+    # ``board_seq`` but not its board's ``key``, which is why this needs a query.
+    board_keys = {}
+    board_ids = {e.board_id for e in epics}
+    if board_ids:
+        board_keys = dict(
+            db.execute(select(Board.id, Board.key).where(Board.id.in_(board_ids))).all()
+        )
     for epic in epics:
         total, done = counts.get(epic.id, (0, 0))
         rollup = compute_rollup(total, done, epic.target_date, now=now)
         # Transient (unmapped) attributes read by EpicRead's from_attributes.
         epic.progress = EpicProgress(**rollup["progress"])  # type: ignore[attr-defined]
         epic.health = rollup["health"]  # type: ignore[attr-defined]
+        key = board_keys.get(epic.board_id)
+        epic.ref = epic_ref(key, epic.board_seq) if key else None  # type: ignore[attr-defined]
     return epics
 
 
@@ -141,6 +153,8 @@ def create_epic(
     authorize_board(db, principal, board_id, Access.WRITE)
     epic = Epic(
         board_id=board_id,
+        # Its own per-board sequence, independent of the cards' (SHAPING D4).
+        board_seq=allocate_epic_seqs(db, board_id)[0],
         name=payload.name,
         description=payload.description,
         target_date=payload.target_date,

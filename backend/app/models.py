@@ -149,6 +149,35 @@ class Board(Base):
         onupdate=func.now(),
     )
 
+    # Per-board ticket counters (M8 V52, KAN-973). Each holds the **highest number
+    # issued so far** on this board — a board with 77 cards holds 77 — and a create
+    # takes the next one with a single row-locked statement:
+    #
+    #   UPDATE board SET next_card_seq = next_card_seq + 1 WHERE id = :id
+    #   RETURNING next_card_seq
+    #
+    # The name says *next* because the value that statement RETURNS is the next one;
+    # the value at rest is the last one used. The shape (SHAPING D6) pins both the
+    # name and the statement, so this comment is where the discrepancy is recorded
+    # rather than silently renamed.
+    #
+    # **A counter column, not a Postgres sequence, and the tradeoff inverts the usual
+    # advice.** A sequence never blocks and always leaves gaps on rollback; a counter
+    # briefly serialises writers to one board and is **gapless**. Gapless is exactly
+    # what issue #280 asked for — "the numbers jump and are not sequential (locally)"
+    # — so the property normally counted as a sequence's advantage is here the defect
+    # being fixed. A sequence *object* per board was also rejected outright: hundreds
+    # of them is DDL per board, which does not scale (D6).
+    #
+    # Never decremented on delete: a trashed card keeps its number so restoring it
+    # cannot collide (D7).
+    next_card_seq: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    next_epic_seq: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+
     __table_args__ = (
         # Board keys are unique **per owner**, not globally (SHAPING D2, ADR 0020).
         # Two users may each own an ``ENG``; at a hundred users a global namespace
@@ -217,6 +246,12 @@ class Epic(Base):
     own individually."""
 
     __tablename__ = "epic"
+    __table_args__ = (
+        # Board-local numbering, unique within its board (M8 V52, KAN-973) — the
+        # epic-side twin of ``uq_card_board_seq``, counting on its own sequence
+        # (SHAPING D4) so ``ENG-1`` and ``ENG-E1`` never contend.
+        UniqueConstraint("board_id", "board_seq", name="uq_epic_board_seq"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     ticket_number: Mapped[str] = mapped_column(
@@ -231,6 +266,12 @@ class Epic(Base):
     board_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("board.id", ondelete="CASCADE"), nullable=False
     )
+    # Board-local sequence number (M8 V52, KAN-973) — the ``7`` in ``ENG-E7``, taken
+    # from ``board.next_epic_seq`` inside the insert transaction. A **second,
+    # independent** sequence rather than one shared with cards (SHAPING D4), mirroring
+    # exactly the two-sequence split ADR 0009 created for ``ticket_number``: ``ENG-1``
+    # and ``ENG-E1`` coexist the way ``KAN-1`` and ``EPIC-1`` do.
+    board_seq: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Lightweight project fields (V31, KAN-295). ``target_date`` is an optional
@@ -440,6 +481,12 @@ class Card(Base):
         # lives in ``0017_card_search_vector``; this declaration must mirror it
         # (name + ``postgresql_using='gin'``) so autogenerate sees no drift (KAN-307).
         Index("ix_card_search_vector", "search_vector", postgresql_using="gin"),
+        # Board-local numbering is unique within its board (M8 V52, KAN-973). This is
+        # the constraint that makes the counter's gaplessness *checkable* rather than
+        # merely intended: a double-issue is an IntegrityError, not a duplicate ref
+        # nobody notices. Soft-deleted rows are included, deliberately — their numbers
+        # stay reserved so a restore cannot collide (SHAPING D7).
+        UniqueConstraint("board_id", "board_seq", name="uq_card_board_seq"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -455,6 +502,13 @@ class Card(Base):
     board_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("board.id", ondelete="CASCADE"), nullable=False
     )
+    # Board-local sequence number (M8 V52, KAN-973) — the ``14`` in ``ENG-14``, taken
+    # from ``board.next_card_seq`` inside the insert transaction. Gapless within a
+    # board, and **never reused**: a soft-deleted card keeps its number, so restoring
+    # it can never collide (SHAPING D7). Unlike ``ticket_number`` this is not globally
+    # unique and not the card's identity — ``ticket_number`` remains both, forever
+    # (D1).
+    board_seq: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     column: Mapped[str] = mapped_column(String(32), nullable=False)

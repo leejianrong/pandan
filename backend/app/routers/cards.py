@@ -31,9 +31,11 @@ from sqlalchemy.orm import Session, aliased
 from ..activity import record_activity
 from ..auth_models import User
 from ..authz import Access, authorize_board, get_principal, visible_board_ids
+from ..board_seq import allocate_card_seqs, card_ref
 from ..card_query import sort_order_by
 from ..db import get_db
 from ..models import (
+    Board,
     Card,
     CardComment,
     CardDependency,
@@ -267,6 +269,7 @@ def _attach_dependencies(db: Session, cards: Sequence[Card]) -> Sequence[Card]:
         card.blocked = active_blockers.get(card.id, 0) > 0
     _attach_links(db, cards)
     _attach_labels(db, cards)
+    _attach_refs(db, cards)
     return cards
 
 
@@ -311,6 +314,29 @@ def _attach_labels(db: Session, cards: Sequence[Card]) -> None:
         by_card[card_id].append(label)
     for card in cards:
         card.labels = by_card.get(card.id, [])
+
+
+def _attach_refs(db: Session, cards: Sequence[Card]) -> None:
+    """Populate the transient ``ref`` on each card — its board-local form, ``ENG-14``
+    (M8 V52, KAN-973).
+
+    One query for the boards involved, keyed by ``board_id``, so a list of N cards
+    costs a single round-trip no matter how many boards it spans (mirrors
+    ``_attach_labels``). A card carries ``board_seq`` but not its board's ``key``,
+    which is the only reason this needs a query at all.
+
+    Called from ``_attach_dependencies`` so every card-returning route carries a ref;
+    ``test_every_card_route_carries_a_ref`` is what actually holds that promise.
+    """
+    if not cards:
+        return
+    board_ids = {c.board_id for c in cards}
+    keys = dict(
+        db.execute(select(Board.id, Board.key).where(Board.id.in_(board_ids))).all()
+    )
+    for card in cards:
+        key = keys.get(card.board_id)
+        card.ref = card_ref(key, card.board_seq) if key else None
 
 
 def _attach_one(db: Session, card: Card) -> Card:
@@ -692,22 +718,44 @@ def list_trashed_cards(
         query = query.where(Card.board_id == board_id)
     else:
         query = query.where(Card.board_id.in_(visible_board_ids(principal)))
-    return list(db.scalars(query).all())
+    rows = list(db.scalars(query).all())
+    # Refs, but deliberately not the rest. This path has always skipped
+    # ``_attach_dependencies``, so labels/links/blocked_by read empty on the trash
+    # listing — a pre-existing simplification left alone here. ``ref`` is different:
+    # it is one query and the slice's promise is that every card carries one, so a
+    # trashed card that rendered no ref would be the only hole in it.
+    _attach_refs(db, rows)
+    return rows
 
 
 def _create_card_row(
-    db: Session, principal: User, board_id: int, payload: CardCreate
+    db: Session,
+    principal: User,
+    board_id: int,
+    payload: CardCreate,
+    board_seq: int | None = None,
 ) -> Card:
     """Build + persist one card on ``board_id`` from a ``CardCreate``-shaped payload,
     validating its epic + labels and recording a ``created`` activity row. Flushes
     (so ``id``/``ticket_number`` are assigned and the next card's ``position`` counts
     it) but does **not** commit — the caller owns the transaction, so a single create
-    and a batch/template apply can share this and stay atomic (M5 V19, KAN-252)."""
+    and a batch/template apply can share this and stay atomic (M5 V19, KAN-252).
+
+    ``board_seq`` (M8 V52, KAN-973) is the card's board-local number. Passing one lets
+    a batch take its whole range in a single statement instead of locking the board
+    row once per card; omitting it allocates one here, which is what every
+    single-card create does. Allocation happens **after** validation on purpose — a
+    payload that is going to 422 should not have consumed a number first, since the
+    counter is deliberately gapless and nothing gives a number back.
+    """
     _validate_epic(db, payload.epic_id, board_id)
     _validate_cycle(db, payload.cycle_id, board_id)
     label_ids = _validate_labels(db, payload.label_ids, board_id)
+    if board_seq is None:
+        board_seq = allocate_card_seqs(db, board_id)[0]
     card = Card(
         board_id=board_id,
+        board_seq=board_seq,
         title=payload.title,
         description=payload.description,
         column=payload.column.value,

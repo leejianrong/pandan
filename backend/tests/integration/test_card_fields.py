@@ -76,12 +76,15 @@ def test_priority_check_constraint_in_db():
 
     from app.db import engine
 
+    # ``board_seq`` is supplied (V52, KAN-973) even though this row is meant to fail:
+    # without it the insert violates that column's NOT NULL instead, and the test
+    # would pass while proving nothing about the priority CHECK.
     with pytest.raises(IntegrityError):
         with engine.begin() as conn:
             conn.execute(
                 text(
-                    'INSERT INTO card (board_id, title, "column", position, priority) '
-                    "VALUES (1, 't', 'todo', 0, 'bogus')"
+                    'INSERT INTO card (board_id, board_seq, title, "column", position, '
+                    "priority) VALUES (1, 9999, 't', 'todo', 0, 'bogus')"
                 )
             )
 

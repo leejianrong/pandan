@@ -40,7 +40,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | **V61 · Label management UI** ✅ | the screen that did not exist | C | KAN-982 | 5 | A human creates and recolours a label without touching a terminal |
 | **V55 · `PATCH /cycles/{id}`** ✅ | a sprint you can edit | B | KAN-976 | 1 | `pandan cycle update 7 --name 'Sprint 12'` works and the cards stay attached |
 | **V51 · Board keys** ✅ | `board.key`, unique per owner 🗄️ | A | KAN-972 | 3 | A board has a key; two users can each own an `ENG`; keying a board `KAN` is a clean `422` |
-| **V52 · Per-board sequences** | `board_seq` + backfill 🗄️ | A | KAN-973 | 5 | Every card and epic carries a gapless board-local ref in its payload |
+| **V52 · Per-board sequences** ✅ | `board_seq` + backfill 🗄️ | A | KAN-973 | 5 | Every card and epic carries a gapless board-local ref in its payload |
 | **V53 · Resolution** | both forms, everywhere | A | KAN-974 | 5 | `pandan get ENG-42` and `pandan get KAN-1013` return the same card |
 | **V54 · Render** | SPA + CLI show the ref | A | KAN-975 | 3 | The board reads `ENG-1…ENG-77` instead of `KAN-530…KAN-971` |
 | **V62 · Dual-theme palette** ✅ | + colour validation | C | KAN-983 | 3 | Every label is readable in both themes; a bad colour is a `422` |
@@ -109,7 +109,7 @@ head is the key, all-digit tail is a card, `E`+digits tail is an epic.
 - **+215 resident MCP tokens** (8,426 → 8,641 compact, measured both ways) for the `key` argument on
   `create_board` and `update_board`. ADR 0019's freeze is on the tool *count*, unchanged at 49.
 
-### V52 · Per-board sequences — KAN-973 🗄️
+### V52 · Per-board sequences — KAN-973 ✅ 🗄️
 
 `card.board_seq`, `epic.board_seq`, and counter columns `board.next_card_seq` / `next_epic_seq`.
 Assignment is one statement inside the insert transaction:
@@ -132,6 +132,41 @@ Epics get a **second, independent** sequence rather than sharing the cards' one,
 existing two-sequence design that ADR 0009 deliberately created (SHAPING D4).
 
 A test pins that `ticket_number` values are unchanged across the migration (R1.2).
+
+**Shipped.** Five notes worth keeping:
+
+- **The counter columns are named `next_*` but hold the *last* number issued.** A board
+  with 77 cards holds 77, and `SET next_card_seq = next_card_seq + 1 … RETURNING
+  next_card_seq` is what makes the returned value the next one. The shape pins both the
+  name and the statement, so the discrepancy is recorded in the model's own comment
+  rather than silently renamed. Storing the true next value and returning
+  `next_card_seq - 1` would have made the name honest; it was not worth deviating from a
+  twice-written decision, and this note is the alternative.
+- **Allocation happens after validation**, so a create that `422`s consumes no number.
+  Gaplessness has to survive failed writes, and nothing gives a number back.
+- **`apply_template` is the only server-side batch create**, so it is the only place the
+  range allocation applies. The MCP's `create_cards` is a client-side loop over N HTTP
+  posts and allocates one at a time by construction — worth knowing before looking for a
+  batch endpoint that does not exist.
+- **`ref` is attached, not stored**, which is what makes `board.key` editable: changing a
+  key re-labels every ref on the board at once and rewrites nothing. It is optional on
+  the schema so a route that forgets to attach it returns null rather than a 500 — and a
+  test that walks every card- and epic-returning route is what actually holds the
+  promise. The trash listing was the one gap found that way; it now attaches refs (and
+  still, deliberately, not labels/links, which it never did).
+- **The payload grows by two keys per row**, which is a real per-read MCP cost given
+  ADR 0019's finding that breadth is where the tokens are. Estimated at
+  `"board_seq":14,"ref":"ENG-14"` ≈ 12 tokens × 121 rows ≈ **+1.5k** on an un-narrowed
+  `list_cards` — an estimate from arithmetic, not a measurement; re-run
+  `mcp/scripts/measure_read_payload_tokens.py` once it is deployed. The `fields`
+  narrowing KAN-501 added is the mitigation, and `ref` is selectable through it with no
+  code change, because both adapters derive their valid field names from the payload.
+
+**One trap this slice sprang, worth remembering.** V51's backfill test downgraded with
+`command.downgrade(cfg, "-1")`, which meant "undo the board-keys migration" only while
+that migration was head. Adding this one silently changed what `-1` meant and the test
+failed on assumptions that were no longer true. Any migration-bracketing test must name
+its revision.
 
 ### V53 · Resolution — KAN-974
 

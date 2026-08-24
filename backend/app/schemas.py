@@ -374,6 +374,16 @@ class CardRead(BaseModel):
     id: int
     ticket_number: str
     board_id: int
+    # Board-local numbering (M8 V52, KAN-973). ``board_seq`` is a real column — the
+    # ``14`` in ``ENG-14``, gapless within its board. ``ref`` is the rendered form,
+    # populated by the router from the board's key (not an ORM column), mirroring
+    # ``labels``/``links``; it needs the board row, which a card does not carry.
+    #
+    # ``ref`` is optional so a route that forgets to attach it returns null rather
+    # than a 500 — and a test asserts every card-returning route fills it, which is
+    # the half that actually keeps it honest.
+    board_seq: int
+    ref: str | None = None
     title: str
     description: str | None
     column: ColumnEnum
@@ -495,6 +505,12 @@ class EpicRead(BaseModel):
     id: int
     ticket_number: str
     board_id: int
+    # Board-local numbering (M8 V52, KAN-973), on the epic's **own** per-board
+    # sequence rather than the cards' (SHAPING D4). ``board_seq`` is a real column;
+    # ``ref`` renders as ``ENG-E7`` and is attached by the router. Same optionality
+    # rationale as :class:`CardRead`.
+    board_seq: int
+    ref: str | None = None
     name: str
     description: str | None
     # Lightweight project fields (V31, KAN-295) — real columns, read directly.
