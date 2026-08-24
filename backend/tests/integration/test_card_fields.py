@@ -186,8 +186,10 @@ def test_filter_overdue(client):
 
 def test_list_labels(client):
     board = _default_board(client)
-    _label(client, board, "a", "#1")
-    _label(client, board, "b", "#2")
+    # "#1"/"#2" until V62 (KAN-983): colour was unvalidated, so a one-digit stand-in
+    # was fine. It is a 422 now, which is the point of the slice.
+    _label(client, board, "a", "#111111")
+    _label(client, board, "b", "#222222")
     r = client.get(f"{BOARDS}/{board}/labels")
     assert r.status_code == 200
     assert [label["name"] for label in r.json()] == ["a", "b"]
@@ -273,6 +275,88 @@ def test_update_label_rejects_blank_and_null_422(client, payload):
 
 def test_update_missing_label_404(client):
     assert client.patch("/api/v1/labels/999999", json={"name": "x"}).status_code == 404
+
+# --- V62 (KAN-983): colour is validated at the schema layer ------------------
+# Before this, `color` was any non-empty string <= 32 chars, so "banana" was a valid
+# label colour that rendered as a blank dot (issue #278). It is now a palette token or
+# a well-formed hex, checked on BOTH create and update.
+
+
+@pytest.mark.parametrize("color", ["sky", "ink", "mulberry", "#0ea5e9", "#abc", "#ABCDEF"])
+def test_create_label_accepts_palette_tokens_and_hex(client, color):
+    board = _default_board(client)
+    r = client.post(f"{BOARDS}/{board}/labels", json={"name": "ok", "color": color})
+    assert r.status_code == 201
+    # Stored verbatim: the token is the value, not a hex the server resolves. The SPA
+    # maps it to var(--label-<token>) so it follows the theme, which a stored hex
+    # could not do.
+    assert r.json()["color"] == color
+
+
+@pytest.mark.parametrize(
+    "color",
+    [
+        "banana",  # the value issue #278 named
+        "red",  # a CSS keyword is not a palette token
+        "Sky",  # tokens are identifiers; one spelling only
+        "#0ea5e",  # five digits
+        "#0ea5e9ff",  # #rrggbbaa would composite against whatever surface it lands on
+        "var(--danger)",  # would smuggle a status colour back in
+    ],
+)
+def test_create_label_rejects_unrenderable_colour_422(client, color):
+    board = _default_board(client)
+    assert client.post(
+        f"{BOARDS}/{board}/labels", json={"name": "bad", "color": color}
+    ).status_code == 422
+
+
+def test_update_label_rejects_unrenderable_colour_422(client):
+    """Recolouring is what this milestone is FOR, so validating create alone would
+    leave the wider hole open — the CLI's `label update --color` is the likeliest way
+    a bad value gets in."""
+    board = _default_board(client)
+    la = _label(client, board, "ok", "sky")
+    assert client.patch(
+        f"/api/v1/labels/{la['id']}", json={"color": "banana"}
+    ).status_code == 422
+    # And the label is untouched, not half-written.
+    r = client.get(f"{BOARDS}/{board}/labels")
+    assert [x["color"] for x in r.json() if x["id"] == la["id"]] == ["sky"]
+
+
+def test_the_422_names_the_palette(client):
+    """The error detail is the palette's only discovery path for an API or CLI caller
+    — there is no "list the palette" endpoint, and the MCP surface is frozen at 49
+    tools (ADR 0019) — so it must carry the tokens, not just say "invalid"."""
+    board = _default_board(client)
+    r = client.post(f"{BOARDS}/{board}/labels", json={"name": "x", "color": "banana"})
+    assert r.status_code == 422
+    detail = str(r.json()["detail"])
+    assert "sky" in detail and "ink" in detail
+
+
+def test_a_legacy_colour_survives_a_rename(client):
+    """No value migration (SHAPING D11). A label already carrying a free-string colour
+    can still be renamed: `color` is only validated when it is actually SENT, which is
+    what lets the rule tighten without rewriting stored data.
+
+    Set up through the model rather than the API, because the API is exactly what can
+    no longer create such a row."""
+    from app.db import SessionLocal
+    from app.models import Label
+
+    board = _default_board(client)
+    with SessionLocal() as db:
+        legacy = Label(board_id=board, name="old", color="banana")
+        db.add(legacy)
+        db.commit()
+        label_id = legacy.id
+
+    r = client.patch(f"/api/v1/labels/{label_id}", json={"name": "renamed"})
+    assert r.status_code == 200
+    assert r.json()["name"] == "renamed"
+    assert r.json()["color"] == "banana"  # untouched, still rendering as it always did
 
 
 def test_label_list_reports_usage_count(client):

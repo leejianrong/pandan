@@ -12,7 +12,7 @@ Four tools for keeping a board legible once it has more than a screenful of card
 A label is a coloured tag, scoped to one board. A card can carry any number.
 
 ```bash
-pandan label create "bug" --color '#dc2626'
+pandan label create "bug" --color mulberry
 pandan label list
 pandan create "Fix the warmup message" --label 3 --label 7
 ```
@@ -20,18 +20,40 @@ pandan create "Fix the warmup message" --label 3 --label 7
 Labels attach by id rather than by name, which is awkward by hand and deliberate for scripts. `label
 list` gives you the ids, and how many cards carry each one.
 
+### Choosing a colour
+
+A label's colour is one of seven **palette tokens**:
+
+| Token | | Token | |
+|---|---|---|---|
+| `sky` | a mid blue | `mulberry` | a deep rose |
+| `blue` | a true blue | `pink` | a bright pink |
+| `cyan` | a blue-green | `ink` | a neutral (the default) |
+| `fuchsia` | a vivid magenta | | |
+
+Each token is defined **twice** — once for the light theme and once for the dark one — so a label
+stays readable whichever theme you or a teammate is using. A single hex code cannot do that, which is
+why the palette exists rather than a free colour picker.
+
+The tokens also avoid every colour the board already uses to mean something: teal for the accent,
+violet for an agent, green for success, amber for a warning, red for danger, grey for low priority.
+So a label never accidentally reads as a status.
+
+A hex like `#0ea5e9` is still accepted — labels created before the palette keep whatever colour they
+had, and nothing was rewritten — but new labels are better off with a token.
+
 ### Managing labels in the browser
 
 Open the menu and choose **Labels** to see the board's labels, create one, rename or recolour an
-existing one, and delete one. Each row shows how many cards carry the label, because deleting it
-removes it from all of them.
+existing one, and delete one. The colour is a row of swatches: click one to pick it. Each label row
+shows how many cards carry it, because deleting it removes it from all of them.
 
 Renaming and recolouring are safe: the label keeps every card it was attached to. Only deleting
 detaches it. From the command line the same edit is:
 
 ```bash
 pandan label update 3 --name "defect"      # rename, colour untouched
-pandan label update 3 --color '#0ea5e9'    # recolour, name untouched
+pandan label update 3 --color sky          # recolour, name untouched
 ```
 
 Pass only what you want to change — omitting a field leaves it alone.

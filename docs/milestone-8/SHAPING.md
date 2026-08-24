@@ -278,8 +278,11 @@ already present in the activity log and `card.assignee`. Three reasons:
 
 **D11 — Colours come from a bounded palette, not a free hex picker.**
 Every token in `app.css` is defined twice, once per theme. A user-picked hex has one value and will be
-unreadable in one theme roughly half the time. The palette ships ~12 named tokens, each with a light
-and a dark value; the picker is a swatch grid. Existing free-string colours keep rendering as-is
+unreadable in one theme roughly half the time. The palette ships named tokens, each with a light and a
+dark value; the picker is a swatch grid. **It shipped as seven, not the ~12 estimated here** — the
+disjointness requirement in Q5 turned out to exclude most of the hue wheel once the priority dots were
+counted and once "disjoint" was measured rather than judged by name; the numbers are in Q5 and in
+`backend/tests/unit/test_palette.py`. Existing free-string colours keep rendering as-is
 (there is no migration of stored values) — only *new* picks are constrained. Accepting this means the
 column stays `varchar(32)` and validation is "a palette token **or** a well-formed hex", with the UI
 offering only the former.
@@ -304,7 +307,14 @@ tab-alignment in the CLI's human rows, so it is opt-in via `--fields`.
   `planning_interval_id` filter? Lean the filter.
 - **Q5** ~~Do the existing semantic tokens participate?~~ **Settled 2026-08-23: the label palette is
   DISJOINT from the semantic tokens** (`--accent`, `--agent`, `--danger`, `--success`, `--warning`), so a
-  label can never accidentally read as a status. Which twelve hues is still a V62 call.
+  label can never accidentally read as a status. ~~Which twelve hues is still a V62 call.~~
+  **V62 settled it at SEVEN**, and in doing so found the decision bites harder than expected: the
+  exclusion set also has to cover `Card.svelte`'s **priority dots** (amber, orange, `--danger`,
+  `--muted`), which are the same visual primitive as a label dot in the same card. Measuring ΔE
+  instead of eyeballing hue then rejected three of a hand-picked nine — `slate` at 6.9 from `--muted`
+  (what priority "low" paints), `indigo` at 14.4 from `--agent`, `brown` at 14.8 from `--warning` —
+  and with green/violet/red/orange/grey out, the remaining blues and magentas cannot field nine that
+  separate from each other (mutual ΔE 11.2 vs 21.4 at seven). See D11.
 
 ## Shape — "Legible at Scale"
 
@@ -418,7 +428,7 @@ reports 13 committed and 9 completed, because closing froze the committed set. N
 an evidence-backed budget instead of a guess, and nobody had to invent an "agent point".
 
 **Managing a label.** A Labels screen lists the board's labels with their swatch and emoji. Creating
-one opens a 12-swatch grid (each swatch a token that is already defined for both themes) and an
+one opens a 7-swatch grid (each swatch a token that is already defined for both themes) and an
 optional emoji field. The card chip renders emoji + dot + name; `pandan list --fields ticket,labels`
 shows the emoji in the terminal.
 

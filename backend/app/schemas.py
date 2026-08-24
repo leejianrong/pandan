@@ -13,6 +13,8 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .palette import is_valid_label_color, label_color_error
+
 # --- Payload hardening caps (V28, KAN-292) ---------------------------------
 # ``max_length`` bounds on the write contract so no single string field can carry an
 # unbounded blob (defence-in-depth *behind* the body-size ceiling in ``app.main``).
@@ -225,6 +227,18 @@ class LabelCreate(BaseModel):
             raise ValueError("must not be empty")
         return v
 
+    @field_validator("color")
+    @classmethod
+    def known_color(cls, v: str) -> str:
+        """A palette token or a well-formed hex (V62, KAN-983).
+
+        Before this, ``"banana"`` was a valid colour that rendered as a blank dot.
+        Runs after :meth:`non_empty` (validators fire in declaration order), so an
+        all-whitespace colour still reports the more specific "must not be empty"."""
+        if not is_valid_label_color(v):
+            raise ValueError(label_color_error())
+        return v
+
 
 class LabelUpdate(BaseModel):
     """Field edits for a label (V61, KAN-982): ``PATCH /labels/{id}``. Both fields
@@ -257,6 +271,20 @@ class LabelUpdate(BaseModel):
             raise ValueError("must not be null; omit the field to leave it unchanged")
         if not v.strip():
             raise ValueError("must not be empty")
+        return v
+
+    @field_validator("color")
+    @classmethod
+    def known_color(cls, v: str) -> str:
+        """The same palette rule as :class:`LabelCreate` (V62, KAN-983).
+
+        Recolouring is the operation this milestone is *for*, so validating create
+        but not update would leave the wider hole open. It fires only when ``color``
+        was actually sent, so a label still carrying a legacy free-string colour can
+        be renamed without being forced onto the palette — which is what keeps this
+        slice free of a value migration (SHAPING D11)."""
+        if not is_valid_label_color(v):
+            raise ValueError(label_color_error())
         return v
 
 

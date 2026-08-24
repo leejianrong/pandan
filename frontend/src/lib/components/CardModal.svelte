@@ -4,6 +4,7 @@
   import {
     addComment,
     deleteComment,
+    labelColor,
     listComments,
     type Column,
     type Comment,
@@ -554,7 +555,7 @@
                       class:selected={labelIds.includes(label.id)}
                       onclick={() => toggleLabel(label.id)}
                     >
-                      <span class="label-dot" style="background: {label.color}" aria-hidden="true"
+                      <span class="label-dot" style="background: {labelColor(label.color)}" aria-hidden="true"
                       ></span>
                       {label.name}
                     </button>

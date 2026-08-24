@@ -8,18 +8,32 @@
   // labels could only be created from the CLI or MCP — which is why issue #278's
   // request for a colour picker had nowhere to live.
   //
-  // Colour is still a free string here, the mechanism M5 V11 shipped. **V62 (KAN-983)
-  // replaces the text input with a swatch grid over ~12 palette tokens** that are
-  // defined for both themes, and adds server-side validation; until then the live
-  // preview swatch below is what stops a typo from being invisible. Deliberately not
-  // pulled forward — which twelve hues, and whether they are disjoint from the
-  // semantic tokens, is V62's decision (it is: disjoint).
+  // Colour is a PALETTE PICK, not a free string (V62, KAN-983 — "the palette is the
+  // picker", SHAPING D11). The swatch grid below offers the seven `--label-*` tokens
+  // from app.css, each defined for both themes; the server independently validates
+  // "palette token or well-formed hex" so the CLI and MCP cannot store a colour the
+  // UI would render as a blank dot.
+  //
+  // Seven, not the shape's "~12": the palette is disjoint from the semantic tokens AND
+  // from Card.svelte's priority dots, measured in CIE Lab ΔE rather than eyeballed — a
+  // first hand-picked set of nine had three members that were status colours wearing
+  // different names. See backend/app/palette.py for the numbers.
+  //
+  // A label created before V62 may carry any old string. Such a value keeps rendering
+  // (there is no value migration) and appears in the grid as a leading "custom"
+  // swatch, so editing its NAME never silently recolours it.
   //
   // Modelled on Members.svelte: a page view with a create form over a list of
   // mutable rows. Server-authoritative like every mutation — the store refetches
   // cards as well as labels, because a card's `labels` are inlined in its payload.
   import { Check, Plus, Tag, Trash2, X } from "lucide-svelte";
-  import { ApiError, type Label } from "../api";
+  import {
+    ApiError,
+    DEFAULT_LABEL_COLOR,
+    LABEL_PALETTE,
+    labelColor,
+    type Label,
+  } from "../api";
   import {
     activeBoard,
     addLabel,
@@ -30,9 +44,29 @@
     removeLabel,
   } from "../board.svelte";
 
-  // The neutral the CLI falls back to (pandan_cli DEFAULT_LABEL_COLOR), so a label
-  // made here and one made from the terminal start the same colour.
-  const DEFAULT_COLOR = "#94a3b8";
+  // The palette token the CLI's `label create` also falls back to, so a label made
+  // here and one made from the terminal start the same colour. Both now name the same
+  // constant instead of each hardcoding a hex and claiming it matched the other's.
+  const DEFAULT_COLOR: string = DEFAULT_LABEL_COLOR;
+
+  // The grid for a given current value: the seven palette tokens, plus the current
+  // value itself when it is NOT one of them. That extra leading swatch is what makes
+  // a pre-V62 colour visible and selectable rather than silently unrepresented — with
+  // no such option, no radio would be checked and the row would look unset.
+  function optionsFor(current: string): string[] {
+    const tokens = LABEL_PALETTE as readonly string[];
+    return tokens.includes(current) || !current
+      ? [...tokens]
+      : [current, ...tokens];
+  }
+
+  // A swatch's accessible name. Tokens are their own name; a legacy value is
+  // announced as custom so it is not mistaken for a tenth hue.
+  function swatchLabel(color: string): string {
+    return (LABEL_PALETTE as readonly string[]).includes(color)
+      ? color
+      : `custom (${color})`;
+  }
 
   let adding = $state(false);
   let newName = $state("");
@@ -133,6 +167,37 @@
   }
 </script>
 
+<!-- The picker (V62, KAN-983). Real <input type="radio"> elements rather than a
+     div-with-role: a native radiogroup gives arrow-key navigation, roving focus and
+     screen-reader semantics for free, and "pick one of seven" is exactly what a radio
+     group is. The visible swatch is the <label>; the input itself is clipped rather
+     than `display: none`, which would take it out of the tab order. -->
+<!-- No separate preview swatch beside the grid: the selected swatch's ring IS the
+     preview, and a duplicate of it sitting alongside read as an extra, eighth
+     option. (V61 needed one because the colour was free text with nothing showing
+     what a typo produced.) -->
+{#snippet swatches(group: string, current: string, pick: (color: string) => void)}
+  <div class="swatch-grid" role="group" aria-label="Label colour">
+    {#each optionsFor(current) as color (color)}
+      <label class="swatch-opt" title={swatchLabel(color)}>
+        <input
+          type="radio"
+          name={group}
+          value={color}
+          checked={current === color}
+          onchange={() => pick(color)}
+        />
+        <span
+          class="swatch swatch-pick"
+          style="background: {labelColor(color)}"
+          aria-hidden="true"
+        ></span>
+        <span class="sr-only">{swatchLabel(color)}</span>
+      </label>
+    {/each}
+  </div>
+{/snippet}
+
 <div class="labels-view page-view">
   {#if labelStore.error}
     <div class="banner error" role="alert">
@@ -176,19 +241,8 @@
       }}
     >
       <input placeholder="Label name (required)" aria-label="Label name" bind:value={newName} />
-      <div class="row">
-        <span
-          class="swatch"
-          style="background: {newColor}"
-          aria-hidden="true"
-          data-testid="new-label-preview"
-        ></span>
-        <input
-          class="color-input"
-          placeholder="#0ea5e9"
-          aria-label="Label color"
-          bind:value={newColor}
-        />
+      <div class="row colour-row">
+        {@render swatches("new-label-color", newColor, (c) => (newColor = c))}
       </div>
       <div class="row actions">
         <button type="submit" class="primary" disabled={!newName.trim() || !newColor.trim() || busy}>
@@ -218,9 +272,8 @@
               saveEdit(label);
             }}
           >
-            <span class="swatch" style="background: {editColor}" aria-hidden="true"></span>
             <input aria-label="Label name" bind:value={editName} />
-            <input class="color-input" aria-label="Label color" bind:value={editColor} />
+            {@render swatches(`label-${label.id}-color`, editColor, (c) => (editColor = c))}
             <button
               type="submit"
               class="primary"
@@ -234,7 +287,11 @@
           </form>
         {:else}
           <div class="label-info">
-            <span class="swatch" style="background: {label.color}" aria-hidden="true"></span>
+            <span
+              class="swatch"
+              style="background: {labelColor(label.color)}"
+              aria-hidden="true"
+            ></span>
             <span class="label-name">{label.name}</span>
             <span class="label-usage">{usage(label)}</span>
           </div>
@@ -323,8 +380,77 @@
     min-width: 0;
     flex: 1 1 8rem;
   }
-  .color-input {
-    font-family: var(--mono);
-    flex: 0 1 9rem;
+  /* The swatch grid (V62). Wraps, because the edit row shares one flex line with the
+     name input and the save/cancel buttons — and a legacy colour adds a tenth
+     option, so the count is not fixed. */
+  .swatch-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+  }
+  .swatch-opt {
+    display: inline-flex;
+    cursor: pointer;
+    line-height: 0;
+  }
+  /* Clipped, not hidden: `display: none` would drop the radio out of the tab order
+     and take the native arrow-key group with it, which is the whole reason these are
+     real inputs. Focus is shown on the sibling swatch via :has() below. */
+  .swatch-opt input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .swatch-pick {
+    width: 22px;
+    height: 22px;
+    transition: transform 120ms ease;
+  }
+  .swatch-opt:hover .swatch-pick {
+    transform: scale(1.12);
+  }
+  /* Selection is a ring in the text colour rather than a tick glyph: at 22px a tick
+     would sit on top of the very hue being judged, and the ring reads on all seven
+     swatches in both themes. */
+  .swatch-opt:has(input:checked) .swatch-pick {
+    box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--text);
+  }
+  .swatch-opt:has(input:focus-visible) .swatch-pick {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+  .colour-row {
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  /* Each swatch's accessible name. Svelte styles are component-scoped, so this is a
+     local copy of ViewSwitcher's rule rather than a shared utility — the same trade
+     that file already made. It is what a radio's accessible name comes from, so it
+     must stay in the a11y tree: clipped, never `display: none`. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .swatch-pick {
+      transition: none;
+    }
+    .swatch-opt:hover .swatch-pick {
+      transform: none;
+    }
   }
 </style>

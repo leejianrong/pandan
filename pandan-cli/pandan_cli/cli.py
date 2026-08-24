@@ -295,7 +295,32 @@ PRIORITIES = ("none", "low", "medium", "high", "urgent")
 # Fallback color for `label create` when neither the positional nor --color is
 # given (KAN-288). A neutral slate so an unspecified label still renders sensibly;
 # the API requires a non-empty color string.
-DEFAULT_LABEL_COLOR = "#64748b"
+#
+# V62 (KAN-983) makes this a PALETTE TOKEN rather than a raw hex, matching
+# backend/app/palette.py's DEFAULT_LABEL_COLOR and the SPA's, so a label created here
+# and one created in the browser start the same colour. They had silently drifted —
+# this file said #64748b and the SPA said #94a3b8, each commented as matching the
+# other — which is a thing two hardcoded hexes will always eventually do and two
+# references to one named token cannot.
+#
+# A token also renders correctly in BOTH themes (it resolves to `var(--label-slate)`,
+# defined once per theme in app.css) where a single hex can only ever suit one.
+DEFAULT_LABEL_COLOR = "ink"
+
+# The palette tokens the server accepts alongside a well-formed hex (V62, KAN-983 —
+# authoritative list in backend/app/palette.py). Listed here ONLY for `--help`: the
+# CLI deliberately does not validate the colour itself, because a client-side copy of
+# a server rule is a second thing to keep in sync and it would reject a token this
+# build happens not to know about. The server's 422 names the valid tokens.
+LABEL_PALETTE = (
+    "sky",
+    "blue",
+    "cyan",
+    "fuchsia",
+    "mulberry",
+    "pink",
+    "ink",
+)
 
 
 # --- content truncation (V45, KAN-428 — AXI 3) ------------------------------
@@ -3351,11 +3376,15 @@ def build_parser() -> argparse.ArgumentParser:
     # positional when both are given.
     p_label_create.add_argument(
         "color_pos", nargs="?", metavar="COLOR",
-        help=f"a color string, e.g. #0ea5e9 (or use --color; default {DEFAULT_LABEL_COLOR})",
+        help=(
+            "a palette token or hex, e.g. sky or #0ea5e9 "
+            f"(or use --color; default {DEFAULT_LABEL_COLOR}). "
+            f"tokens: {', '.join(LABEL_PALETTE)}"
+        ),
     )
     p_label_create.add_argument(
         "--color", dest="color_opt", metavar="COLOR",
-        help="a color string, e.g. #0ea5e9 (alternative to the positional)",
+        help="a palette token or hex, e.g. sky or #0ea5e9 (alternative to the positional)",
     )
     p_label_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_label_create.set_defaults(func=_cmd_label_create, noun="label")
@@ -3365,7 +3394,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_label_update.add_argument("label_id", type=int)
     p_label_update.add_argument("--name", help="new label name")
-    p_label_update.add_argument("--color", help="new color string, e.g. #0ea5e9")
+    p_label_update.add_argument(
+        "--color",
+        help=(
+            "new palette token or hex, e.g. sky or #0ea5e9. "
+            f"tokens: {', '.join(LABEL_PALETTE)}"
+        ),
+    )
     p_label_update.set_defaults(func=_cmd_label_update, noun="label")
 
     p_label_delete = label_sub.add_parser("delete", parents=[common], help="delete a label")

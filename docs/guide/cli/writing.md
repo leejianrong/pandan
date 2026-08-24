@@ -178,11 +178,16 @@ pandan board delete 5
 
 ```bash
 pandan label list
-pandan label create "bug" --color '#dc2626'
+pandan label create "bug" --color mulberry   # a palette token
 pandan label update 7 --name "defect"        # rename; colour untouched
-pandan label update 7 --color '#0ea5e9'      # recolour; name untouched
+pandan label update 7 --color sky            # recolour; name untouched
 pandan label delete 7
 ```
+
+A colour is either a **palette token** — `sky`, `blue`, `cyan`, `fuchsia`, `mulberry`, `pink`, `ink` —
+or a hex like `#0ea5e9`. Anything else is a `422`, and the error lists the tokens. Prefer a token:
+each one is defined separately for the light and the dark theme, so it stays readable in both, which
+a single hex cannot do. Omit `--color` and you get `ink`.
 
 **Views** are saved queries. Anything you can pass to `list` you can save:
 

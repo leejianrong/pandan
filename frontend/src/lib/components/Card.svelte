@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Ban, CalendarClock, Hand, Link as LinkIcon, Pencil, Trash2 } from "lucide-svelte";
-  import type { Card, Priority } from "../api";
+  import { labelColor, type Card, type Priority } from "../api";
   import { cardById, epicFor, removeCard } from "../board.svelte";
   import { kbd } from "../keyboard.svelte";
   import CardModal from "./CardModal.svelte";
@@ -162,7 +162,7 @@
       <div class="card-meta">
         {#each card.labels as label (label.id)}
           <span class="label-chip" title={label.name}>
-            <span class="label-dot" style="background: {label.color}" aria-hidden="true"></span>
+            <span class="label-dot" style="background: {labelColor(label.color)}" aria-hidden="true"></span>
             <span class="label-name">{label.name}</span>
           </span>
         {/each}
