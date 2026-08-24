@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from ..auth_models import User
 from ..authz import Access, authorize_board, get_principal
+from ..board_seq import allocate_card_seqs
 from ..db import get_db
 from ..models import Card, CardTemplate
 from ..schemas import (
@@ -161,10 +162,19 @@ def apply_template(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"template exceeds the {MAX_TEMPLATE_CARDS}-card apply limit",
         )
+    # Board-local numbers for the whole apply in ONE statement (M8 V52, KAN-973),
+    # rather than locking the board row once per card. This is the only server-side
+    # batch create in the app — the MCP's ``create_cards`` is a client-side loop over
+    # N HTTP posts, so it allocates one at a time by construction.
+    #
+    # A number is consumed even if a later card fails validation: the whole apply is
+    # one transaction, so a 422 rolls the UPDATE back with everything else and the
+    # counter is untouched. That is the property that keeps it gapless.
+    seqs = allocate_card_seqs(db, board_id, len(template.cards)) if template.cards else []
     created: list[Card] = []
-    for item in template.cards:
+    for item, board_seq in zip(template.cards, seqs, strict=True):
         payload = CardCreate.model_validate({**item, "board_id": board_id})
-        created.append(_create_card_row(db, principal, board_id, payload))
+        created.append(_create_card_row(db, principal, board_id, payload, board_seq))
     db.commit()
     for card in created:
         db.refresh(card)

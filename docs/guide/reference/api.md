@@ -84,6 +84,16 @@ a bearer token. It returns the minimum on purpose, because it is a cross-applica
 | `GET` | `/api/v1/boards/{board_id}/activity` |
 | `GET` | `/api/v1/boards/{board_id}/metrics` |
 
+Card and epic reads carry two board-local fields alongside `ticket_number`: **`board_seq`**, a
+number that starts at 1 on each board and never repeats, and **`ref`**, the rendered form —
+`ENG-14` for a card, `ENG-E7` for an epic. They are a *display* form. `ticket_number` remains the
+identifier: globally unique, immutable, and the only form that means anything without knowing which
+board you are on. `ref` is built from the board's key at read time, so changing the key re-labels
+every ref at once and rewrites nothing.
+
+Reach them from the CLI with `pandan list --fields ref,title`, or over MCP with
+`list_cards(fields=["ref","title"])`. Nothing in the web UI shows them yet.
+
 `PATCH` is where auto-sync and outbound webhook settings live. The outbound secret is accepted here and
 never returned by any read.
 

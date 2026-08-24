@@ -30,8 +30,20 @@ DEMO_CARDS: list[dict] = [dict(zip(_FIELDS, row)) for row in _ROWS]
 # INSERT, so this module is free to target the current schema.
 _INSERT = text(
     "INSERT INTO card "
-    '(board_id, title, description, "column", position, story_points, assignee) '
-    "VALUES (:board_id, :title, :description, :column, :position, :story_points, :assignee)"
+    '(board_id, board_seq, title, description, "column", position, story_points, assignee) '
+    "VALUES (:board_id, :board_seq, :title, :description, :column, :position, "
+    ":story_points, :assignee)"
+)
+
+# Board-local numbering (M8 V52, KAN-973). ``board_seq`` is NOT NULL, so this seam
+# has to take numbers from the board's counter like any other create. Written out
+# here rather than imported from :mod:`app.board_seq`: that helper takes an ORM
+# ``Session`` and this module deliberately speaks Core SQL over a ``Connection`` so
+# it stays valid if the ORM layer changes (see the module docstring). One statement
+# for the whole batch, so the numbers are contiguous.
+_TAKE_SEQ_RANGE = text(
+    "UPDATE board SET next_card_seq = next_card_seq + :n WHERE id = :board_id "
+    "RETURNING next_card_seq"
 )
 
 
@@ -50,6 +62,13 @@ def seed_demo_cards(connection: Connection, board_id: int | None = None) -> int:
         board_id = connection.execute(
             text("SELECT id FROM board ORDER BY id LIMIT 1")
         ).scalar_one()
-    for card in DEMO_CARDS:
-        connection.execute(_INSERT, {**card, "board_id": board_id})
+    last_seq = connection.execute(
+        _TAKE_SEQ_RANGE, {"n": len(DEMO_CARDS), "board_id": board_id}
+    ).scalar_one()
+    first_seq = last_seq - len(DEMO_CARDS) + 1
+    for offset, card in enumerate(DEMO_CARDS):
+        connection.execute(
+            _INSERT,
+            {**card, "board_id": board_id, "board_seq": first_seq + offset},
+        )
     return len(DEMO_CARDS)

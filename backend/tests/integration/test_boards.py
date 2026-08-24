@@ -199,6 +199,12 @@ def test_the_backfill_derives_keys_and_deduplicates_per_owner():
     ``finally`` re-upgrades unconditionally: a failure mid-test would otherwise leave
     the schema one revision behind and break every test after it, turning one red
     into a hundred.
+
+    **The target is a named revision, not ``-1``.** This test was written with ``-1``
+    while 0022 was head, and V52's migration silently changed what that meant — the
+    downgrade stopped one revision short and the test failed on assumptions that were
+    no longer true. ``-1`` is relative to head, so any migration-bracketing test that
+    uses it has a hidden dependency on being the newest one.
     """
     from alembic.config import Config
     from sqlalchemy import text
@@ -207,7 +213,7 @@ def test_the_backfill_derives_keys_and_deduplicates_per_owner():
     from app.db import engine
 
     cfg = Config("alembic.ini")
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "a4f5050820ce")  # the revision before 0022_board_keys
     try:
         with engine.begin() as conn:
             owner = conn.execute(

@@ -153,6 +153,9 @@ def test_card_read_dependency_arrays_default_empty():
         id=1,
         ticket_number="KAN-1",
         board_id=1,
+        # Real column since V52 (KAN-973), so it is required here. ``ref`` is not —
+        # the router attaches it, and its default is the point of that asymmetry.
+        board_seq=1,
         title="t",
         description=None,
         column=ColumnEnum.todo,
@@ -170,6 +173,11 @@ def test_card_read_dependency_arrays_default_empty():
     )
     assert card.blocked_by == []
     assert card.blocks == []
+    # ``ref`` is the same kind of field and defaults the same way (V52, KAN-973):
+    # the router renders it from the board's key, which a card row does not carry.
+    # Its optionality is deliberate — a route that forgets to attach it returns null
+    # rather than a 500 — and an integration test walks every route to hold that.
+    assert card.ref is None
 
 
 def test_dependency_create_requires_blocker_id():
@@ -188,6 +196,9 @@ def test_card_read_links_default_empty():
         id=1,
         ticket_number="KAN-1",
         board_id=1,
+        # Real column since V52 (KAN-973), so it is required here. ``ref`` is not —
+        # the router attaches it, and its default is the point of that asymmetry.
+        board_seq=1,
         title="t",
         description=None,
         column=ColumnEnum.todo,
