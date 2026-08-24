@@ -54,7 +54,8 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 
 🗄️ = carries a migration, lands alone. ✅ = shipped.
 
-Total: **40 points across 14 slices**, plus one standalone bug (KAN-986) found while tracing #280.
+Total: **40 points across 14 slices**, plus one standalone bug (KAN-986) found while tracing #280 —
+**now landed**.
 
 ## Part A — Identity (EPIC-122, issue #280)
 
@@ -151,9 +152,10 @@ SPA: `Card.svelte`, `BoardTable.svelte`, `EpicItem.svelte`, `EpicForm.svelte`, `
 (which searches by ticket and must match **both** forms), `dashboard.svelte.ts`. CLI: the human row
 shows the board-local ref, `--fields ticket` keeps the canonical form reachable.
 
-Fold in KAN-986 if it has not already landed. Board-local refs make that sort bug **more** visible,
-not less: a 77-card board goes from a sparse `KAN-530…971` to a solid `1…77`, where lexicographic
-misordering is obvious.
+KAN-986 **already landed**, so nothing to fold in — `compareTicketRefs` is board-local-ref-aware by
+construction (see *Loose card* below). The ordering was worth fixing before this slice rather than
+inside it: board-local refs make that sort bug **more** visible, not less, since a 77-card board goes
+from a sparse `KAN-530…971` to a solid `1…77`, where lexicographic misordering is obvious.
 
 **Qualification is a client concern, computed per viewer.** A key collision is a property of the
 *viewer*, not the board (SHAPING, *Detail — when two accessible boards share a key*): only a user who
@@ -316,10 +318,21 @@ tab-alignment in the CLI's human rows, so it is opt-in via `--fields` and never 
 
 ## Loose card
 
-**KAN-986 — ticket sort is lexicographic.** `dashboard.svelte.ts:225` sorts with
-`localeCompare(ticket_number)`, so `KAN-100` orders before `KAN-9`; `BoardTable.svelte`'s ticket sort
-key appears to share the defect. Found while tracing #280, independent of M8, and either landed first
-or folded into V54.
+**KAN-986 — ticket sort is lexicographic.** ✅ **Landed first**, ahead of V54. `dashboard.svelte.ts`
+sorted with `localeCompare(ticket_number)`, so `KAN-100` ordered before `KAN-9`, and
+`BoardTable.svelte`'s ticket sort key did share the defect — verified, not assumed. Both now route
+through one comparator, `frontend/src/lib/tickets.ts`.
+
+The parse is **structural rather than a `KAN-`/`EPIC-` special case** — split off the trailing digit
+run, compare what precedes it as text and the digits as a number — which is why V54 gets `ENG-14` for
+free and why `ENG-E7` keeps its `E` in the prefix, so epics sort as their own run instead of
+interleaving into the card numbers. **V54 therefore has nothing left to fold in.**
+
+Its test is a pure-logic spec in the **e2e** suite (`frontend/e2e/ticket-sort.spec.ts`), and that
+placement is deliberate rather than lazy: the frontend has no unit-test runner, and adding one
+(vitest + a script + a CI job) is a larger change than the bug deserved. Playwright already compiles
+TypeScript and already runs in CI. If a frontend unit runner ever arrives, the file moves there
+unchanged.
 
 ## Open questions (carried from the shape)
 
