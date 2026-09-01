@@ -46,6 +46,17 @@ cross-board addressing mode), and **board keys are unique per owner**, which is 
 board-local ref resolves only within a known board. Read
 [docs/milestone-8/SHAPING.md](docs/milestone-8/SHAPING.md) D1–D3 before touching identity.
 
+**Milestone 9** ("Teams", [docs/milestone-9/](docs/milestone-9/SLICES.md)) is **planned, not started** —
+V65–V70, one epic (EPIC-138), tracing to [issue #322](https://github.com/leejianrong/pandan/issues/322)
+and [ADR 0021](docs/adr/0021-organization-team-tier.md). Unlike every prior milestone, the design
+question was answered by a standalone ADR *before* this milestone's shaping pass existed, so
+`docs/milestone-9/SHAPING.md` mostly points at the ADR rather than re-deriving it. Runs independently of
+M8 (different schema surface, no shared code path) rather than waiting for M8 to finish. V65 is schema
+(`team`/`team_member` tables, a nullable `board.team_id`) and lands alone; V66–V68 are a strict
+membership → board-linking → authorization chain; V69 (CLI/MCP — needs its own ADR-0019-style token
+measurement before landing, since it grows the frozen 49-tool count) and V70 (a Teams SPA view, which can
+slip to a later pass) both depend only on V68 and can ship in either order.
+
 The **49-tool** MCP surface was right-sized in V49: measured at 8,775 `o200k_base` tokens of resident
 schema per session, shipped at **7,388** (compact; 10,307 pretty-printed) after
 `mcp/pandan_mcp/schema.py` stripped 1,387 tokens of pure Pydantic serializer artefact. The decision is
@@ -705,7 +716,19 @@ intended behavior:
   have since landed** — payload shaping in KAN-501 and the four CLI gaps in KAN-502, which also pins
   parity **both ways** via `pandan-cli/tests/test_parity.py`. ADR 0019 still stands, because the
   single-exec-tool option needs a second precondition that remains unmet: the published ghcr image
-  carries no `pandan` binary to exec. Newest is **board keys** — `board.key`, `^[A-Z][A-Z0-9]{1,9}$`,
+  carries no `pandan` binary to exec. **Board keys** — `board.key`, `^[A-Z][A-Z0-9]{1,9}$`,
   unique **per owner** so two users can each hold `ENG`, with `KAN`/`EPIC` reserved and no hyphens
   (which is what lets a ref split on its first one); derived at create so creation never blocks on
-  naming, and editable because nothing about a card is stored per key (0020, M8 V51).
+  naming, and editable because nothing about a card is stored per key (0020, M8 V51). Newest are two
+  design-only ADRs from a 2026-09-01 cross-repo planning batch kaya opened against this repo (issues
+  #322–#324): **team as the tenant tier above a user** — no separate `organization` entity yet, since
+  the target self-hosted-one-company-per-instance scope means one would always number exactly one; a
+  team role (reusing the existing viewer/editor/owner vocabulary) grants a *default* board access that
+  an explicit per-board `BoardMember` row still overrides, and PATs/`GET /api/v1/me` are unaffected
+  (0021, implementation shaped as **Milestone 9**, [docs/milestone-9/](docs/milestone-9/SLICES.md));
+  and **the `/api/v1` stability policy** — formalizes an assertion already in the published guide (a
+  breaking change goes to `/api/v2`, never rewriting `v1` underneath existing clients) into a
+  breaking-vs-additive table, two deprecation tiers (confirm-migration for tracked sibling
+  repos/clients like kaya, a fixed 90-day floor for untrackable self-hosted integrations), and RFC 8594
+  `Deprecation`/`Sunset` response headers as the on-the-wire notice (0022). Neither has landed a line
+  of implementation yet.
