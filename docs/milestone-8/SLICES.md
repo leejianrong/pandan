@@ -42,7 +42,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | **V51 · Board keys** ✅ | `board.key`, unique per owner 🗄️ | A | KAN-972 | 3 | A board has a key; two users can each own an `ENG`; keying a board `KAN` is a clean `422` |
 | **V52 · Per-board sequences** ✅ | `board_seq` + backfill 🗄️ | A | KAN-973 | 5 | Every card and epic carries a gapless board-local ref in its payload |
 | **V53 · Resolution** ✅ | both forms, everywhere | A | KAN-974 | 5 | `pandan get ENG-42` and `pandan get KAN-1013` return the same card |
-| **V54 · Render** | SPA + CLI show the ref | A | KAN-975 | 3 | The board reads `ENG-1…ENG-77` instead of `KAN-530…KAN-971` |
+| **V54 · Render** ✅ | SPA + CLI show the ref | A | KAN-975 | 3 | The board reads `PAN-1…PAN-77` instead of `KAN-530…KAN-971`; `--fields ticket` still gives the canonical form |
 | **V62 · Dual-theme palette** ✅ | + colour validation | C | KAN-983 | 3 | Every label is readable in both themes; a bad colour is a `422` |
 | **V63 · Epic colour** | 🗄️ | C | KAN-984 | 2 | An epic's stories are recognisable on the board without reading them |
 | **V64 · Label emoji** | 🗄️ | C | KAN-985 | 2 | Two labels sharing a colour are still distinguishable at a glance |
@@ -245,16 +245,48 @@ visible boards, the auto-sync-enabled boards, the configured board — and a sha
 would take that scope as a parameter, which is to say it would be a wrapper around the two
 lines each caller already writes. The *grammar* is what must not be duplicated.
 
-### V54 · Render — KAN-975
+### V54 · Render — KAN-975 ✅
 
-SPA: `Card.svelte`, `BoardTable.svelte`, `EpicItem.svelte`, `EpicForm.svelte`, `CommandPalette.svelte`
-(which searches by ticket and must match **both** forms), `dashboard.svelte.ts`. CLI: the human row
-shows the board-local ref, `--fields ticket` keeps the canonical form reachable.
+**One helper, both sides.** `frontend/src/lib/tickets.ts` gained `displayRef(entity)` — `ref ?? ticket_number`
+— and every display site was routed through it. The 2026-08-23 site list undercounted: the app had grown
+`CardModal.svelte`, `EpicModal.svelte`, `Dashboard.svelte`, `Trash.svelte` and `CardForm.svelte` since
+that note was written, none of them in the original enumeration. All ten SPA files now show the
+board-local ref: `Card.svelte`, `CardModal.svelte`, `BoardTable.svelte`, `EpicItem.svelte`,
+`EpicForm.svelte`, `EpicModal.svelte`, `CommandPalette.svelte`, `Dashboard.svelte`, `Trash.svelte`,
+`CardForm.svelte`. The CLI got the mirror: `cli.py`'s `_display_ref` for `_card_line`/`_epic_line`, and
+the same fallback duplicated (not imported — `context.py` cannot circularly import `cli`) into
+`context.py`'s `_card_row` for the `pandan context show` ambient block.
+
+**Sort and search stay on `ticket_number` — deliberately.** `compareTicketRefs(a.ticket_number,
+b.ticket_number)` in `BoardTable.svelte`/`dashboard.svelte.ts` is unchanged: it orders rows, it doesn't
+display anything, and `board_seq` tracks creation order identically. `CommandPalette.svelte`'s `keywords`
+gained the board-local `ref` alongside the existing `ticket_number` so a search matches **either** form —
+its own instruction, read literally — while `value` (the list's own React-style key) stayed on the
+concatenated canonical string, since changing an internal identity key was out of scope for a rendering
+slice.
+
+**`--fields ticket` still means `ticket_number`, on purpose.** The default row and the explicit field
+selector are supposed to disagree now: the row is a display choice, the field is the one that resolves
+from anywhere. Documented in `reference/api.md`, `pandan-cli/README.md`, and
+`docs/guide/cli/reading.md` — the ADR 0018-style "notice on the wire" pattern (here: `--fields ticket`
+does not silently start meaning something new) applies exactly.
+
+**One known, deliberate gap.** `GET .../metrics`' `aging_wip.items` (`AgingWipItem`) has no `ref` field —
+that's a backend/schema change, out of scope for a pure-rendering slice — so `Dashboard.svelte`'s aging-WIP
+bars and `pandan metrics`' aging rows still show the canonical `ticket_number`. Left as-is rather than
+adding a backend field this slice wasn't scoped to touch; worth a one-line follow-up card if it ever
+actually confuses someone.
 
 KAN-986 **already landed**, so nothing to fold in — `compareTicketRefs` is board-local-ref-aware by
 construction (see *Loose card* below). The ordering was worth fixing before this slice rather than
 inside it: board-local refs make that sort bug **more** visible, not less, since a 77-card board goes
 from a sparse `KAN-530…971` to a solid `1…77`, where lexicographic misordering is obvious.
+
+**Two e2e specs pinned a display shape that stopped being true.** `dependencies.spec.ts` and
+`epic-story.spec.ts` asserted a rendered `.ticket` matched `/^KAN-\d+$/` / `/^EPIC-\d+$/` — true only
+because every e2e board used to render the canonical form. Loosened to accept either shape
+(`[A-Z][A-Z0-9]{1,9}-\d+` for cards, plus `EPIC-\d+` or `<KEY>-E\d+` for epics), since e2e boards derive
+their own key from a random name and were never going to be `KAN` or `EPIC` (both reserved).
 
 **Qualification is a client concern, computed per viewer.** A key collision is a property of the
 *viewer*, not the board (SHAPING, *Detail — when two accessible boards share a key*): only a user who
@@ -262,7 +294,8 @@ can see two `ENG` boards has one, and nothing is stored. Inside a board nothing 
 across boards a colliding ref renders `alice/ENG-14` and a non-colliding one stays bare. The canonical
 `KAN-955` is the title attribute and the click-to-copy value everywhere.
 
-Deliberately last, so a user never sees a ref that something cannot parse.
+Deliberately last, so a user never sees a ref that something cannot parse. CLI behaviour changed, so
+`pandan-cli` bumped 0.36.0 → 0.37.0 per the standing version-bump guard.
 
 ## Part B — Time (EPIC-123, issue #279)
 

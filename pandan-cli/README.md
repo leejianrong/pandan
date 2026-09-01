@@ -290,6 +290,12 @@ pandan epic list --fields ticket,name,lead,target_date
   from the payload rather than a hand-kept list is deliberate: it cannot drift from
   the API. Plus three aliases for the names the default row displays differently:
   `ticket` → `ticket_number`, and `pts` / `points` → `story_points`.
+  **`ticket` is deliberately the canonical form, not what the default row shows** —
+  since M8 V54 the default row's own ticket column renders the board-local `ref`
+  (`ENG-14`) when the board has a key, falling back to `ticket_number` otherwise, but
+  `--fields ticket` always resolves to the canonical `ticket_number` (`KAN-955`).
+  The two are meant to disagree: the row is what you read on *this* board, the field
+  is what resolves from anywhere with no board context at all.
 - **Values print bare**, tab-separated, `-` for null/empty: the default row's `pts=N`
   labelling belongs to the default row, not to the field, so
   `--fields ticket,column,title,pts` prints `KAN-7  todo  Ship it  3`. A list renders

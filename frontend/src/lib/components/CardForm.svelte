@@ -1,6 +1,7 @@
 <script lang="ts">
   import { labelColor, type Column, type Priority } from "../api";
   import { addCard, epicStore, labelStore } from "../board.svelte";
+  import { displayRef } from "../tickets";
   import { Select, TextInput, Textarea } from "./ui";
 
   // Create-only: the add-card affordance inside a column. Editing an existing
@@ -36,7 +37,7 @@
     { value: "", label: "— no epic" },
     ...epicOptions.map((e) => ({
       value: String(e.id),
-      label: `${e.ticket_number} · ${e.name}`,
+      label: `${displayRef(e)} · ${e.name}`,
     })),
   ]);
   const labelOptions = $derived(labelStore.labels);

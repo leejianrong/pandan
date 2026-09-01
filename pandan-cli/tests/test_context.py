@@ -339,6 +339,27 @@ def test_show_renders_counts_and_open_cards(monkeypatch, capsys):
     assert out.index("KAN-2") < out.index("KAN-1")
 
 
+def test_show_renders_board_local_ref_not_canonical_ticket(monkeypatch, capsys):
+    """M8 V54 (KAN-975): the ambient block's card rows show the board-local ``ref``
+    when the API attached one, not the canonical ``ticket_number`` — mirroring
+    ``cli._display_ref`` (duplicated here since this module can't import ``cli``)."""
+
+    class RefFakeClient(FakeClient):
+        def list_cards(self, **kw):
+            self.calls.append(kw)
+            return {"cards": [
+                {**CARDS[0], "ref": "ENG-1"},
+                {**CARDS[1], "ref": None},  # no board key yet -> falls back
+            ]}
+
+    _install_fake(monkeypatch, factory=RefFakeClient)
+    assert cli.run(["context", "show"]) == 0
+    out = capsys.readouterr().out
+    assert "ENG-1\ttodo" in out
+    assert "KAN-2\tin_progress" in out  # null ref -> canonical ticket_number
+    assert "KAN-1" not in out
+
+
 def test_show_hook_emits_exactly_the_verified_envelope(monkeypatch, capsys):
     _install_fake(monkeypatch)
     assert cli.run(["context", "show", "--hook"]) == 0

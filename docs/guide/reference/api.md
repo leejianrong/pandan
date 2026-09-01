@@ -92,7 +92,10 @@ board you are on. `ref` is built from the board's key at read time, so changing 
 every ref at once and rewrites nothing.
 
 Reach them from the CLI with `pandan list --fields ref,title`, or over MCP with
-`list_cards(fields=["ref","title"])`. Nothing in the web UI shows them yet.
+`list_cards(fields=["ref","title"])`. The web UI shows the board-local `ref` everywhere a ticket
+appears — the card face, epic view, dashboard, trash, command palette — falling back to `ticket_number`
+if a read hasn't attached one (M8 V54). The CLI's default human row does the same, but `--fields ticket`
+stays mapped to the canonical `ticket_number` regardless — the two are meant to disagree.
 
 `PATCH` is where auto-sync and outbound webhook settings live. The outbound secret is accepted here and
 never returned by any read.

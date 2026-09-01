@@ -7,7 +7,7 @@
   import { ArrowDown, ArrowUp } from "lucide-svelte";
   import { board, epicFor } from "../board.svelte";
   import type { Card } from "../api";
-  import { compareTicketRefs } from "../tickets";
+  import { compareTicketRefs, displayRef } from "../tickets";
 
   const PRIORITY_RANK: Record<string, number> = {
     none: 0,
@@ -99,7 +99,7 @@
     <tbody>
       {#each rows as card (card.id)}
         <tr>
-          <td class="mono">{card.ticket_number}</td>
+          <td class="mono">{displayRef(card)}</td>
           <td class="title-cell">{card.title}</td>
           <td>{COLUMN_LABEL[card.column] ?? card.column}</td>
           <td class="cap">{card.priority}</td>

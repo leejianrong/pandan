@@ -23,11 +23,11 @@ test("add a blocker, see the blocked badge, then remove it", async ({ page }) =>
   await createCard(page, "Todo", blockerTitle);
   await createCard(page, "Todo", blockedTitle);
 
-  // The blocker's ticket number drives the Add-blocker option label + the
-  // blocked-by reference we assert later.
+  // The card face now renders the board-local ref (M8 V54), not the canonical
+  // KAN- form, so match either shape rather than pinning KAN- specifically.
   const blockerCard = cardInColumn(page, "Todo", blockerTitle);
   const blockerTicket = (await blockerCard.locator(".ticket").innerText()).trim();
-  expect(blockerTicket).toMatch(/^KAN-\d+$/);
+  expect(blockerTicket).toMatch(/^[A-Z][A-Z0-9]{1,9}-\d+$/);
 
   // No badge before any dependency exists.
   const blockedCard = cardInColumn(page, "Todo", blockedTitle);

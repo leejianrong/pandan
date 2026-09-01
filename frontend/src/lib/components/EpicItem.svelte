@@ -3,6 +3,7 @@
   import type { EpicHealth } from "../api";
   import type { Epic } from "../api";
   import { cardsForEpic, removeEpic } from "../board.svelte";
+  import { displayRef } from "../tickets";
   import EpicModal from "./EpicModal.svelte";
 
   let { epic }: { epic: Epic } = $props();
@@ -59,7 +60,7 @@
 {#if mode === "confirmDelete"}
   <div class="card confirm">
     <p class="confirm-msg">
-      Delete <strong>{epic.ticket_number}</strong> — “{epic.name}”? Its
+      Delete <strong>{displayRef(epic)}</strong> — “{epic.name}”? Its
       {total} linked {total === 1 ? "story" : "stories"} will be unlinked
       (not deleted).
     </p>
@@ -77,12 +78,12 @@
     class:completed={allDone}
     role="button"
     tabindex="0"
-    aria-label="Open {epic.ticket_number}: {epic.name}"
+    aria-label="Open {displayRef(epic)}: {epic.name}"
     onclick={openFromClick}
     onkeydown={onKeydown}
   >
     <div class="card-top">
-      <span class="ticket epic-ticket">{epic.ticket_number}</span>
+      <span class="ticket epic-ticket">{displayRef(epic)}</span>
       <span class="epic-count">{total} {total === 1 ? "story" : "stories"}</span>
       {#if health}
         <span class="health-pill {epic.health}" title="Health: {health.label}">
@@ -119,7 +120,7 @@
         {#each stories as story (story.id)}
           <li class:is-done={story.column === "done"}>
             <span class="sdot {story.column}" aria-hidden="true"></span>
-            <span class="ticket">{story.ticket_number}</span>
+            <span class="ticket">{displayRef(story)}</span>
             <span class="stitle">{story.title}</span>
           </li>
         {/each}

@@ -1283,6 +1283,57 @@ def test_single_card_with_labels_renders_card_line_not_no_labels(monkeypatch, en
     assert "(no labels)" not in out
 
 
+def test_get_shows_board_local_ref_not_canonical_ticket(monkeypatch, env, capsys):
+    """M8 V54 (KAN-975): the default human row's ticket column shows the board-local
+    ``ref`` when the API attached one, not the canonical ``ticket_number`` — even
+    though both are present on the same row."""
+    card = {
+        "ticket_number": "KAN-260", "ref": "ENG-14", "column": "done",
+        "title": "Fix humanize", "story_points": 3, "labels": [],
+    }
+    patch_client(monkeypatch, FakeClient(result=card))
+    assert cli.run(["get", "260"]) == 0
+    assert data_out(capsys).strip() == "ENG-14\tdone\tFix humanize\tpts=3"
+
+
+def test_get_falls_back_to_ticket_number_when_ref_is_null(monkeypatch, env, capsys):
+    """A row with ``ref: null`` (no board key attached yet) still shows a ticket —
+    the canonical ``ticket_number`` — rather than ``None`` or an empty column."""
+    card = {
+        "ticket_number": "KAN-260", "ref": None, "column": "done",
+        "title": "Fix humanize", "story_points": 3, "labels": [],
+    }
+    patch_client(monkeypatch, FakeClient(result=card))
+    assert cli.run(["get", "260"]) == 0
+    assert data_out(capsys).strip() == "KAN-260\tdone\tFix humanize\tpts=3"
+
+
+def test_fields_ticket_stays_canonical_even_when_ref_differs(monkeypatch, env, capsys):
+    """``--fields ticket`` is the canonical ``KAN-`` form (``FIELD_ALIASES`` maps it to
+    ``ticket_number``) — deliberately unaffected by the default row's switch to the
+    board-local ``ref`` (M8 V54). The two are supposed to disagree."""
+    cards = {"cards": [
+        {"ticket_number": "KAN-260", "ref": "ENG-14", "column": "done", "title": "Fix humanize"},
+    ]}
+    patch_client(monkeypatch, FakeClient(result=cards))
+    assert cli.run(["list", "--fields", "ticket"]) == 0
+    assert capsys.readouterr().out.splitlines()[0] == "KAN-260"
+
+
+def test_epic_line_shows_board_local_ref(monkeypatch, env, capsys):
+    """M8 V54 (KAN-975): an epic's default row also shows its board-local ref
+    (``ENG-E7``) rather than the canonical ``EPIC-`` ticket, mirroring cards."""
+    epic = {
+        "ticket_number": "EPIC-7", "ref": "ENG-E7", "name": "Onboarding",
+        "progress": {"percent": 60, "done": 3, "total": 5}, "health": "on_track",
+    }
+    patch_client(monkeypatch, FakeClient(result=epic))
+    assert cli.run(["epic", "get", "7"]) == 0
+    out = data_out(capsys).strip()
+    assert out.startswith("ENG-E7\t")
+    assert "EPIC-7" not in out
+
+
 def test_label_list_renders_labels(monkeypatch, env, capsys):
     """`pandan label list` on a real ``{"labels": [...]}`` response renders one line
     per label (id, name, color) — the legitimate consumer of the labels branch."""

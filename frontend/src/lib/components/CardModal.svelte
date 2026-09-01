@@ -26,6 +26,7 @@
     removeCardLink,
   } from "../board.svelte";
   import { session } from "../session.svelte";
+  import { displayRef } from "../tickets";
   import { marked } from "marked";
   import DOMPurify from "dompurify";
   import Modal from "./Modal.svelte";
@@ -145,7 +146,7 @@
     { value: "", label: "— no epic" },
     ...epicOptions.map((e) => ({
       value: String(e.id),
-      label: `${e.ticket_number} · ${e.name}`,
+      label: `${displayRef(e)} · ${e.name}`,
     })),
   ]);
 
@@ -155,7 +156,7 @@
       : [...labelIds, id];
   }
   const epic = $derived(card ? epicFor(card.epic_id) : null);
-  const ticket = $derived(card?.ticket_number ?? "");
+  const ticket = $derived(card ? displayRef(card) : "");
   const columnLabel = $derived(
     COLUMNS.find((c) => c.key === card?.column)?.label ?? "",
   );
@@ -193,7 +194,7 @@
     },
     ...blockerCandidates.map((c) => ({
       value: String(c.id),
-      label: `${c.ticket_number} · ${c.title}`,
+      label: `${displayRef(c)} · ${c.title}`,
     })),
   ]);
   let depBusy = $state(false);
@@ -395,7 +396,7 @@
           </span>
         {/if}
         {#if epic}
-          <span class="epic-tag" title="{epic.ticket_number} · {epic.name}">{epic.name}</span>
+          <span class="epic-tag" title="{displayRef(epic)} · {epic.name}">{epic.name}</span>
         {/if}
         <button
           type="button"
@@ -573,13 +574,13 @@
                   {#each blockers as b}
                     {#if b}
                       <li class="blocker-item">
-                        <span class="dep-ref" title={b.title}>{b.ticket_number}</span>
+                        <span class="dep-ref" title={b.title}>{displayRef(b)}</span>
                         <span class="blocker-ref" title={b.title}>{b.title}</span>
                         <button
                           type="button"
                           class="icon-btn danger"
                           title="Remove blocker"
-                          aria-label="Remove blocker {b.ticket_number}"
+                          aria-label="Remove blocker {displayRef(b)}"
                           disabled={depBusy}
                           onclick={() => onRemoveBlocker(b.id)}
                         >
@@ -610,7 +611,7 @@
                 <div class="chip-row">
                   {#each blocks as b}
                     {#if b}
-                      <span class="dep-ref" title={b.title}>{b.ticket_number}</span>
+                      <span class="dep-ref" title={b.title}>{displayRef(b)}</span>
                     {/if}
                   {/each}
                 </div>
