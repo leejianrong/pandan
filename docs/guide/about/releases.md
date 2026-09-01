@@ -70,7 +70,9 @@ That strictness is on purpose. The whole value of printing a build commit is tha
 detectable, and an unbumped version silently breaks that.
 
 The API is versioned by its path prefix, `/api/v1`. A breaking change would go to a new prefix rather than
-altering `v1` underneath existing clients.
+altering `v1` underneath existing clients — see
+[ADR 0022](https://github.com/leejianrong/pandan/blob/main/docs/adr/0022-api-stability-policy.md) for
+what counts as breaking and how a deprecation is announced.
 
 ## What is not in a release
 
