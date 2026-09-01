@@ -163,9 +163,21 @@ def _effective_access(db: Session, principal: User, board: Board) -> Access | No
     """The principal's effective :class:`Access` on ``board``, or ``None`` if it
     has no access at all.
 
-    The board OWNER always has ``MANAGE`` (full access), regardless of any
-    membership row (KAN-13). Otherwise the principal's ``board_member`` role, if
-    any, decides. No ownership and no membership row → ``None`` (→ 403).
+    Checked in order (M9 V68, KAN-1057; ADR 0021 §"Interaction with the existing
+    board-role model", SHAPING D2):
+
+    1. The board **OWNER** always has ``MANAGE`` (full access), regardless of any
+       membership row (KAN-13).
+    2. An explicit ``board_member`` row, if any — **the override**. Checked before
+       the team default so an explicit share always wins, per D2.
+    3. The board's **team default** (new): if ``board.team_id`` is set and the
+       principal is a ``team_member`` of it, that membership's role maps through
+       the *same* ``_ROLE_ACCESS`` table — one vocabulary, two places it can be
+       granted (ADR 0021 §Shape). Only consulted when step 2 found nothing, so an
+       explicit ``viewer`` share on a board still beats an ``editor`` team default,
+       and vice versa — "explicit" wins on *presence*, not on being the higher
+       grant.
+    4. None of the above → ``None`` (→ 403).
     """
     if board.owner_id == principal.id:
         return Access.MANAGE
@@ -175,10 +187,19 @@ def _effective_access(db: Session, principal: User, board: Board) -> Access | No
             BoardMember.user_id == principal.id,
         )
     )
-    if role is None:
-        return None
-    # An unknown role (should never happen — CHECK-constrained) grants nothing.
-    return _ROLE_ACCESS.get(role)
+    if role is not None:
+        # An unknown role (should never happen — CHECK-constrained) grants nothing.
+        return _ROLE_ACCESS.get(role)
+    if board.team_id is not None:
+        role = db.scalar(
+            select(TeamMember.role).where(
+                TeamMember.team_id == board.team_id,
+                TeamMember.user_id == principal.id,
+            )
+        )
+        if role is not None:
+            return _ROLE_ACCESS.get(role)
+    return None
 
 
 def authorize_board(
@@ -210,15 +231,22 @@ def visible_board_ids(principal: User) -> Select:
     """A scalar subquery of the board ids this principal may see. Used to scope
     list endpoints so a caller only ever sees boards they have access to.
 
-    A board is visible if the principal **owns** it *or* is a ``board_member`` of
-    it (KAN-15) — the same set of boards :func:`authorize_board` grants at least
-    ``READ`` on. Kept as a ``Select`` so callers can use it as an ``IN`` subquery
-    unchanged."""
+    A board is visible if the principal **owns** it, *or* is a ``board_member`` of
+    it (KAN-15), *or* is a ``team_member`` of the team it belongs to (M9 V68,
+    KAN-1057; ADR 0021 — the matching ``OR`` clause for :func:`_effective_access`'s
+    new team-default rung) — the same set of boards :func:`authorize_board` grants
+    at least ``READ`` on. Kept as a ``Select`` so callers can use it as an ``IN``
+    subquery unchanged."""
     return select(Board.id).where(
         or_(
             Board.owner_id == principal.id,
             Board.id.in_(
                 select(BoardMember.board_id).where(BoardMember.user_id == principal.id)
+            ),
+            Board.id.in_(
+                select(Board.id)
+                .join(TeamMember, TeamMember.team_id == Board.team_id)
+                .where(TeamMember.user_id == principal.id)
             ),
         )
     )
@@ -230,9 +258,9 @@ def visible_board_ids(principal: User) -> Select:
 # the `owner` role, not by one person by default), so unlike a board there is no
 # owner-always-MANAGE rung: membership itself is the whole visibility rule, and
 # holding the `owner` role (not "being *the* owner" — a team may have several) is
-# the whole management rule. The team-default-board-access rung
-# (`_effective_access` step 3) arrives with V68 — reads/writes of the team's own
-# members are what V66 gates here.
+# the whole management rule. (The team-default-board-*access* rung — a team role
+# granting access to a *board* — is `_effective_access` step 3 / `visible_board_ids`
+# above, V68; what follows here gates the team's own membership, V66.)
 
 
 def visible_team_ids(principal: User) -> Select:
