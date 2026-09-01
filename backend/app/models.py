@@ -149,6 +149,17 @@ class Board(Base):
         onupdate=func.now(),
     )
 
+    # The team this board belongs to (M9 V65, KAN-1054; ADR 0021). Nullable, ON
+    # DELETE SET NULL — mirrors ``owner_id``'s own pattern exactly: deleting a team
+    # unclaims its boards rather than destroying them. ``owner_id`` stays untouched
+    # and still required — a board keeps exactly one human owner; ``team_id`` is an
+    # additional grouping/sharing pointer layered on top, not a replacement for
+    # ownership. A board belongs to at most one team (no join table, ADR 0021
+    # §Alternatives rejected). NULL is every existing board's unchanged meaning —
+    # this migration backfills nothing (SHAPING R5).
+    team_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("team.id", ondelete="SET NULL"), nullable=True
+    )
     # Per-board ticket counters (M8 V52, KAN-973). Each holds the **highest number
     # issued so far** on this board — a board with 77 cards holds 77 — and a create
     # takes the next one with a single row-locked statement:
@@ -223,6 +234,76 @@ class BoardMember(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     board_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("board.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The member user (a UUID). CASCADE: deleting a user removes their memberships.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID, ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class Team(Base):
+    """The tenant tier above a User (M9 V65, KAN-1054; ADR 0021) — a company's
+    grouping of members and, via ``Board.team_id``, of boards.
+
+    Deliberately **no ``owner_id``**: unlike a board, a team isn't administered by
+    one person by default — it's administered by whichever of its members hold the
+    ``owner`` role (see :class:`TeamMember`). Deliberately **no ``key`` either** — a
+    team has no ticket-ref namespace of its own; that stays exactly where ADR 0020
+    put it (per-user, not per-team — see ADR 0021 §Consequences).
+    """
+
+    __tablename__ = "team"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class TeamMember(Base):
+    """A user's membership of a team with a role (M9 V65, KAN-1054; ADR 0021).
+
+    Mirrors :class:`BoardMember`'s shape exactly, on purpose (ADR 0021 §Shape):
+    roles reuse ``VALID_ROLES`` (``viewer``/``editor``/``owner``), guarded by a
+    CHECK constraint in the ``card.column`` varchar style, and a
+    ``UNIQUE(team_id, user_id)`` keeps a user's membership of a team singular. Both
+    FKs ``ON DELETE CASCADE`` — deleting a team or a user removes the membership row
+    (consistent with the app's hard-delete model).
+
+    Team membership grants a team **default** board access once V68 lands (an
+    explicit ``BoardMember`` row still wins) — this slice (V65) only creates the
+    table and its own owner-only management arrives with V66.
+    """
+
+    __tablename__ = "team_member"
+    __table_args__ = (
+        UniqueConstraint("team_id", "user_id", name="uq_team_member"),
+        CheckConstraint(
+            "role IN ('viewer', 'editor', 'owner')",
+            name="ck_team_member_role",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    team_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("team.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # The member user (a UUID). CASCADE: deleting a user removes their memberships.
     user_id: Mapped[uuid.UUID] = mapped_column(

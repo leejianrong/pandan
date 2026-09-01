@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from .auth import bearer_scheme
 from .auth_models import PersonalAccessToken, User
 from .db import get_db
-from .models import Board, BoardMember
+from .models import Board, BoardMember, Team, TeamMember
 from .tokens import ACCEPTED_TOKEN_PREFIXES, hash_token
 from .users import current_optional_user
 
@@ -222,3 +222,46 @@ def visible_board_ids(principal: User) -> Select:
             ),
         )
     )
+
+
+# --- teams (M9 V65, KAN-1054; ADR 0021) -------------------------------------
+#
+# A team has no owner_id (ADR 0021 §Shape — administered by whichever member holds
+# the `owner` role, not by one person by default), so unlike a board there is no
+# owner-always-MANAGE rung: membership itself is the whole visibility/access rule
+# for this slice. Role-graded team access (owner-only rename/delete/member
+# management) and the team-default-board-access rung (`_effective_access` step 3)
+# both arrive with V66/V68 — this slice only needs "is a member at all".
+
+
+def visible_team_ids(principal: User) -> Select:
+    """A scalar subquery of the team ids this principal is a member of. Mirrors
+    :func:`visible_board_ids`, but simpler: a team has no owner analogue, so
+    membership is the entire rule."""
+    return select(TeamMember.team_id).where(TeamMember.user_id == principal.id)
+
+
+def authorize_team(db: Session, principal: User, team_id: int) -> Team:
+    """Load ``team_id`` and assert the principal is a member of it, else raise.
+    Returns the loaded team with the principal's role attached transiently as
+    ``team.role`` (mirrors ``BoardRead.role``'s attachment pattern), so callers
+    don't need a second query to answer "what's my role here".
+
+    - **404** if the team doesn't exist.
+    - **403** if the principal is not a member of it (any role).
+    """
+    team = db.get(Team, team_id)
+    if team is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    role = db.scalar(
+        select(TeamMember.role).where(
+            TeamMember.team_id == team_id, TeamMember.user_id == principal.id
+        )
+    )
+    if role is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="you do not have access to this team",
+        )
+    team.role = role
+    return team

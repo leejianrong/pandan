@@ -708,6 +708,36 @@ class MemberRead(BaseModel):
     updated_at: datetime
 
 
+class TeamCreate(BaseModel):
+    """Create a team (M9 V65, KAN-1054; ADR 0021). The creator is auto-added as an
+    owner-role team_member by the router — the same bootstrap
+    ``app.authz.authorize_board`` already gives a board's creator."""
+
+    name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
+
+    @field_validator("name")
+    @classmethod
+    def name_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name must not be empty")
+        return v
+
+
+class TeamRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    # The caller's effective role on this team (viewer/editor/owner), attached
+    # transiently by the router (not an ORM column) — mirrors BoardRead.role.
+    # Unlike a board a team has no owner analogue: every team a caller can see is
+    # one they're a member of (visible_team_ids IS membership), so this is never
+    # null on a list/get response reached through the router.
+    role: RoleEnum | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ActivityRead(BaseModel):
     """One append-only audit record of a board-domain mutation (KAN-17 write path,
     KAN-18 read side). Mirrors the ``Activity`` model's real columns; there is no
