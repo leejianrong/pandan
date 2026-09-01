@@ -157,6 +157,17 @@ slices, matching the existing incremental style.
 > target; `make up` runs the whole stack (db + app image serving the SPA) in one command via
 > `docker compose up --build`, and `make dev` is the native hot-reload loop. The detailed commands
 > below remain the source of truth for what each step does.
+>
+> **`make dev` picks free ports rather than assuming its defaults are free.** Postgres, uvicorn and
+> Vite still prefer 5432/8000/5173 — a single-project machine is unchanged — but each falls through
+> to the next free port when something else holds one (`scripts/free-port.sh`), and the run prints
+> the three URLs it settled on. This matters because the failures it replaces did not look like port
+> conflicts: a foreign Postgres on :5432 rejects the `kanban` credentials (reads as broken config), a
+> foreign app on :8000 happily answers Vite's proxied `/api` calls (reads as a backend bug), and a
+> compose container whose bind failed stays `running` while publishing no host port at all —
+> `scripts/dev-db.sh` detects that last state and recreates the container. It also honours an
+> already-exported `DATABASE_URL`, so a worktree pointed at its own `make worktree-db` never gets a
+> second Postgres started underneath it. Guarded by `mcp/tests/test_dev_ports.py`.
 
 Backend uses **`uv`** (Python 3.12; see [backend/pyproject.toml](backend/pyproject.toml) + `uv.lock`).
 Frontend uses **`npm`** (Node 20+). Run backend commands from `backend/`, frontend from `frontend/`.
@@ -338,8 +349,13 @@ export DATABASE_URL=$(make -s worktree-db-url)  # point backend/alembic at it
 make migrate                                  # (or from backend/: uv run alembic upgrade head)
 make worktree-db-down                         # tear it down when the worktree is done
 ```
-`make db`/`make up`/`make dev` (shared :5432 compose Postgres) remain the loop for the primary
-checkout. Integration tests are unaffected — they spin up throwaway testcontainers of their own.
+`make db`/`make up`/`make dev` (the shared compose Postgres, preferring :5432) remain the loop for the
+primary checkout. `make dev` and `make db` now auto-pick a free port and print the resulting
+`DATABASE_URL`, and both honour an exported one — so running `make dev` inside a worktree that has
+already exported its `make worktree-db` URL does the right thing instead of starting a second
+Postgres. `make up` still publishes the fixed `5432`/`8000`, since the full-stack demo is meant to be
+reachable at a URL you can quote. Integration tests are unaffected — they spin up throwaway
+testcontainers of their own.
 
 **Running e2e from a worktree — the ports are env-overridable too (KAN-391).** Playwright uses
 `reuseExistingServer` in dev, and the backend/Vite origins default to `:8000`/`:5173`; on a

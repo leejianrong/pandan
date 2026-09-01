@@ -38,7 +38,7 @@ WT_BACKEND_PORT  := $(shell echo "$(CURDIR)be" | cksum | awk '{print 8100 + ($$1
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up demo down down-v clean db install migrate dev \
+.PHONY: help up demo down down-v clean db dev-db-url install migrate dev \
         test test-integration e2e lint check \
         worktree-db worktree-db-url worktree-db-down worktree-e2e
 
@@ -60,8 +60,13 @@ down-v: ## DESTRUCTIVE: `down` and also delete the Postgres data volume
 
 clean: down-v ## DESTRUCTIVE alias for `down-v` — tear everything down incl. the DB volume
 
-db: ## Start just Postgres in the background (for the native hot-reload dev loop)
-	docker compose up -d db
+db: ## Start just Postgres in the background on a FREE port (for the native hot-reload dev loop)
+	@url=$$(./scripts/dev-db.sh); \
+	echo "export DATABASE_URL=$$url"; \
+	echo '# ^ export that before `make migrate` / running the backend by hand, unless it is the default :5432'"'"''
+
+dev-db-url: ## Print the DATABASE_URL for the local dev Postgres (starting it if needed)
+	@./scripts/dev-db.sh
 
 worktree-db: ## Start an EPHEMERAL Postgres for THIS worktree on its own port; prints the DATABASE_URL to export
 	@if [ -z "$$(docker ps -q -f name=^/kanban-db-$(WT_SLUG)$$)" ]; then \
@@ -96,9 +101,19 @@ install: ## Install deps: backend `uv sync` + frontend `npm ci`
 migrate: ## Apply DB migrations (backend `alembic upgrade head`)
 	cd $(BACKEND) && uv run alembic upgrade head
 
-dev: db migrate ## Local hot-reload loop: Postgres (Docker) + backend uvicorn --reload + Vite together; Ctrl-C stops both. Open http://localhost:5173
-	@trap 'kill 0' EXIT; \
-	(cd $(BACKEND) && uv run uvicorn app.main:app --reload) & \
+dev: ## Local hot-reload loop: Postgres (Docker) + backend uvicorn --reload + Vite together, each on a FREE port; Ctrl-C stops both
+	@set -e; \
+	DATABASE_URL=$$(./scripts/dev-db.sh); export DATABASE_URL; \
+	BACKEND_PORT=$$(./scripts/free-port.sh $${BACKEND_PORT:-8000}); export BACKEND_PORT; \
+	FRONTEND_PORT=$$(./scripts/free-port.sh $${FRONTEND_PORT:-5173}); export FRONTEND_PORT; \
+	(cd $(BACKEND) && uv run alembic upgrade head); \
+	echo ''; \
+	echo "  app      http://localhost:$$FRONTEND_PORT"; \
+	echo "  api      http://localhost:$$BACKEND_PORT/docs"; \
+	echo "  database $$DATABASE_URL"; \
+	echo ''; \
+	trap 'kill 0' EXIT; \
+	(cd $(BACKEND) && uv run uvicorn app.main:app --reload --port $$BACKEND_PORT) & \
 	(cd $(FRONTEND) && npm run dev) & \
 	wait
 

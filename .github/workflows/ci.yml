@@ -132,6 +132,12 @@ jobs:
               # here, because the guard it replaced was itself inert and nothing
               # noticed for months.
               - 'scripts/check-freeze-interpreter.sh'
+              # And once more: mcp/tests/test_dev_ports.py exercises
+              # scripts/free-port.sh + scripts/dev-db.sh, which decide the ports
+              # `make dev` binds. Same hole, same reason they live in mcp/tests —
+              # no DB/Docker/network needed for the pure port-picking half.
+              - 'scripts/free-port.sh'
+              - 'scripts/dev-db.sh'
               # And once more (KAN-586): mcp/tests/test_deploy_gates.py pins the
               # CI/Deploy/auto-merge invariants that keep a merge to main actually
               # reaching production — the concurrency key just above, deploy.yml's
