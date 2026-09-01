@@ -735,6 +735,18 @@ def _humanize(
     return json.dumps(result, default=str)
 
 
+def _display_ref(entity: dict[str, Any]) -> str:
+    """What a human sees as a card/epic's ticket in the default row (M8 V54,
+    KAN-975, issue #280): the board-local ``ref`` (``ENG-14``) when the API
+    attached one, else the canonical ``ticket_number`` (``KAN-955``).
+
+    This is deliberately narrower than ``--fields ticket``, which stays mapped to
+    ``ticket_number`` (``FIELD_ALIASES``) — the default row's own ticket column is
+    the *display* form, an explicit ``--fields`` projection is the *canonical* one,
+    and the two are supposed to disagree. See README/docs/guide/cli/reading.md."""
+    return str(entity.get("ref") or entity.get("ticket_number", entity.get("id", "?")))
+
+
 def _fmt_points(points: int | None) -> str:
     """Render a card's ``story_points`` for human output: ``pts=3`` when set, ``pts=-``
     when null/absent (never the literal string ``None``). The field name mirrors the
@@ -745,15 +757,20 @@ def _fmt_points(points: int | None) -> str:
 def _card_line(card: dict[str, Any]) -> str:
     """One concise line for a card: ticket, column, title, story points (tab-separated).
 
+    The ticket column shows the board-local ``ref`` when the API attached one,
+    else the canonical ``ticket_number`` (M8 V54, KAN-975) — see ``_display_ref``.
+    ``--fields ticket`` still resolves to ``ticket_number`` regardless; the two are
+    meant to differ.
+
     Story points read the API's ``story_points`` field (what ``--points`` writes and
     ``--json`` shows), rendered ``pts=<n>``/``pts=-`` so they're never invisible in
-    human output (KAN-269). The ticket/column/title prefix is unchanged.
+    human output (KAN-269).
 
     ``title`` is free text (a ``varchar`` the API does not screen for control
     characters), so it goes through ``_flatten`` — one card, one line (KAN-485)."""
     return "\t".join(
         (
-            str(card.get("ticket_number", card.get("id", "?"))),
+            _display_ref(card),
             str(card.get("column", "")),
             _flatten(str(card.get("title", ""))),
             _fmt_points(card.get("story_points")),
@@ -811,12 +828,16 @@ def _fmt_progress(epic: dict[str, Any]) -> str:
 def _epic_line(epic: dict[str, Any]) -> str:
     """One concise line for an epic: ticket, name, progress rollup (tab-separated).
 
+    The ticket column shows the board-local ``ref`` (``ENG-E7``) when the API
+    attached one, else the canonical ``ticket_number`` (M8 V54, KAN-975) — see
+    ``_display_ref``. ``--fields ticket`` still resolves to ``ticket_number``.
+
     Progress reads the API's derived ``progress``/``health`` (V32, KAN-296), rendered
     ``<pct>% (<done>/<total>) [<health>]`` so an epic's completion + risk are visible
     in human output; ``--json`` shows the full objects."""
     return "\t".join(
         (
-            str(epic.get("ticket_number", epic.get("id", "?"))),
+            _display_ref(epic),
             _flatten(str(epic.get("name", ""))),
             _fmt_progress(epic),
         )

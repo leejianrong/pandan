@@ -41,6 +41,7 @@
     WINDOW_OPTIONS,
     type DashboardWindow,
   } from "../dashboard.svelte";
+  import { displayRef } from "../tickets";
   import BoardTable from "./BoardTable.svelte";
 
   // Optional cross-view navigation (App passes a switch-to-board callback) so a
@@ -278,7 +279,7 @@
               <ul class="inflight-list">
                 {#each group.cards as card (card.id)}
                   <li class="inflight-row">
-                    <span class="ticket">{card.ticket_number}</span>
+                    <span class="ticket">{displayRef(card)}</span>
                     <span class="inflight-title" title={card.title}>{card.title}</span>
                     <span class="inflight-badges">
                       {#if card.needs_human}
@@ -324,7 +325,7 @@
           {#each dashboardStore.attention as card (card.id)}
             <li class="attn-row">
               <div class="attn-top">
-                <span class="ticket">{card.ticket_number}</span>
+                <span class="ticket">{displayRef(card)}</span>
                 <span class="attn-title" title={card.title}>{card.title}</span>
                 {#if navigate}
                   <button class="row-link" onclick={goToBoard} title="Open on the board">

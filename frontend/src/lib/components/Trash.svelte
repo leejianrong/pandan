@@ -13,6 +13,7 @@
     restoreEpicItem,
     trashStore,
   } from "../trash.svelte";
+  import { displayRef } from "../tickets";
 
   // Board-scoped: reload whenever the active board changes (also on mount, since the
   // component only mounts when the view is open). Mirrors Activity / Members.
@@ -36,14 +37,14 @@
       ...trashStore.cards.map((c) => ({
         kind: "card" as const,
         id: c.id,
-        ticket: c.ticket_number,
+        ticket: displayRef(c),
         title: c.title,
         deleted_at: c.deleted_at,
       })),
       ...trashStore.epics.map((e) => ({
         kind: "epic" as const,
         id: e.id,
-        ticket: e.ticket_number,
+        ticket: displayRef(e),
         title: e.name,
         deleted_at: e.deleted_at,
       })),

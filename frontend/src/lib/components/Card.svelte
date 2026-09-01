@@ -3,6 +3,7 @@
   import { labelColor, type Card, type Priority } from "../api";
   import { cardById, epicFor, removeCard } from "../board.svelte";
   import { kbd } from "../keyboard.svelte";
+  import { displayRef } from "../tickets";
   import CardModal from "./CardModal.svelte";
 
   let { card }: { card: Card } = $props();
@@ -38,7 +39,7 @@
   function ref(id: number): { ticket: string; title: string } {
     const c = cardById(id);
     return c
-      ? { ticket: c.ticket_number, title: c.title }
+      ? { ticket: displayRef(c), title: c.title }
       : { ticket: `#${id}`, title: `card ${id}` };
   }
   const blockedBy = $derived(card.blocked_by.map(ref));
@@ -104,7 +105,7 @@
 {#if mode === "confirmDelete"}
   <div class="card confirm">
     <p class="confirm-msg">
-      Delete <strong>{card.ticket_number}</strong> — “{card.title}”? This can't be
+      Delete <strong>{displayRef(card)}</strong> — “{card.title}”? This can't be
       undone.
     </p>
     {#if deleteError}
@@ -123,14 +124,14 @@
     role="button"
     tabindex="0"
     data-card-id={card.id}
-    aria-label="Open {card.ticket_number}: {card.title}"
+    aria-label="Open {displayRef(card)}: {card.title}"
     onpointerdown={onPointerDown}
     onfocus={() => (kbd.focusedCardId = card.id)}
     onclick={openFromClick}
     onkeydown={onKeydown}
   >
     <div class="card-top">
-      <span class="ticket">{card.ticket_number}</span>
+      <span class="ticket">{displayRef(card)}</span>
       {#if priorityMeta}
         <span class="priority-badge" title="Priority: {priorityMeta.label}">
           <span class="priority-dot" style="background: {priorityMeta.color}" aria-hidden="true"
@@ -151,7 +152,7 @@
         </span>
       {/if}
       {#if epic}
-        <span class="epic-tag" title="{epic.ticket_number} · {epic.name}">{epic.name}</span>
+        <span class="epic-tag" title="{displayRef(epic)} · {epic.name}">{epic.name}</span>
       {/if}
       {#if card.story_points != null}
         <span class="points" title="Story points">{card.story_points}</span>

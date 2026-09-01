@@ -24,6 +24,15 @@ help: pandan next --claim
 `overview` is what bare `pandan` prints. It shows only open work (`todo` and `in_progress`), which is
 almost always the question you actually have.
 
+!!! note "That ticket column is board-local, not the canonical form"
+
+    Every default row's ticket column shows the board-local `ref` (`ENG-14`) once the board has a key,
+    falling back to the canonical `ticket_number` (`KAN-955`) otherwise (M8 V54). This is a *display*
+    choice: `--fields ticket` always resolves to the canonical form regardless of what the row shows —
+    the two are meant to disagree. Use the canonical form when you need something that resolves from
+    any board with no context (an external link, a cross-board reference); use whatever the row already
+    shows when you're just working on this board.
+
 ## Listing and filtering cards
 
 ```bash

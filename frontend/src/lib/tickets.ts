@@ -35,3 +35,15 @@ export function compareTicketRefs(a: string, b: string): number {
   // total and the sort stays deterministic.
   return a.localeCompare(b);
 }
+
+// What a human sees for a card or epic's ticket (M8 V54, KAN-975, issue #280).
+// The board-local `ref` (`ENG-14`) is the display form; the canonical
+// `ticket_number` (`KAN-955`) is the fallback for the rare case the API hasn't
+// attached one (a board with no key, which cannot happen post-migration, or a
+// read path that doesn't resolve it). Every *display* site should go through
+// this; sorting/searching stays on `ticket_number` deliberately (see
+// `compareTicketRefs` above and `CommandPalette.svelte`), since it's the
+// canonical, always-present, globally comparable form.
+export function displayRef(entity: { ref: string | null; ticket_number: string }): string {
+  return entity.ref ?? entity.ticket_number;
+}

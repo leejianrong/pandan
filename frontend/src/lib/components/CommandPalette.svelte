@@ -26,6 +26,7 @@
   import type { CommandGroup, CommandItem } from "./ui";
   import { COLUMNS, boardStore, board, epicStore, setActiveBoard, addCard, moveCard, setQuery, setActiveView } from "../board.svelte";
   import { themeStore, toggleTheme } from "../theme.svelte";
+  import { displayRef } from "../tickets";
   import type { Column } from "../api";
 
   // App owns navigation (`show()` has side-effects like refetchTokens), so it's
@@ -203,11 +204,13 @@
   function cardPickGroups(): CommandGroup[] {
     const items: CommandItem[] = board.cards.map((c) => ({
       value: `${c.ticket_number} ${c.title}`,
-      label: `${c.ticket_number} · ${c.title}`,
-      keywords: [c.ticket_number, c.title],
+      label: `${displayRef(c)} · ${c.title}`,
+      // Search matches either form — the canonical ticket_number and the
+      // board-local ref (when one exists), plus the title.
+      keywords: [c.ticket_number, ...(c.ref ? [c.ref] : []), c.title],
       onSelect: () => {
         moveCardId = c.id;
-        moveCardLabel = c.ticket_number;
+        moveCardLabel = displayRef(c);
         enter("move-target");
       },
     }));
@@ -248,9 +251,9 @@
   function epicGroups(): CommandGroup[] {
     const items: CommandItem[] = epicStore.epics.map((e) => ({
       value: `${e.ticket_number} ${e.name}`,
-      label: `${e.ticket_number} · ${e.name}`,
+      label: `${displayRef(e)} · ${e.name}`,
       icon: Layers,
-      keywords: [e.ticket_number, e.name],
+      keywords: [e.ticket_number, ...(e.ref ? [e.ref] : []), e.name],
       onSelect: () => run(async () => {
         navigate("board");
         await setQuery({ epic_id: e.id });

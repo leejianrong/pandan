@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import { Trash2, X } from "lucide-svelte";
   import { cardsForEpic, editEpic, epicStore, removeEpic } from "../board.svelte";
+  import { displayRef } from "../tickets";
   import Modal from "./Modal.svelte";
 
   // Edit an epic's name + description in place, with its story rollup shown for
@@ -69,10 +70,10 @@
 </script>
 
 {#if epic}
-  <Modal label="Epic {epic.ticket_number}: {epic.name}" {onclose}>
+  <Modal label="Epic {displayRef(epic)}: {epic.name}" {onclose}>
     <form class="card-form epic-modal" onsubmit={submit}>
       <header class="modal-head">
-        <span class="ticket epic-ticket">{epic.ticket_number}</span>
+        <span class="ticket epic-ticket">{displayRef(epic)}</span>
         <span class="epic-count">
           {stories.length}
           {stories.length === 1 ? "story" : "stories"}
@@ -116,7 +117,7 @@
                 {#each stories as story (story.id)}
                   <li class:is-done={story.column === "done"}>
                     <span class="sdot {story.column}" aria-hidden="true"></span>
-                    <span class="ticket">{story.ticket_number}</span>
+                    <span class="ticket">{displayRef(story)}</span>
                     <span class="stitle">{story.title}</span>
                   </li>
                 {/each}
@@ -131,7 +132,7 @@
       <footer class="modal-foot">
         {#if confirming}
           <span class="confirm-msg">
-            Delete {epic.ticket_number}? Its {stories.length}
+            Delete {displayRef(epic)}? Its {stories.length}
             linked {stories.length === 1 ? "story" : "stories"} will be unlinked (not deleted).
           </span>
           <button type="button" class="danger" onclick={confirmDelete} disabled={deleting}>

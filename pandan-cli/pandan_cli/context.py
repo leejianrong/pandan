@@ -563,7 +563,11 @@ def _resolved_board() -> tuple[str, str, str]:
 
 def _card_row(card: dict[str, Any]) -> str:
     points = card.get("story_points")
-    ticket = card.get("ticket_number") or f"#{card.get('id')}"
+    # The board-local ref (M8 V54, KAN-975) when the API attached one, else the
+    # canonical ticket_number, else the raw id. Mirrors cli.py's ``_display_ref`` —
+    # duplicated rather than imported, since this module can't circularly import
+    # ``cli`` (see the ``ContextError`` docstring above).
+    ticket = card.get("ref") or card.get("ticket_number") or f"#{card.get('id')}"
     title = str(card.get("title") or "").replace("\n", " ").strip()
     assignee = card.get("assignee")
     row = f"{ticket}\t{card.get('column')}\t{title}\tpts={points if points else '-'}"

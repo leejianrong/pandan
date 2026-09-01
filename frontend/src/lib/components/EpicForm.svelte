@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import type { Epic } from "../api";
   import { addEpic, editEpic } from "../board.svelte";
+  import { displayRef } from "../tickets";
 
   // Create mode: no `epic`. Edit mode: pass `epic`. Mirrors CardForm (ADR 0009).
   let {
@@ -51,7 +52,7 @@
 
 <form class="card-form" onsubmit={submit}>
   {#if isEdit}
-    <span class="ticket">{epic!.ticket_number}</span>
+    <span class="ticket">{displayRef(epic!)}</span>
   {/if}
   <!-- svelte-ignore a11y_autofocus -->
   <input type="text" placeholder="Epic name (required)" bind:value={name} autofocus />

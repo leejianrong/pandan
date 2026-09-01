@@ -31,15 +31,19 @@ maintainer: **EPIC-122** board-local ticket refs ([#280](https://github.com/leej
 **EPIC-124** epic + label colour ([#278](https://github.com/leejianrong/pandan/issues/278)). One theme:
 the board assumed one user with one board, and all three problems are that assumption breaking.
 **M8 is the first milestone since M6 to change the schema** — M7's no-API/no-schema/no-migration
-constraint expired with it — so five slices carry an additive migration and each lands alone. **Six
+constraint expired with it — so five slices carry an additive migration and each lands alone. **Seven
 slices have shipped**: V61 and V62 (label management UI + the measured seven-token palette), V55
 (`PATCH /cycles/{id}`, the edit a sprint never had), **V51 — `board.key`, the head of the four-slice
 identity chain** ([ADR 0020](docs/adr/0020-board-keys.md)), **V52 — `card.board_seq` /
-`epic.board_seq`, so every card and epic carries a gapless board-local `ref` in its payload**, and
+`epic.board_seq`, so every card and epic carries a gapless board-local `ref` in its payload**,
 **V53 — every resolver now accepts both forms** (the batch read, autosync's branch-name scan, and the
-CLI's `_resolve_card_id`/`_resolve_epic_id`, plus the owner-qualified `alice/ENG-14`). **Only V54 is
-left in the chain**: nothing *renders* a board-local ref yet, so a user never sees a reference
-something cannot parse.
+CLI's `_resolve_card_id`/`_resolve_epic_id`, plus the owner-qualified `alice/ENG-14`), and **V54 —
+render**: the SPA and the CLI's default row now show the board-local ref everywhere a ticket appears,
+falling back to the canonical `ticket_number` when a read hasn't attached one; `--fields ticket` stays
+mapped to the canonical form on purpose (`pandan-cli` bumped 0.36.0 → 0.37.0). **Part A (identity) is
+now fully shipped** — the four-slice chain V51–V54 is complete, so a user never sees a reference
+something in the system can't parse. Remaining: Part B (V56–V60, sprints/backlog/planning intervals)
+and V63–V64 (Part C's epic/label colour).
 Two decisions are settled and load-bearing before anyone starts: **`card.ticket_number` is never
 touched** (the board-local `ENG-14` is added *beside* it, and the canonical `KAN-955` becomes the
 cross-board addressing mode), and **board keys are unique per owner**, which is exactly why a
