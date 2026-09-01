@@ -52,7 +52,7 @@
 
 <form class="card-form" onsubmit={submit}>
   {#if isEdit}
-    <span class="ticket">{displayRef(epic!)}</span>
+    <span class="ticket" title={epic!.ticket_number}>{displayRef(epic!)}</span>
   {/if}
   <!-- svelte-ignore a11y_autofocus -->
   <input type="text" placeholder="Epic name (required)" bind:value={name} autofocus />

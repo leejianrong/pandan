@@ -156,7 +156,10 @@
       : [...labelIds, id];
   }
   const epic = $derived(card ? epicFor(card.epic_id) : null);
+  // The board-local ref for display; the canonical ticket stays the title
+  // attribute beside it (V54, KAN-975).
   const ticket = $derived(card ? displayRef(card) : "");
+  const canonical = $derived(card?.ticket_number ?? "");
   const columnLabel = $derived(
     COLUMNS.find((c) => c.key === card?.column)?.label ?? "",
   );
@@ -386,7 +389,7 @@
   <Modal label="Card {ticket}: {card.title}" {onclose}>
     <form class="card-form card-modal" onsubmit={submit}>
       <header class="modal-head">
-        <span class="ticket">{ticket}</span>
+        <span class="ticket" title={canonical}>{ticket}</span>
         <span class="status-pill status-{card.column}">
           <span class="dot" aria-hidden="true"></span>{columnLabel}
         </span>

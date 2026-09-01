@@ -40,7 +40,11 @@ identity chain** ([ADR 0020](docs/adr/0020-board-keys.md)), **V52 — `card.boar
 CLI's `_resolve_card_id`/`_resolve_epic_id`, plus the owner-qualified `alice/ENG-14`), and **V54 —
 render**: the SPA and the CLI's default row now show the board-local ref everywhere a ticket appears,
 falling back to the canonical `ticket_number` when a read hasn't attached one; `--fields ticket` stays
-mapped to the canonical form on purpose (`pandan-cli` bumped 0.36.0 → 0.37.0). **Part A (identity) is
+mapped to the canonical form on purpose. A follow-up pass closed V54's one deliberate gap (`ref` on
+`aging_wip.items`, so the dashboard's aging bars stop being the last surface showing the canonical
+form), put the canonical ticket on every rendered ref's `title` attribute so it stays hoverable and
+copyable, moved sorting onto the *displayed* form, and made the CLI fall back to the canonical ticket
+when one key names two boards in a single result set. **Part A (identity) is
 now fully shipped** — the four-slice chain V51–V54 is complete, so a user never sees a reference
 something in the system can't parse. Remaining: Part B (V56–V60, sprints/backlog/planning intervals)
 and V63–V64 (Part C's epic/label colour).

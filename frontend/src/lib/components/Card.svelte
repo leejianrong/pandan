@@ -131,7 +131,7 @@
     onkeydown={onKeydown}
   >
     <div class="card-top">
-      <span class="ticket">{displayRef(card)}</span>
+      <span class="ticket" title={card.ticket_number}>{displayRef(card)}</span>
       {#if priorityMeta}
         <span class="priority-badge" title="Priority: {priorityMeta.label}">
           <span class="priority-dot" style="background: {priorityMeta.color}" aria-hidden="true"

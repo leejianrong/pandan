@@ -957,6 +957,10 @@ class AgingWipItem(BaseModel):
 
     card_id: int
     ticket_number: str
+    # The board-local ref (V54, KAN-975) so the dashboard's aging bars label cards the
+    # same way every other surface does. Optional for the same reason ``CardRead.ref``
+    # is: it is rendered, not stored.
+    ref: str | None = None
     assignee: str | None = None
     age_seconds: float
 

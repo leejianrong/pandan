@@ -257,13 +257,19 @@ board-local ref: `Card.svelte`, `CardModal.svelte`, `BoardTable.svelte`, `EpicIt
 the same fallback duplicated (not imported — `context.py` cannot circularly import `cli`) into
 `context.py`'s `_card_row` for the `pandan context show` ambient block.
 
-**Sort and search stay on `ticket_number` — deliberately.** `compareTicketRefs(a.ticket_number,
-b.ticket_number)` in `BoardTable.svelte`/`dashboard.svelte.ts` is unchanged: it orders rows, it doesn't
-display anything, and `board_seq` tracks creation order identically. `CommandPalette.svelte`'s `keywords`
-gained the board-local `ref` alongside the existing `ticket_number` so a search matches **either** form —
-its own instruction, read literally — while `value` (the list's own React-style key) stayed on the
-concatenated canonical string, since changing an internal identity key was out of scope for a rendering
-slice.
+**Search matches both forms; sort follows the displayed one.** `CommandPalette.svelte`'s `keywords`
+carry the board-local `ref` alongside `ticket_number`, so a search matches **either** form — its own
+instruction, read literally — while `value` (the list's own React-style key) stays on the concatenated
+canonical string, since changing an internal identity key was out of scope for a rendering slice.
+
+Sorting originally stayed on `ticket_number` on the reasoning that it orders rows rather than displaying
+them, and that `board_seq` tracks creation order identically. The follow-up pass moved
+`BoardTable.svelte` and `dashboard.svelte.ts` to `compareTicketRefs(displayRef(a), displayRef(b))`: a
+user sorts the column they can *see*, and a table headed `ENG-14` that ordered itself by a hidden
+`KAN-955` reads as broken. The original reasoning holds *within* one board — both keys track creation
+order, so the orders coincide and nothing changes — which is precisely why the switch is safe; it only
+differs across boards, and that is the case where the old behaviour was inexplicable rather than merely
+invisible.
 
 **`--fields ticket` still means `ticket_number`, on purpose.** The default row and the explicit field
 selector are supposed to disagree now: the row is a display choice, the field is the one that resolves
@@ -271,11 +277,16 @@ from anywhere. Documented in `reference/api.md`, `pandan-cli/README.md`, and
 `docs/guide/cli/reading.md` — the ADR 0018-style "notice on the wire" pattern (here: `--fields ticket`
 does not silently start meaning something new) applies exactly.
 
-**One known, deliberate gap.** `GET .../metrics`' `aging_wip.items` (`AgingWipItem`) has no `ref` field —
-that's a backend/schema change, out of scope for a pure-rendering slice — so `Dashboard.svelte`'s aging-WIP
-bars and `pandan metrics`' aging rows still show the canonical `ticket_number`. Left as-is rather than
-adding a backend field this slice wasn't scoped to touch; worth a one-line follow-up card if it ever
-actually confuses someone.
+**The one known gap is now closed (follow-up pass).** `GET .../metrics`' `aging_wip.items`
+(`AgingWipItem`) shipped without a `ref` field, because that is a backend/schema change and V54 was a
+pure-rendering slice — so the dashboard's aging-WIP bars were briefly the one surface still showing the
+canonical `ticket_number` while the board beside them showed the board-local form. A follow-up added
+`ref` to `AgingWipItem`, rendered in `routers/boards.py`'s metrics endpoint from this board's key
+(`card_ref(board_key, row.board_seq)`, the same `if key else None` guard the card and epic reads use)
+and passed through `metrics.py`, which stays a pure function of the dicts it is handed and derives
+nothing itself. `Dashboard.svelte`'s bars and `aria-label`s now go through `displayRef`. Pinned by
+`test_metrics.py`, which asserts the item's `ref` equals the card read's own — not merely that it is
+non-null.
 
 KAN-986 **already landed**, so nothing to fold in — `compareTicketRefs` is board-local-ref-aware by
 construction (see *Loose card* below). The ordering was worth fixing before this slice rather than
@@ -284,9 +295,18 @@ from a sparse `KAN-530…971` to a solid `1…77`, where lexicographic misorderi
 
 **Two e2e specs pinned a display shape that stopped being true.** `dependencies.spec.ts` and
 `epic-story.spec.ts` asserted a rendered `.ticket` matched `/^KAN-\d+$/` / `/^EPIC-\d+$/` — true only
-because every e2e board used to render the canonical form. Loosened to accept either shape
-(`[A-Z][A-Z0-9]{1,9}-\d+` for cards, plus `EPIC-\d+` or `<KEY>-E\d+` for epics), since e2e boards derive
-their own key from a random name and were never going to be `KAN` or `EPIC` (both reserved).
+because every e2e board used to render the canonical form. First loosened to accept either shape, then
+**tightened again in the follow-up pass** to require the board-local form only, now that the canonical
+ticket is separately asserted on the element's `title` attribute. An e2e board always derives its own
+key from a random name and can never be `KAN` or `EPIC` (both reserved), so the permissive alternation
+could only ever have passed by accident — pinning both halves says more than accepting either.
+
+**The canonical ticket stays reachable: hover, don't guess.** Every display site renders the
+board-local ref as its text and carries `title={…ticket_number}`, so `KAN-955` is one hover away and
+still selectable/copyable for anyone quoting a card outside its board. `Trash.svelte` carries it as a
+`canonical` field on its merged card+epic `Entry`, since a trashed item is exactly the one you may need
+to reference elsewhere. Pinned by `board-local-refs.spec.ts`, which asserts the shown text and the
+`title` **disagree** — the cheapest possible proof that both forms are actually present.
 
 **Qualification is a client concern, computed per viewer.** A key collision is a property of the
 *viewer*, not the board (SHAPING, *Detail — when two accessible boards share a key*): only a user who

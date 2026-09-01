@@ -129,6 +129,12 @@ def test_metrics_derived_from_seeded_activity(client):
     assert m["aging_wip"]["count"] == 1
     item = m["aging_wip"]["items"][0]
     assert item["ticket_number"] == c["ticket_number"]
+    # The board-local ref rides along (M8 V54, KAN-975) so the dashboard's aging bars
+    # can label a card the same way every other surface does. It is rendered from the
+    # board's key rather than stored, exactly as `CardRead.ref` is — so it must match
+    # what the card read itself reports, not merely be non-null.
+    assert item["ref"] == c["ref"]
+    assert item["ref"] is not None
     assert item["assignee"] == "agent-b"
     assert 1770 <= item["age_seconds"] <= 1860  # ~1800s
 

@@ -23,11 +23,16 @@ test("create an epic (own view), link a story, tag + rollup persist", async ({ p
   const epicName = uniqueTitle("epic");
   const storyTitle = uniqueTitle("story");
 
-  // Epic is created in the Epics view and gets an epic ticket (not a card's).
-  // The face renders the board-local ref (M8 V54) — canonical `EPIC-<n>` or
-  // board-local `<KEY>-E<n>` — rather than the canonical form specifically.
+  // The epic list shows the epic's BOARD-LOCAL ref since V54 (KAN-975): `<KEY>-E<n>`,
+  // on the epics' own per-board sequence, so `ENG-1` (a card) and `ENG-E1` (an epic)
+  // coexist the way `KAN-1` and `EPIC-1` do. The canonical `EPIC-<n>` is the element's
+  // title attribute — asserted here so this spec still pins that it did not vanish.
   const epicTicket = await createEpic(page, epicName);
-  expect(epicTicket).toMatch(/^(EPIC-\d+|[A-Z][A-Z0-9]{1,9}-E\d+)$/);
+  expect(epicTicket).toMatch(/^[A-Z][A-Z0-9]{1,9}-E\d+$/);
+  const epicCanonical = await epicItem(page, epicName)
+    .locator(".ticket")
+    .getAttribute("title");
+  expect(epicCanonical).toMatch(/^EPIC-\d+$/);
 
   // Link a story to the epic from the board.
   await createStoryUnder(page, "Todo", storyTitle, epicTicket, epicName);

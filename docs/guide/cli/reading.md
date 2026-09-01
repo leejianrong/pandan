@@ -33,6 +33,13 @@ almost always the question you actually have.
     any board with no context (an external link, a cross-board reference); use whatever the row already
     shows when you're just working on this board.
 
+    **One exception, and it protects you:** if a single read spans two boards that share a key — a
+    board shared with you whose owner also uses `ENG`, say — those rows fall back to the canonical
+    `KAN-955` instead, because `ENG-14` would otherwise name two different cards in the same output.
+    Board keys are unique per *owner*, so this only happens across owners, and only in the result set
+    where it would actually be ambiguous. Rows whose key is unambiguous in that same output keep their
+    short form.
+
 ## Listing and filtering cards
 
 ```bash

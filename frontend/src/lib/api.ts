@@ -996,6 +996,8 @@ export interface CycleTimeMetrics {
 export interface AgingWipItem {
   card_id: number;
   ticket_number: string;
+  // The board-local ref (V54, KAN-975); null when the server did not render one.
+  ref: string | null;
   assignee: string | null;
   age_seconds: number;
 }

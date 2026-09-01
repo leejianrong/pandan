@@ -184,6 +184,10 @@ def compute_metrics(
             {
                 "card_id": card["id"],
                 "ticket_number": card["ticket_number"],
+                # The board-local ref (V54, KAN-975), passed through from the caller
+                # rather than derived — this module has no board row and deliberately
+                # stays a pure function of the dicts it is handed.
+                "ref": card.get("ref"),
                 "assignee": card["assignee"],
                 "age_seconds": (now - entered).total_seconds(),
             }

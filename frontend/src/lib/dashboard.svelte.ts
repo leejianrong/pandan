@@ -18,7 +18,7 @@ import {
   type CycleMetrics,
 } from "./api";
 import { boardStore } from "./board.svelte";
-import { compareTicketRefs } from "./tickets";
+import { compareTicketRefs, displayRef } from "./tickets";
 
 // Reporting windows the strip/charts scope to. `""` = all time (omit the param).
 export type DashboardWindow = "24h" | "7d" | "30d" | "";
@@ -223,7 +223,7 @@ export function inflightByAssignee(): { assignee: string | null; cards: Card[] }
   return [...groups.entries()]
     .map(([assignee, cards]) => ({
       assignee,
-      cards: [...cards].sort((a, b) => compareTicketRefs(a.ticket_number, b.ticket_number)),
+      cards: [...cards].sort((a, b) => compareTicketRefs(displayRef(a), displayRef(b))),
     }))
     .sort((a, b) => {
       // Named assignees first (alphabetical), unassigned last.

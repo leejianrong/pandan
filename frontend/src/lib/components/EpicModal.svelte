@@ -73,7 +73,7 @@
   <Modal label="Epic {displayRef(epic)}: {epic.name}" {onclose}>
     <form class="card-form epic-modal" onsubmit={submit}>
       <header class="modal-head">
-        <span class="ticket epic-ticket">{displayRef(epic)}</span>
+        <span class="ticket epic-ticket" title={epic.ticket_number}>{displayRef(epic)}</span>
         <span class="epic-count">
           {stories.length}
           {stories.length === 1 ? "story" : "stories"}
@@ -117,7 +117,7 @@
                 {#each stories as story (story.id)}
                   <li class:is-done={story.column === "done"}>
                     <span class="sdot {story.column}" aria-hidden="true"></span>
-                    <span class="ticket">{displayRef(story)}</span>
+                    <span class="ticket" title={story.ticket_number}>{displayRef(story)}</span>
                     <span class="stitle">{story.title}</span>
                   </li>
                 {/each}

@@ -122,6 +122,7 @@ import json
 import re
 import shlex
 import sys
+from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any, NamedTuple
 
@@ -630,14 +631,20 @@ def _humanize(
         # `(no cards)` stays the empty rendering, but it is now a *line* rather than
         # an early return: a batch read (issue #254) where every selector missed has
         # no rows and yet is precisely the case that must not render as silence.
-        lines = [_card_line(c) for c in rows] if rows else [f"(no {envelope})"]
+        ambiguous = _ambiguous_keys(rows)
+        lines = (
+            [_card_line(c, ambiguous) for c in rows] if rows else [f"(no {envelope})"]
+        )
         if result.get("next_cursor"):
             lines.append(f"(more — next cursor: {result['next_cursor']})")
         return _with_unresolved("\n".join(lines), result)
     if envelope == "boards":  # list_boards
         return "\n".join(_board_line(b) for b in rows) if rows else "(no boards)"
     if envelope == "epics":  # list_epics
-        return "\n".join(_epic_line(e) for e in rows) if rows else "(no epics)"
+        ambiguous = _ambiguous_keys(rows)
+        return (
+            "\n".join(_epic_line(e, ambiguous) for e in rows) if rows else "(no epics)"
+        )
     if envelope == "labels":  # list_labels
         return "\n".join(_label_line(la) for la in rows) if rows else "(no labels)"
     if envelope == "views":  # list_views
@@ -762,7 +769,31 @@ def _humanize(
     return json.dumps(result, default=str)
 
 
-def _display_ref(entity: dict[str, Any]) -> str:
+def _ambiguous_keys(rows: list[Any]) -> frozenset[str]:
+    """Board keys that name more than one board **within this result set** (V54).
+
+    Qualification is a property of the *viewer*, not of a board (SHAPING): a key is
+    only ambiguous to someone looking at two boards that share it. Board keys are
+    unique per owner, so this can only happen when a board shared with you belongs to
+    an owner who also uses your key — rare, and real.
+
+    Computed from the rows themselves, which needs no extra request: the ref carries
+    its own key, and two rows with the same key but different ``board_id`` settle it.
+    """
+    boards_by_key: dict[str, set[Any]] = defaultdict(set)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ref = row.get("ref")
+        if not ref or "-" not in str(ref):
+            continue
+        boards_by_key[str(ref).split("-", 1)[0].upper()].add(row.get("board_id"))
+    return frozenset(key for key, ids in boards_by_key.items() if len(ids) > 1)
+
+
+def _display_ref(
+    entity: dict[str, Any], ambiguous: frozenset[str] = frozenset()
+) -> str:
     """What a human sees as a card/epic's ticket in the default row (M8 V54,
     KAN-975, issue #280): the board-local ``ref`` (``ENG-14``) when the API
     attached one, else the canonical ``ticket_number`` (``KAN-955``).
@@ -770,8 +801,19 @@ def _display_ref(entity: dict[str, Any]) -> str:
     This is deliberately narrower than ``--fields ticket``, which stays mapped to
     ``ticket_number`` (``FIELD_ALIASES``) — the default row's own ticket column is
     the *display* form, an explicit ``--fields`` projection is the *canonical* one,
-    and the two are supposed to disagree. See README/docs/guide/cli/reading.md."""
-    return str(entity.get("ref") or entity.get("ticket_number", entity.get("id", "?")))
+    and the two are supposed to disagree. See README/docs/guide/cli/reading.md.
+
+    **A key in ``ambiguous`` falls back to the canonical ticket rather than being
+    qualified with an owner.** The shape sketched ``alice/ENG-14`` for this case; the
+    canonical ``KAN-955`` is strictly better *here* for two reasons. It needs no extra
+    request — an owner's email is not on a card payload, and a rendering function must
+    not do I/O — and it is unambiguous by construction rather than by luck. Both forms
+    are still accepted as *input* (V53 resolves the qualified one); this is only about
+    what gets printed."""
+    ref = entity.get("ref")
+    if ref and str(ref).split("-", 1)[0].upper() not in ambiguous:
+        return str(ref)
+    return str(entity.get("ticket_number", entity.get("id", "?")))
 
 
 def _fmt_points(points: int | None) -> str:
@@ -781,7 +823,9 @@ def _fmt_points(points: int | None) -> str:
     return f"pts={points if points is not None else '-'}"
 
 
-def _card_line(card: dict[str, Any]) -> str:
+def _card_line(
+    card: dict[str, Any], ambiguous: frozenset[str] = frozenset()
+) -> str:
     """One concise line for a card: ticket, column, title, story points (tab-separated).
 
     The ticket column shows the board-local ``ref`` when the API attached one,
@@ -797,7 +841,7 @@ def _card_line(card: dict[str, Any]) -> str:
     characters), so it goes through ``_flatten`` — one card, one line (KAN-485)."""
     return "\t".join(
         (
-            _display_ref(card),
+            _display_ref(card, ambiguous),
             str(card.get("column", "")),
             _flatten(str(card.get("title", ""))),
             _fmt_points(card.get("story_points")),
@@ -852,7 +896,9 @@ def _fmt_progress(epic: dict[str, Any]) -> str:
     return out
 
 
-def _epic_line(epic: dict[str, Any]) -> str:
+def _epic_line(
+    epic: dict[str, Any], ambiguous: frozenset[str] = frozenset()
+) -> str:
     """One concise line for an epic: ticket, name, progress rollup (tab-separated).
 
     The ticket column shows the board-local ``ref`` (``ENG-E7``) when the API
@@ -864,7 +910,7 @@ def _epic_line(epic: dict[str, Any]) -> str:
     in human output; ``--json`` shows the full objects."""
     return "\t".join(
         (
-            _display_ref(epic),
+            _display_ref(epic, ambiguous),
             _flatten(str(epic.get("name", ""))),
             _fmt_progress(epic),
         )

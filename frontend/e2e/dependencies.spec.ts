@@ -23,11 +23,15 @@ test("add a blocker, see the blocked badge, then remove it", async ({ page }) =>
   await createCard(page, "Todo", blockerTitle);
   await createCard(page, "Todo", blockedTitle);
 
-  // The card face now renders the board-local ref (M8 V54), not the canonical
-  // KAN- form, so match either shape rather than pinning KAN- specifically.
+  // The card shows its BOARD-LOCAL ref since V54 (KAN-975); the canonical `KAN-<n>`
+  // moved to the title attribute. Both the blocker picker's option label and the
+  // blocked-by chip render the same displayed form, so the flow below is unchanged.
   const blockerCard = cardInColumn(page, "Todo", blockerTitle);
   const blockerTicket = (await blockerCard.locator(".ticket").innerText()).trim();
   expect(blockerTicket).toMatch(/^[A-Z][A-Z0-9]{1,9}-\d+$/);
+  expect(await blockerCard.locator(".ticket").getAttribute("title")).toMatch(
+    /^KAN-\d+$/,
+  );
 
   // No badge before any dependency exists.
   const blockedCard = cardInColumn(page, "Todo", blockedTitle);
