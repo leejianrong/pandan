@@ -542,10 +542,18 @@ class BoardCreate(BaseModel):
     creating a board must never block on naming (R1.4). Supplying one asks for that
     exact key, so it is the only path that can fail — a malformed or reserved key is
     a ``422`` here, and a key already used by this owner is a ``409`` in the router.
+
+    ``team_id`` (M9 V67, KAN-1056; ADR 0021) optionally links the new board to a
+    team. Omitted → ``team_id = NULL``, i.e. today's behavior, byte-for-byte. The
+    router 403s if the creating principal isn't a member of the named team (any
+    role) — "you don't get to point a create at something you can't touch",
+    mirroring ``_validate_epic``'s pattern but at 403 since the boundary here is
+    membership, not shape.
     """
 
     name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
     key: Annotated[str | None, Field(max_length=MAX_BOARD_KEY_LEN)] = None
+    team_id: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -571,7 +579,13 @@ class BoardUpdate(BaseModel):
     ``outbound_webhook_enabled`` turns on a signed ``POST`` on every notification-create;
     ``outbound_webhook_url`` is the target; ``outbound_webhook_secret`` keys the
     HMAC-SHA256 signature and is **write-only** (accepted here, never echoed back in
-    ``BoardRead``). Send ``null`` for the url/secret to clear it."""
+    ``BoardRead``). Send ``null`` for the url/secret to clear it.
+
+    ``team_id`` (M9 V67, KAN-1056; ADR 0021) sets or clears the board's team link —
+    unlike ``key``, ``null`` here is meaningful (clears the link back to a personal
+    board) rather than rejected, mirroring the webhook fields above. Setting it to
+    a non-null value 403s if the caller isn't a member of that team (any role),
+    same as on create."""
 
     name: Annotated[str | None, Field(max_length=MAX_NAME_LEN)] = None
     key: Annotated[str | None, Field(max_length=MAX_BOARD_KEY_LEN)] = None
@@ -582,6 +596,7 @@ class BoardUpdate(BaseModel):
         str | None, Field(max_length=MAX_WEBHOOK_SECRET_LEN)
     ] = None
     outbound_webhook_enabled: bool | None = None
+    team_id: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -634,6 +649,11 @@ class BoardRead(BaseModel):
     # The owning user (UUID), or null for an unclaimed board (e.g. the migrated
     # default board). Server-enforced ownership checks arrive in V8.
     owner_id: uuid.UUID | None
+    # The linked team (M9 V67, KAN-1056; ADR 0021), or null for a personal board —
+    # every board's meaning before this slice, and still the default. A real ORM
+    # column (unlike ``role``/``owner_email`` below), so this reads straight off
+    # the model with no router-side attachment.
+    team_id: int | None
     # Auto-sync opt-ins (KAN-43); both default false.
     autosync_enabled: bool
     autosync_advance_to_done: bool

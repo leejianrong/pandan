@@ -27,6 +27,11 @@ codes, and which one you get depends on whether you named the key:
   fact about the database and not about the request.
 
 See :mod:`app.board_keys` for the shape, the reserved words and the derivation.
+
+**Team linking (M9 V67, KAN-1056; ADR 0021).** ``team_id`` on create/update is
+optional and 403s if the caller isn't a member of the named team (any role) —
+:func:`_reject_non_member_team`. Omitted on create → ``NULL`` (a personal board,
+today's unchanged default); a PATCH may set or explicitly clear it (``null``).
 """
 from __future__ import annotations
 
@@ -46,7 +51,7 @@ from ..authz import Access, authorize_board, get_principal, visible_board_ids
 from ..board_keys import allocate_board_key
 from ..db import get_db
 from ..metrics import compute_metrics, move_target
-from ..models import Activity, Board, BoardMember, Card
+from ..models import Activity, Board, BoardMember, Card, TeamMember
 from ..ordering import next_position, renumber_column, select_next_ready_card
 from ..pagination import NEXT_CURSOR_HEADER, decode_cursor, encode_cursor
 from ..schemas import (
@@ -170,6 +175,27 @@ def _reject_taken_key(
         )
 
 
+def _reject_non_member_team(db: Session, principal: User, team_id: int | None) -> None:
+    """403 if ``team_id`` is set and the principal isn't a member of it — any role
+    (M9 V67, KAN-1056; ADR 0021 §New surface). Uniform for an unknown team too (no
+    row → no membership row → the same 403), so a create/update can't be used to
+    probe which team ids exist — "you don't get to point a create at something you
+    can't touch", the ``_validate_epic`` pattern, but 403 rather than 422 because
+    the boundary here is membership, not shape."""
+    if team_id is None:
+        return
+    is_member = db.scalar(
+        select(TeamMember.id).where(
+            TeamMember.team_id == team_id, TeamMember.user_id == principal.id
+        )
+    )
+    if is_member is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="you are not a member of that team",
+        )
+
+
 @router.post("", response_model=BoardRead, status_code=status.HTTP_201_CREATED)
 def create_board(
     payload: BoardCreate,
@@ -185,6 +211,7 @@ def create_board(
     # worth never failing.
     if payload.key is not None:
         _reject_taken_key(db, principal.id, payload.key)
+    _reject_non_member_team(db, principal, payload.team_id)
     # Read-then-write is not atomic, so two concurrent creates can pick the same
     # derived key and one of them loses the unique constraint at COMMIT. Retry the
     # *derived* path — the second attempt reads the winner's key and suffixes past
@@ -194,7 +221,9 @@ def create_board(
         key = payload.key or allocate_board_key(
             payload.name, _owner_keys(db, principal.id)
         )
-        board = Board(name=payload.name, key=key, owner_id=principal.id)
+        board = Board(
+            name=payload.name, key=key, owner_id=principal.id, team_id=payload.team_id
+        )
         db.add(board)
         try:
             db.commit()
@@ -253,6 +282,10 @@ def update_board(
         # two coincide; scoping to ``board.owner_id`` anyway keeps this correct if
         # MANAGE ever widens, rather than silently checking the wrong namespace.
         _reject_taken_key(db, board.owner_id, data["key"], excluding=board.id)
+    if "team_id" in data:
+        # The *caller's* membership gates a set (M9 V67) — an explicit ``null``
+        # clears the link back to a personal board and needs no membership check.
+        _reject_non_member_team(db, principal, data["team_id"])
     for field, value in data.items():
         setattr(board, field, value)
     record_activity(
