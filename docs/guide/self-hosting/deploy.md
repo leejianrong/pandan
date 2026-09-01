@@ -44,6 +44,54 @@ DATABASE_URL=… uv run alembic upgrade head
     and the code that depends on it go out together and the migration fails, you have a running app
     against a schema it does not expect.
 
+## Registering the production OAuth App
+
+GitHub login needs its own **OAuth App** (not a GitHub App) per environment, because an OAuth App allows
+exactly one callback URL — the one you used for local development cannot also serve production.
+
+1. In GitHub, go to **Settings → Developer settings → OAuth Apps → New OAuth App**.
+2. Set **Homepage URL** to your instance's public URL (`https://kanban.example.com`, say) and
+   **Authorization callback URL** to exactly:
+   ```
+   https://kanban.example.com/auth/github/callback
+   ```
+3. Register the app, generate a client secret, and set both as secrets on your deployment:
+   ```bash
+   GITHUB_OAUTH_CLIENT_ID=…
+   GITHUB_OAUTH_CLIENT_SECRET=…
+   ```
+
+If the callback URL is wrong or the app is missing the proxy header flags (see the warning above),
+GitHub either rejects the redirect outright or the app generates an `http://` redirect URI that GitHub
+refuses to match against the registered `https://` one — both look the same from the login button:
+sign-in starts and immediately errors.
+
+## Bootstrapping the first user
+
+There is no separate install wizard and no "admin" role to seed. The first person to complete GitHub
+login can immediately create a board, and owning it works exactly the way it works for every board after
+it — ownership is captured from the session at creation time, not granted by being first. See
+[who can sign in, and who is the admin](local.md#who-can-sign-in-and-who-is-the-admin) for what that
+does and does not restrict; it applies identically in production. In short: registering the OAuth App
+above **is** your access control, since anyone who can complete that flow can create boards, and nothing
+in Pandan gates sign-in beyond it.
+
+## Things worth changing before you point this at real users
+
+**The landing page links to the hosted demo.** `frontend/src/lib/components/Landing.svelte` hardcodes
+two links to `https://simple-kanban-jian.fly.dev` (the "Live demo" button and "See a board in action").
+They ship in every build from source, including yours, so your own users land on a page that invites
+them to someone else's board. Edit or remove both before you build the frontend for production.
+
+**This repository's own CI/CD is not a self-hosting tool.** `fly.toml` and the GitHub Actions workflows
+under `.github/workflows/` (`deploy.yml`, `keepalive.yml`) automate *this project's* hosted board on Fly
+— they are not something you need, and you should not point them at your instance by leaving them
+running in a fork. `keepalive.yml` in particular exists only to work around Fly/Neon's free-tier
+scale-to-zero (see the warning below) and is a no-op cost if you run on infrastructure that does not
+scale to zero. If you do fork the repository and keep its Actions enabled, override the
+`KEEPALIVE_URL` / `PROD_VERSION_URL` repository variables — both already read from a variable with the
+hosted URL only as a fallback — or disable the workflows outright.
+
 ## The hosted setup
 
 The hosted board runs on Fly.io with a managed serverless Postgres. `fly.toml` and the root `Dockerfile`

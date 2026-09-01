@@ -81,22 +81,48 @@ With no OAuth credentials the instance still boots, the landing page still rende
 unavailable. That is enough to run the API with a token, but not to get a token, since minting one needs
 a logged-in session.
 
-To enable GitHub login, create an OAuth App and set both values:
+Pandan only ever talks to a GitHub **OAuth App**, not a GitHub App — the two are different things in
+GitHub's UI, and only the OAuth App flow is wired up.
 
-```bash
-export GITHUB_OAUTH_CLIENT_ID=…
-export GITHUB_OAUTH_CLIENT_SECRET=…
-```
-
-The callback URL for local development is:
-
-```
-http://localhost:5173/auth/github/callback
-```
+1. In GitHub, go to **Settings → Developer settings → OAuth Apps → New OAuth App** (personal account) or
+   your organization's equivalent page.
+2. Set **Homepage URL** to `http://localhost:5173` and **Authorization callback URL** to exactly:
+   ```
+   http://localhost:5173/auth/github/callback
+   ```
+3. Register the app, then generate a **client secret** on the app's page. You now have a client ID and a
+   client secret.
+4. Set both:
+   ```bash
+   export GITHUB_OAUTH_CLIENT_ID=…
+   export GITHUB_OAUTH_CLIENT_SECRET=…
+   ```
+5. Restart the backend. The landing page's "Sign in with GitHub" button now works.
 
 !!! warning "A GitHub OAuth App allows only one callback URL"
 
-    So you cannot share one app between development and production. Create two.
+    So you cannot share one app between development and production. Create two — see
+    [deploy](deploy.md#registering-the-production-oauth-app) for the production one.
+
+## Who can sign in, and who is the admin
+
+There is no separate admin account and no signup allowlist. **Anyone who completes GitHub OAuth against
+the app you registered above can log in and start creating boards.** The only access control is at the
+board level, applied after login (owner, then shared members) — nothing gates who is allowed to log in
+in the first place.
+
+There is also no explicit "bootstrap the first admin" step to run. Board ownership is captured from the
+session at creation time: the first person to log in and create a board simply owns it, the same as
+every board after it. (A separate mechanism, `claim-on-login`, silently adopts any *pre-existing*
+unclaimed board for whoever next logs in — it exists to rescue data from a migration and does nothing on
+a fresh instance with zero boards, so do not rely on it as your bootstrap step.)
+
+For a team instance this means **network reachability is your access control**: any GitHub account that
+can reach your callback URL and complete the flow gets in. Pandan does not check GitHub org membership or
+consult any allowlist — nothing in the code does that today. If you need to restrict who can sign in, do
+it outside Pandan: put the instance behind a VPN or an internal network, so only people who already have
+network access ever reach the login button at all. See [current limits](../about/limits.md#access) for
+this stated plainly.
 
 ## Migrations
 
