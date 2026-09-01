@@ -265,6 +265,15 @@ every mutation.
 This is a deliberate choice for a board of this size, not an oversight. See
 [design decisions](../about/design-decisions.md).
 
+## Stability
+
+`/api/v1` only grows — new endpoints, new optional fields, new response fields. Removing or renaming
+something, or tightening validation on existing input, is treated as breaking and goes to a new prefix
+rather than changing `v1` underneath you; a shape being phased out is marked with `Deprecation` and
+`Sunset` response headers before it's ever removed. See
+[ADR 0022](https://github.com/leejianrong/pandan/blob/main/docs/adr/0022-api-stability-policy.md) for
+the full policy, including how long a deprecated shape is guaranteed to keep working.
+
 ## Recap
 
 - Every `/api/v1` request needs a cookie session or a bearer token, and both resolve to a real user.
