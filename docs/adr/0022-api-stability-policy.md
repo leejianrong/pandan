@@ -1,7 +1,8 @@
 # ADR 0022 — `/api/v1` stability and versioning policy
 
-- **Status:** Proposed — a policy statement, not a code change. Nothing here retroactively flags an
-  existing endpoint; it governs what happens the next time a breaking change is on the table.
+- **Status:** Accepted (2026-09-01, on merge) — a policy statement, not a code change. Nothing here
+  retroactively flags an existing endpoint; it governs what happens the next time a breaking change is
+  on the table.
 - **Date:** 2026-09-01
 - **Context source:** [issue #324](https://github.com/leejianrong/pandan/issues/324), third of three
   cross-repo issues from kaya's 2026-09-01 roadmap session, explicitly filed as depending on

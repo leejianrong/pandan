@@ -1,7 +1,7 @@
 # ADR 0021 — Team: the tenant tier above a user, and where "organization" would go later
 
-- **Status:** Proposed — an ADR-level design, no code yet, exactly as the issue asked for. Pending
-  maintainer sign-off before any slice is shaped or scheduled.
+- **Status:** Accepted (2026-09-01, on merge). No code yet — the design is settled; implementation is
+  shaped separately as Milestone 9 (see [docs/milestone-9/](../milestone-9/SLICES.md)).
 - **Date:** 2026-09-01
 - **Context source:** cross-repo planning from kaya's 2026-09-01 roadmap session, filed as three
   issues in priority order because the first blocks the other two:
