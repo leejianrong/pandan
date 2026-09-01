@@ -669,6 +669,10 @@ def _humanize(
             if rows
             else "(no comments)"
         )
+    if envelope == "teams":  # list_teams
+        return "\n".join(_team_line(t) for t in rows) if rows else "(no teams)"
+    if envelope == "members":  # list_team_members
+        return "\n".join(_member_line(m) for m in rows) if rows else "(no members)"
     # list_dependencies returns {"card_id", "blocked_by", "blocks"} — ``card_id``
     # is distinctive (a card carries ``id``, not ``card_id``).
     if isinstance(result, dict) and "card_id" in result and "blocked_by" in result:
@@ -691,6 +695,13 @@ def _humanize(
     # below key off `name`/`ticket_number`, neither of which a principal has, so it
     # would otherwise fall through to the `json.dumps` catch-all (the KAN-287/478/519
     # family).
+    # A single team member (add/update-role) carries `team_id` + `user_id`
+    # (distinctive) AND `email` + `id` — so this MUST be matched before the `me`
+    # check just below, which would otherwise claim it first and silently drop
+    # the team_id/role columns (KAN-287/478/519-family trap, caught here rather
+    # than by an audit).
+    if isinstance(result, dict) and "team_id" in result and "user_id" in result:
+        return _member_line(result)
     if isinstance(result, dict) and "email" in result and "id" in result:
         return _me_line(result)
     if isinstance(result, dict) and "card" in result:  # dispatch / next (peek/claim)
@@ -722,6 +733,22 @@ def _humanize(
     # generic name-without-title branch below, which would print it as a board line.
     if isinstance(result, dict) and "name" in result and isinstance(result.get("cards"), list):
         return _template_line(result)
+    # A single team carries ``name`` (no ``title``) like a board or epic does, but
+    # never an ``owner_id`` key at all — a board always carries one (even ``null``
+    # for an unclaimed board), while a team has no owner (ADR 0021 §Shape: it is
+    # administered by whichever member holds the ``owner`` role, not by one
+    # principal). ``owner_id``'s mere *presence* is the signal, not its value, so
+    # this holds even for an unclaimed board. Also excludes ``ticket_number``
+    # (an epic). Matched before the generic board/epic branch below, which would
+    # otherwise render it as a board (KAN-287/478/519-family trap).
+    if (
+        isinstance(result, dict)
+        and "name" in result
+        and "title" not in result
+        and "owner_id" not in result
+        and "ticket_number" not in result
+    ):
+        return _team_line(result)
     # A single entity: epics/boards carry ``name`` (no ``title``); cards carry
     # ``title``. Epics additionally have a ``ticket_number`` (``EPIC-…``).
     if isinstance(result, dict) and "name" in result and "title" not in result:
@@ -855,6 +882,30 @@ def _epic_block(epic: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS) ->
 def _board_line(board: dict[str, Any]) -> str:
     """One concise line for a board: id, name (tab-separated)."""
     return "\t".join((str(board.get("id", "?")), _flatten(str(board.get("name", "")))))
+
+
+def _team_line(team: dict[str, Any]) -> str:
+    """One concise line for a team: id, name, role (tab-separated). ``role`` is the
+    caller's own role on the team (owner/editor/viewer) — never absent for a team
+    the caller can reach, since visibility IS membership (ADR 0021)."""
+    return "\t".join(
+        (
+            str(team.get("id", "?")),
+            _flatten(str(team.get("name", ""))),
+            str(team.get("role") or "-"),
+        )
+    )
+
+
+def _member_line(member: dict[str, Any]) -> str:
+    """One concise line for a team member: id, email, role (tab-separated)."""
+    return "\t".join(
+        (
+            str(member.get("id", "?")),
+            _flatten(str(member.get("email") or "-")),
+            str(member.get("role", "")),
+        )
+    )
 
 
 def _me_line(principal: dict[str, Any]) -> str:
@@ -1167,6 +1218,8 @@ _LIST_ENVELOPES = (
     "notifications",
     "activity",
     "comments",
+    "teams",
+    "members",
 )
 
 # The envelopes whose rows are **cards**, so they share one renderer and one
@@ -1195,6 +1248,8 @@ _ROW_NOUN = {
     "notifications": "notification",
     "activity": "activity",
     "comments": "comment",
+    "teams": "team",
+    "members": "member",
 }
 
 
@@ -1342,6 +1397,8 @@ _SUMMARY_NOUN: dict[str, tuple[str, str]] = {
     # "activity" is already a mass noun — "50 activitys" is not a sentence.
     "activity": ("activity row", "activity rows"),
     "comments": ("comment", "comments"),
+    "teams": ("team", "teams"),
+    "members": ("member", "members"),
 }
 
 # The epic health vocabulary (backend ``schemas.EpicHealth``). ``health`` is null
@@ -2319,7 +2376,10 @@ def _cmd_board_list(client: PandanClient, config: Config, args: argparse.Namespa
 def _cmd_board_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     # --key is optional and usually omitted: the server derives one from the name and
     # suffixes on collision, so a create never fails on naming (V51, KAN-972).
-    return client.create_board(args.name, key=args.key)
+    # --team (M9 V67, KAN-1056) is a plain numeric team id — a team has no `key`/ref
+    # namespace of its own (ADR 0021 §Consequences), so unlike --board there is no
+    # richer form to resolve; `pandan team list` is how you find the id.
+    return client.create_board(args.name, key=args.key, team_id=args.team)
 
 
 def _cmd_board_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -2336,7 +2396,14 @@ def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Names
     ``ENG-14``. Renaming it is safe: nothing about a card is stored per key, and the
     canonical ``KAN-…`` ticket is untouched forever (SHAPING D1).
 
-    These seven are exactly the API's ``BoardUpdate`` fields, so ``pandan board update``
+    ``--team`` (M9 V67, KAN-1056) links the board to a team you belong to (403
+    otherwise) — a plain numeric team id, since a team has no ``key``/ref namespace
+    of its own; there is no way to *clear* the link from this verb (mirroring
+    ``--key``'s own un-clearability and the webhook fields' stdin-only secret
+    path — some ``BoardUpdate`` fields the CLI can only set, never null; the raw
+    API accepts an explicit ``null``).
+
+    These eight are exactly the API's ``BoardUpdate`` fields, so ``pandan board update``
     now reaches all of ``PATCH /api/v1/boards/{id}``. The two ``--autosync-*`` tri-states
     (KAN-529) close the last hole: they were reachable from *neither* adapter, which made
     a raw ``curl`` the only way to turn auto-sync on — the exact state this verb exists
@@ -2358,10 +2425,12 @@ def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Names
         "outbound_webhook_url": args.outbound_webhook_url,
         "outbound_webhook_secret": secret,
         "outbound_webhook_enabled": args.outbound_webhook_enabled,
+        "team_id": args.team,
     }
     if all(value is None for value in fields.values()):
         raise CliError(
-            "nothing to update (pass --name / --key / --autosync-enabled|-disabled / "
+            "nothing to update (pass --name / --key / --team / "
+            "--autosync-enabled|-disabled / "
             "--autosync-advance-to-done|--no-autosync-advance-to-done / "
             "--outbound-webhook-url / --outbound-webhook-secret[-stdin] / "
             "--outbound-webhook-enabled|-disabled)",
@@ -2398,6 +2467,63 @@ def _cmd_board_delete(client: PandanClient, config: Config, args: argparse.Names
             arg="--yes",
         )
     return client.delete_board(args.board_id)
+
+
+# --- team handlers (M9 V69, KAN-1058) ----------------------------------------
+# Full entity CRUD, mirroring the board handlers above 1:1, plus member
+# management the MCP surface deliberately declines (ADR 0019 amendment) — "new
+# capability goes in the CLI" (ADR 0019), and a team's membership is the one
+# thing this milestone's other slices made meaningful to manage.
+
+
+def _cmd_team_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.list_teams()
+
+
+def _cmd_team_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.create_team(args.name)
+
+
+def _cmd_team_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.get_team(args.team_id)
+
+
+def _cmd_team_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    if args.name is None:
+        raise CliError("nothing to update (pass --name)", code="invalid_input")
+    return client.update_team(args.team_id, name=args.name)
+
+
+def _cmd_team_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    if not args.yes:
+        raise CliError(
+            f"refusing to delete team {args.team_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
+        )
+    return client.delete_team(args.team_id)
+
+
+def _cmd_team_member_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.list_team_members(args.team_id)
+
+
+def _cmd_team_member_add(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    # --user-id / --email are a required mutually-exclusive pair (argparse), so
+    # exactly one is always set here — no re-check needed.
+    return client.add_team_member(
+        args.team_id, user_id=args.user_id, email=args.email, role=args.role
+    )
+
+
+def _cmd_team_member_update_role(
+    client: PandanClient, config: Config, args: argparse.Namespace
+) -> Any:
+    return client.update_team_member(args.team_id, args.member_id, role=args.role)
+
+
+def _cmd_team_member_rm(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.remove_team_member(args.team_id, args.member_id)
 
 
 # --- epic handlers ----------------------------------------------------------
@@ -3479,6 +3605,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Omit and one is derived from the name"
         ),
     )
+    p_board_create.add_argument(
+        "--team",
+        type=int,
+        metavar="TEAM_ID",
+        help="link the new board to a team you belong to (M9 V67); see `pandan team list`",
+    )
     p_board_create.set_defaults(
         func=_cmd_board_create, noun="board", hints=_HINTS["board create"]
     )
@@ -3492,6 +3624,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_board_update.add_argument("--name", help="rename the board")
     p_board_update.add_argument(
         "--key", help="change the board-local ref prefix, e.g. ENG (V51)"
+    )
+    p_board_update.add_argument(
+        "--team",
+        type=int,
+        metavar="TEAM_ID",
+        help=(
+            "link the board to a team you belong to (M9 V67); see `pandan team "
+            "list`. Sets the link only — there is no flag to clear it"
+        ),
     )
     # EPIC-10 / ADR 0016 GitHub PR auto-sync (KAN-529). Both were reachable from neither
     # the CLI nor MCP, so `curl` was the only way to opt a board in. Tri-states for the
@@ -3579,6 +3720,102 @@ def build_parser() -> argparse.ArgumentParser:
     p_board_delete.add_argument("board_id", type=int, metavar="BOARD", help="a board id")
     p_board_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     p_board_delete.set_defaults(func=_cmd_board_delete, noun="board")
+
+    # --- team subcommands (M9 V69, KAN-1058; parity with /api/v1/teams) ------
+    # Entity CRUD (list/get/create/update/delete) mirrors `board` above 1:1 and has
+    # an MCP twin for each. `team member` (add/rm/list/update-role) does NOT — it
+    # is deliberately CLI-only (ADR 0019 amendment; see pandan-cli/tests/
+    # test_parity.py's CLI_ONLY dict), the same way board membership has never had
+    # one either.
+    p_team = sub.add_parser(
+        "team", help="manage teams (list / get / create / update / delete / member)"
+    )
+    team_sub = p_team.add_subparsers(dest="team_command", metavar="<subcommand>", required=True)
+
+    p_team_list = team_sub.add_parser("list", parents=[common], help="list your teams")
+    _add_fields_arg(p_team_list, "id,name,role")
+    p_team_list.set_defaults(func=_cmd_team_list, noun="team")
+
+    p_team_get = team_sub.add_parser(
+        "get", parents=[common], help="get a single team by id"
+    )
+    p_team_get.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
+    p_team_get.set_defaults(func=_cmd_team_get, noun="team")
+
+    p_team_create = team_sub.add_parser("create", parents=[common], help="create a team")
+    p_team_create.add_argument("name")
+    p_team_create.set_defaults(func=_cmd_team_create, noun="team")
+
+    p_team_update = team_sub.add_parser(
+        "update", parents=[common], help="rename a team"
+    )
+    p_team_update.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
+    p_team_update.add_argument("--name", help="rename the team")
+    p_team_update.set_defaults(func=_cmd_team_update, noun="team")
+
+    p_team_delete = team_sub.add_parser(
+        "delete",
+        parents=[common],
+        help="delete a team (boards linked to it are unclaimed, not deleted)",
+    )
+    p_team_delete.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
+    p_team_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
+    p_team_delete.set_defaults(func=_cmd_team_delete, noun="team")
+
+    # --- team member subcommands (owner-role gated; no MCP twin) -------------
+    p_team_member = team_sub.add_parser(
+        "member", help="manage team membership (add / rm / list / update-role)"
+    )
+    team_member_sub = p_team_member.add_subparsers(
+        dest="team_member_command", metavar="<subcommand>", required=True
+    )
+
+    p_team_member_list = team_member_sub.add_parser(
+        "list", parents=[common], help="list a team's members"
+    )
+    p_team_member_list.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
+    _add_fields_arg(p_team_member_list, "id,email,role")
+    p_team_member_list.set_defaults(func=_cmd_team_member_list, noun="member")
+
+    p_team_member_add = team_member_sub.add_parser(
+        "add", parents=[common], help="add a member by user id or email"
+    )
+    p_team_member_add.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
+    identity_group = p_team_member_add.add_mutually_exclusive_group(required=True)
+    identity_group.add_argument("--user-id", dest="user_id", help="the user's id (UUID)")
+    identity_group.add_argument("--email", help="the user's email")
+    p_team_member_add.add_argument(
+        "--role",
+        choices=("viewer", "editor", "owner"),
+        default="viewer",
+        help="the member's role (default: viewer)",
+    )
+    p_team_member_add.set_defaults(func=_cmd_team_member_add, noun="member")
+
+    p_team_member_update_role = team_member_sub.add_parser(
+        "update-role", parents=[common], help="change a member's role"
+    )
+    p_team_member_update_role.add_argument(
+        "team_id", type=int, metavar="TEAM", help="a team id"
+    )
+    p_team_member_update_role.add_argument(
+        "member_id", type=int, metavar="MEMBER", help="the team_member row id"
+    )
+    p_team_member_update_role.add_argument(
+        "--role", choices=("viewer", "editor", "owner"), required=True
+    )
+    p_team_member_update_role.set_defaults(
+        func=_cmd_team_member_update_role, noun="member"
+    )
+
+    p_team_member_rm = team_member_sub.add_parser(
+        "rm", parents=[common], help="remove a member"
+    )
+    p_team_member_rm.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
+    p_team_member_rm.add_argument(
+        "member_id", type=int, metavar="MEMBER", help="the team_member row id"
+    )
+    p_team_member_rm.set_defaults(func=_cmd_team_member_rm, noun="member")
 
     # --- epic subcommands (nested group; parity with /api/v1/epics) ----------
     p_epic = sub.add_parser(

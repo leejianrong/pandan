@@ -480,9 +480,10 @@ def test_update_board_advertises_every_boardupdate_field():
     surely as a removal — and each new one must appear alongside them.
 
     The set is pinned **by name, never by a count**, which this test has now been
-    right about twice: KAN-529 took it to six, and V51 (KAN-972) added ``key`` for
-    seven. Both times the assertion was what noticed, which is why the name of this
-    test no longer contains a number."""
+    right about three times: KAN-529 took it to six, V51 (KAN-972) added ``key``
+    for seven, and V67 (KAN-1056) added ``team_id`` for eight. Every time the
+    assertion was what noticed, which is why the name of this test no longer
+    contains a number."""
     update_board = next(t for t in _tools() if t.name == "update_board")
     assert set(update_board.input_schema["properties"]) == {
         "board_id",
@@ -493,6 +494,7 @@ def test_update_board_advertises_every_boardupdate_field():
         "outbound_webhook_url",
         "outbound_webhook_secret",
         "outbound_webhook_enabled",
+        "team_id",
     }
 
 
@@ -524,3 +526,78 @@ def test_update_board_rename_carries_no_autosync_opinion(monkeypatch):
     seen = _capture_client(monkeypatch, httpx.Response(200, json=_BOARD_READ))
     server.update_board(5, name="Pandan Roadmap")
     assert json.loads(seen["content"]) == {"name": "Pandan Roadmap"}
+
+
+def test_create_board_sends_team_id_when_given(monkeypatch):
+    """V67's team_id argument, wired through to the wire (V69)."""
+    seen = _capture_client(monkeypatch, httpx.Response(201, json=_BOARD_READ))
+    server.create_board("Roadmap", team_id=9)
+    assert json.loads(seen["content"]) == {"name": "Roadmap", "team_id": 9}
+
+
+def test_create_board_omits_team_id_when_not_given(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(201, json=_BOARD_READ))
+    server.create_board("Roadmap")
+    assert json.loads(seen["content"]) == {"name": "Roadmap"}
+
+
+def test_update_board_sends_team_id_when_given(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(200, json=_BOARD_READ))
+    server.update_board(5, team_id=9)
+    assert json.loads(seen["content"]) == {"team_id": 9}
+
+
+# --- teams (M9 V69, KAN-1058; ADR 0021, ADR 0019 amendment) -----------------
+
+
+def test_list_teams_reads_teams(monkeypatch):
+    seen = _capture_client(
+        monkeypatch, httpx.Response(200, json=[{"id": 1, "name": "Platform"}])
+    )
+    server.list_teams()
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/teams"
+
+
+def test_create_team_posts_name(monkeypatch):
+    seen = _capture_client(
+        monkeypatch, httpx.Response(201, json={"id": 1, "name": "Platform"})
+    )
+    server.create_team("Platform")
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/teams"
+    assert json.loads(seen["content"]) == {"name": "Platform"}
+
+
+def test_get_team_hits_the_id_path(monkeypatch):
+    seen = _capture_client(
+        monkeypatch, httpx.Response(200, json={"id": 4, "name": "Platform"})
+    )
+    server.get_team(4)
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/teams/4"
+
+
+def test_update_team_patches_name(monkeypatch):
+    seen = _capture_client(
+        monkeypatch, httpx.Response(200, json={"id": 4, "name": "Renamed"})
+    )
+    server.update_team(4, name="Renamed")
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/teams/4"
+    assert json.loads(seen["content"]) == {"name": "Renamed"}
+
+
+def test_delete_team_sends_delete(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(204))
+    result = server.delete_team(4)
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/api/v1/teams/4"
+    assert result == {"deleted": 4}
+
+
+def test_list_teams_schema_takes_fields(monkeypatch):
+    """list_teams is shaped like list_boards (KAN-501's `fields` pattern), not a
+    raw passthrough — a discovery call should be narrowable the same way."""
+    list_teams = next(t for t in _tools() if t.name == "list_teams")
+    assert "fields" in list_teams.input_schema["properties"]

@@ -67,7 +67,7 @@ file's text*, so an empty parse makes all of it true and none of it meaningful. 
 original cross-check — tool names counted against raw ``@mcp.tool(`` decorators — was
 built for exactly that and was still blind in one direction, because **both counts were
 derived from the string ``mcp``**: rename the server variable and 0 == 0 passes. Only
-``test_the_mcp_surface_is_still_the_frozen_49``'s hardcoded ``49`` caught it, which is a
+``test_the_mcp_surface_is_still_the_frozen_count``'s hardcoded count caught it, which is a
 constant doing the work of a design.
 
 The generalisable rule, and the reason this is documented rather than quietly patched:
@@ -128,6 +128,12 @@ MCP_TO_CLI: dict[str, tuple[str, ...]] = {
     "get_board": ("board", "get"),        # KAN-502
     "update_board": ("board", "update"),  # KAN-502 — was MCP-only
     "delete_board": ("board", "delete"),  # KAN-502 — was MCP-only
+    # teams (M9 V69, KAN-1058 — the 5-tool group ADR 0019 was amended to admit)
+    "list_teams": ("team", "list"),
+    "create_team": ("team", "create"),
+    "get_team": ("team", "get"),
+    "update_team": ("team", "update"),
+    "delete_team": ("team", "delete"),
     # cards
     "list_cards": ("list",),
     "get_card": ("get",),
@@ -245,6 +251,23 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
         "`update_cycle` is wanted on MCP, that is an ADR 0019 amendment naming it, not "
         "an edit here."
     ),
+    ("team", "member", "add"): (
+        "reason 2 (M9 V69, KAN-1058): `POST /teams/{id}/members` IS a board API "
+        "call, so this is a declined tool and not a missing one. ADR 0019 freezes "
+        "the MCP surface (amended to 54 in the same PR that added the 5 `team` "
+        "entity tools above) and mirrors the existing precedent that "
+        "`board_member` management has NO MCP presence at all despite a complete, "
+        "tested REST + CLI surface — membership management is a human/CLI "
+        "ergonomics affordance an agent's normal workflow does not need. "
+        "Re-opening this is a further ADR 0019 amendment, not an edit here."
+    ),
+    ("team", "member", "rm"): "reason 2 (M9 V69, KAN-1058) — see (\"team\", \"member\", \"add\")",
+    ("team", "member", "update-role"): (
+        "reason 2 (M9 V69, KAN-1058) — see (\"team\", \"member\", \"add\")"
+    ),
+    ("team", "member", "list"): (
+        "reason 2 (M9 V69, KAN-1058) — see (\"team\", \"member\", \"add\")"
+    ),
     ("config", "set"): "local config file",
     ("config", "unset"): "local config file (issue #277)",
     ("config", "show"): "local config file",
@@ -270,8 +293,8 @@ def _parse_tool_names(source: str) -> set[str]:
     server variable and the tool regex matches 0, the decorator count is 0, ``0 == 0``
     passes, ``MCP_TOOLS`` is empty, and every subset assertion below holds trivially:
     the whole file goes green while asserting nothing. It was saved only by
-    ``test_the_mcp_surface_is_still_the_frozen_49``'s hardcoded constant — by luck, not
-    by its own design.
+    ``test_the_mcp_surface_is_still_the_frozen_count``'s hardcoded constant — by luck,
+    not by its own design.
 
     The general rule, which is why this is documented rather than just patched: **a
     non-emptiness proof must not share an input with the thing whose non-emptiness it
@@ -364,7 +387,7 @@ def test_the_non_vacuity_proof_survives_renaming_the_decorator_target():
     """**The mutation that used to pass.** Rename ``mcp`` in ``server.py`` and, before
     KAN-592, the tool regex matched 0, the raw decorator count was 0, the cross-check
     asserted ``0 == 0``, and the file went green over an empty set — saved only by
-    ``test_the_mcp_surface_is_still_the_frozen_49``'s hardcoded ``49``, i.e. by a
+    ``test_the_mcp_surface_is_still_the_frozen_count``'s hardcoded count, i.e. by a
     constant rather than by its own non-vacuity design.
 
     Both halves are asserted, because the first is what makes the second non-trivial:
@@ -490,9 +513,10 @@ def test_the_four_gaps_kan_502_closed_are_reachable():
         assert path in leaves, f"`pandan {' '.join(path)}` is gone — KAN-502 regressed"
 
 
-def test_the_mcp_surface_is_still_the_frozen_49():
-    """ADR 0019 froze the surface at 49 tools; ``mcp/tests/test_schema.py`` is the
-    authoritative pin. Restating the count here is what makes the ``cli`` job notice a
-    *removal* on the MCP side, which is the direction that would break parity from the
-    other end — and it keeps this file's own mapping honest about its scope."""
-    assert len(mcp_tool_names()) == 49
+def test_the_mcp_surface_is_still_the_frozen_count():
+    """ADR 0019 froze the surface (54 tools as of M9 V69, KAN-1058 — up from the
+    original 49); ``mcp/tests/test_schema.py`` is the authoritative pin. Restating
+    the count here is what makes the ``cli`` job notice a *removal* on the MCP
+    side, which is the direction that would break parity from the other end — and
+    it keeps this file's own mapping honest about its scope."""
+    assert len(mcp_tool_names()) == 54

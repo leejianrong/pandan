@@ -191,15 +191,22 @@ class PandanClient:
         """List the boards the caller's user owns (owner-scoped by the API)."""
         return {"boards": self._request("GET", "/boards").json()}
 
-    def create_board(self, name: str, *, key: str | None = None) -> dict[str, Any]:
+    def create_board(
+        self, name: str, *, key: str | None = None, team_id: int | None = None
+    ) -> dict[str, Any]:
         """Create a board owned by the caller's user.
 
         ``key`` (V51, KAN-972) is the board's short ref prefix — the ``ENG`` in
         ``ENG-14`` — and is **optional on purpose**: omit it and the server derives
         one from the name, suffixing on collision, so a create can never fail on
         naming. Name it and you get that exact key or an error: a malformed or
-        reserved key is a 422, one already used by your boards is a 409."""
-        payload = _clean({"name": name, "key": key})
+        reserved key is a 422, one already used by your boards is a 409.
+
+        ``team_id`` (M9 V67, KAN-1056) optionally links the new board to a team you
+        are a member of — 403 if you aren't (uniformly for an unknown team id too).
+        Omit it and the board stays personal (``team_id: null``), today's unchanged
+        default."""
+        payload = _clean({"name": name, "key": key, "team_id": team_id})
         return self._request("POST", "/boards", json=payload).json()
 
     def update_board(
@@ -213,6 +220,7 @@ class PandanClient:
         outbound_webhook_url: str | None = None,
         outbound_webhook_secret: str | None = None,
         outbound_webhook_enabled: bool | None = None,
+        team_id: int | None = None,
     ) -> dict[str, Any]:
         """PATCH a board's settings — only the arguments you pass are sent.
 
@@ -224,12 +232,13 @@ class PandanClient:
         ``autosync_advance_to_done`` separately gates merge→Done, which only has effect
         while the master switch is on); the ``outbound_webhook_*`` trio configures the
         V38 signed outbound webhook (``_url`` target, ``_secret`` write-only HMAC key,
-        ``_enabled`` on/off).
+        ``_enabled`` on/off); ``team_id`` (M9 V67, KAN-1056) links the board to a team
+        you're a member of (403 otherwise).
 
-        These are the seven fields of the API's ``BoardUpdate``. ``_clean`` drops unset
+        These are eight of the API's ``BoardUpdate`` fields. ``_clean`` drops unset
         (None) args — and only ``None``, so an explicit ``False`` *is* sent — meaning an
-        omitted field is left untouched (clearing a string value needs the raw API,
-        which accepts explicit null)."""
+        omitted field is left untouched (clearing a string value, or unlinking a team,
+        needs the raw API, which accepts explicit null)."""
         payload = _clean(
             {
                 "name": name,
@@ -239,6 +248,7 @@ class PandanClient:
                 "outbound_webhook_url": outbound_webhook_url,
                 "outbound_webhook_secret": outbound_webhook_secret,
                 "outbound_webhook_enabled": outbound_webhook_enabled,
+                "team_id": team_id,
             }
         )
         return self._request("PATCH", f"/boards/{board_id}", json=payload).json()
@@ -250,6 +260,67 @@ class PandanClient:
         # 204 No Content — no body to parse.
         self._request("DELETE", f"/boards/{board_id}")
         return {"deleted": board_id}
+
+    # --- teams (M9 V65-V68; ADR 0021) ----------------------------------------
+    # A team is the tenant tier above a User. Full entity CRUD mirrors the board
+    # methods above 1:1 (list/create/get/update/delete); member management is a
+    # separate group below.
+
+    def list_teams(self) -> dict[str, Any]:
+        """List the teams the caller is a member of."""
+        return {"teams": self._request("GET", "/teams").json()}
+
+    def create_team(self, name: str) -> dict[str, Any]:
+        """Create a team; the caller is auto-added as an owner-role member."""
+        return self._request("POST", "/teams", json={"name": name}).json()
+
+    def get_team(self, team_id: int) -> dict[str, Any]:
+        return self._request("GET", f"/teams/{team_id}").json()
+
+    def update_team(self, team_id: int, *, name: str | None = None) -> dict[str, Any]:
+        """Rename a team. Owner-role members only (403 otherwise)."""
+        payload = _clean({"name": name})
+        return self._request("PATCH", f"/teams/{team_id}", json=payload).json()
+
+    def delete_team(self, team_id: int) -> dict[str, Any]:
+        """Delete a team. Owner-role members only. Any board pointing at it is
+        unclaimed (``team_id`` set to null), not deleted."""
+        self._request("DELETE", f"/teams/{team_id}")
+        return {"deleted": team_id}
+
+    # --- team membership (M9 V66, KAN-1055) ----------------------------------
+    # No MCP twin (ADR 0019 amendment, KAN-1058): mirrors board_member, which has
+    # none either — membership management is a CLI/human-ergonomics affordance,
+    # not something an agent's normal workflow needs.
+
+    def list_team_members(self, team_id: int) -> dict[str, Any]:
+        return {"members": self._request("GET", f"/teams/{team_id}/members").json()}
+
+    def add_team_member(
+        self,
+        team_id: int,
+        *,
+        user_id: str | None = None,
+        email: str | None = None,
+        role: str = "viewer",
+    ) -> dict[str, Any]:
+        """Add a member by **either** ``user_id`` or ``email`` (exactly one), with a
+        ``role`` (default ``viewer``). Owner-role gated; 404 if the user doesn't
+        exist, 409 if already a member."""
+        payload = _clean({"user_id": user_id, "email": email, "role": role})
+        return self._request("POST", f"/teams/{team_id}/members", json=payload).json()
+
+    def update_team_member(self, team_id: int, member_id: int, *, role: str) -> dict[str, Any]:
+        """Change a member's role. Owner-role gated; 409 if this would demote the
+        team's last owner."""
+        return self._request(
+            "PATCH", f"/teams/{team_id}/members/{member_id}", json={"role": role}
+        ).json()
+
+    def remove_team_member(self, team_id: int, member_id: int) -> dict[str, Any]:
+        """Remove a member. Owner-role gated; 409 if they are the team's last owner."""
+        self._request("DELETE", f"/teams/{team_id}/members/{member_id}")
+        return {"deleted": member_id}
 
     # --- health / warmup ----------------------------------------------------
 

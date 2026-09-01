@@ -111,6 +111,127 @@ def test_delete_board_sends_delete_and_returns_ack_without_parsing_body():
     assert out == {"deleted": 4}
 
 
+def test_create_board_sends_team_id_when_given():
+    import json
+
+    handler, seen = capture(httpx.Response(201, json={"id": 2, "name": "New", "team_id": 9}))
+    make_client(handler).create_board("New", team_id=9)
+    assert json.loads(seen["content"]) == {"name": "New", "team_id": 9}
+
+
+def test_update_board_sends_team_id_when_given():
+    import json
+
+    handler, seen = capture(httpx.Response(200, json={"id": 2, "team_id": 9}))
+    make_client(handler).update_board(2, team_id=9)
+    assert json.loads(seen["content"]) == {"team_id": 9}
+
+
+def test_update_board_omits_team_id_when_not_given():
+    import json
+
+    handler, seen = capture(httpx.Response(200, json={"id": 2, "name": "Renamed"}))
+    make_client(handler).update_board(2, name="Renamed")
+    assert json.loads(seen["content"]) == {"name": "Renamed"}
+
+
+# --- teams (M9 V65-V68; ADR 0021) -------------------------------------------
+
+
+def test_list_teams_hits_teams_and_wraps_result():
+    handler, seen = capture(httpx.Response(200, json=[{"id": 1, "name": "Platform"}]))
+    out = make_client(handler).list_teams()
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/teams"
+    assert out == {"teams": [{"id": 1, "name": "Platform"}]}
+
+
+def test_create_team_posts_name():
+    import json
+
+    handler, seen = capture(httpx.Response(201, json={"id": 2, "name": "Platform"}))
+    out = make_client(handler).create_team("Platform")
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/teams"
+    assert json.loads(seen["content"]) == {"name": "Platform"}
+    assert out == {"id": 2, "name": "Platform"}
+
+
+def test_get_team_hits_the_id_path():
+    handler, seen = capture(httpx.Response(200, json={"id": 4, "name": "Platform"}))
+    out = make_client(handler).get_team(4)
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/teams/4"
+    assert out == {"id": 4, "name": "Platform"}
+
+
+def test_update_team_patches_name():
+    import json
+
+    handler, seen = capture(httpx.Response(200, json={"id": 4, "name": "Renamed"}))
+    out = make_client(handler).update_team(4, name="Renamed")
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/teams/4"
+    assert json.loads(seen["content"]) == {"name": "Renamed"}
+    assert out == {"id": 4, "name": "Renamed"}
+
+
+def test_delete_team_sends_delete_and_returns_ack_without_parsing_body():
+    handler, seen = capture(httpx.Response(204))
+    out = make_client(handler).delete_team(4)
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/api/v1/teams/4"
+    assert out == {"deleted": 4}
+
+
+# --- team membership (M9 V66, KAN-1055) -------------------------------------
+
+
+def test_list_team_members_hits_the_members_path_and_wraps_result():
+    handler, seen = capture(httpx.Response(200, json=[{"id": 1, "role": "owner"}]))
+    out = make_client(handler).list_team_members(4)
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/api/v1/teams/4/members"
+    assert out == {"members": [{"id": 1, "role": "owner"}]}
+
+
+def test_add_team_member_by_email_defaults_role_viewer():
+    import json
+
+    handler, seen = capture(httpx.Response(201, json={"id": 5, "role": "viewer"}))
+    make_client(handler).add_team_member(4, email="bob@example.com")
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/teams/4/members"
+    assert json.loads(seen["content"]) == {"email": "bob@example.com", "role": "viewer"}
+
+
+def test_add_team_member_by_user_id_with_role():
+    import json
+
+    handler, seen = capture(httpx.Response(201, json={"id": 5, "role": "editor"}))
+    make_client(handler).add_team_member(4, user_id="uuid-1", role="editor")
+    assert json.loads(seen["content"]) == {"user_id": "uuid-1", "role": "editor"}
+
+
+def test_update_team_member_patches_role():
+    import json
+
+    handler, seen = capture(httpx.Response(200, json={"id": 5, "role": "editor"}))
+    out = make_client(handler).update_team_member(4, 5, role="editor")
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/teams/4/members/5"
+    assert json.loads(seen["content"]) == {"role": "editor"}
+    assert out == {"id": 5, "role": "editor"}
+
+
+def test_remove_team_member_sends_delete_and_returns_ack():
+    handler, seen = capture(httpx.Response(204))
+    out = make_client(handler).remove_team_member(4, 5)
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/api/v1/teams/4/members/5"
+    assert out == {"deleted": 5}
+
+
 # --- reads -----------------------------------------------------------------
 
 

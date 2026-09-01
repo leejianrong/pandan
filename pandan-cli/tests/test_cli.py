@@ -131,6 +131,35 @@ class FakeClient:
     def delete_board(self, board_id):
         return self._call("delete_board", board_id=board_id)
 
+    def list_teams(self):
+        return self._call("list_teams")
+
+    def create_team(self, name):
+        return self._call("create_team", name=name)
+
+    def get_team(self, team_id):
+        return self._call("get_team", team_id=team_id)
+
+    def update_team(self, team_id, **kw):
+        return self._call("update_team", team_id=team_id, **kw)
+
+    def delete_team(self, team_id):
+        return self._call("delete_team", team_id=team_id)
+
+    def list_team_members(self, team_id):
+        return self._call("list_team_members", team_id=team_id)
+
+    def add_team_member(self, team_id, **kw):
+        return self._call("add_team_member", team_id=team_id, **kw)
+
+    def update_team_member(self, team_id, member_id, **kw):
+        return self._call(
+            "update_team_member", team_id=team_id, member_id=member_id, **kw
+        )
+
+    def remove_team_member(self, team_id, member_id):
+        return self._call("remove_team_member", team_id=team_id, member_id=member_id)
+
     def get_epic(self, epic_id):
         return self._call("get_epic", epic_id=epic_id)
 
@@ -1418,9 +1447,12 @@ def test_board_list_calls_client(monkeypatch, env):
 def test_board_create_passes_name(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result=BOARD))
     assert cli.run(["board", "create", "Roadmap"]) == 0
-    # ``key`` rides along as None (V51): the server derives one, so the normal
-    # create is still a one-argument call from the user's point of view.
-    assert fake.calls == [("create_board", {"name": "Roadmap", "key": None})]
+    # ``key``/``team_id`` ride along as None (V51/V67): the server derives a key,
+    # and an omitted team keeps the board personal, so the normal create is still
+    # a one-argument call from the user's point of view.
+    assert fake.calls == [
+        ("create_board", {"name": "Roadmap", "key": None, "team_id": None})
+    ]
 
 
 def test_board_create_passes_an_explicit_key(monkeypatch, env):
@@ -1428,7 +1460,19 @@ def test_board_create_passes_an_explicit_key(monkeypatch, env):
     is exactly why it has to reach the API rather than be derived over the top."""
     fake = patch_client(monkeypatch, FakeClient(result=BOARD))
     assert cli.run(["board", "create", "Engineering", "--key", "ENG"]) == 0
-    assert fake.calls == [("create_board", {"name": "Engineering", "key": "ENG"})]
+    assert fake.calls == [
+        ("create_board", {"name": "Engineering", "key": "ENG", "team_id": None})
+    ]
+
+
+def test_board_create_passes_an_explicit_team(monkeypatch, env):
+    """M9 V67, KAN-1056. A plain numeric team id — a team has no key/ref namespace
+    of its own, unlike a board."""
+    fake = patch_client(monkeypatch, FakeClient(result=BOARD))
+    assert cli.run(["board", "create", "Roadmap", "--team", "9"]) == 0
+    assert fake.calls == [
+        ("create_board", {"name": "Roadmap", "key": None, "team_id": 9})
+    ]
 
 
 def test_board_update_can_change_just_the_key(monkeypatch, env):
@@ -1447,6 +1491,7 @@ def test_board_update_can_change_just_the_key(monkeypatch, env):
             "outbound_webhook_url",
             "outbound_webhook_secret",
             "outbound_webhook_enabled",
+            "team_id",
         )
     )
 
@@ -1572,6 +1617,7 @@ def test_board_update_sends_only_the_flags_passed(monkeypatch, env):
             "outbound_webhook_url": None,
             "outbound_webhook_secret": None,
             "outbound_webhook_enabled": None,
+            "team_id": None,
         }),
     ]
 
@@ -1595,6 +1641,7 @@ def test_board_update_carries_the_whole_outbound_webhook_trio(monkeypatch, env):
             "outbound_webhook_url": "https://hooks.example/pandan",
             "outbound_webhook_secret": FAKE_WEBHOOK_KEY,
             "outbound_webhook_enabled": True,
+            "team_id": None,
         }),
     ]
 
@@ -1671,6 +1718,7 @@ def test_board_update_autosync_does_not_disturb_the_webhook_trio(monkeypatch, en
             "outbound_webhook_url": None,
             "outbound_webhook_secret": None,
             "outbound_webhook_enabled": None,
+            "team_id": None,
         }),
     ]
 
@@ -1679,13 +1727,14 @@ def test_board_update_covers_every_boardupdate_field(monkeypatch, env):
     """The card's claim, asserted: `pandan board update` reaches every field of the
     API's `BoardUpdate` in one invocation. The set is pinned **by name, not by a
     number**, because counts on this project have been wrong before — and this test
-    has now earned that: V51 (KAN-972) added `key`, taking the set from six to seven,
-    and it was this assertion that said so rather than a stale docstring."""
+    has now earned that twice: V51 (KAN-972) added `key`, taking the set from six to
+    seven; V67 (KAN-1056) added `team_id`, taking it to eight."""
     fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
     code = cli.run([
         "board", "update", "5",
         "--name", "Pandan Roadmap",
         "--key", "PDN",
+        "--team", "9",
         "--autosync-enabled",
         "--autosync-advance-to-done",
         "--outbound-webhook-url", "https://hooks.example/pandan",
@@ -1702,8 +1751,10 @@ def test_board_update_covers_every_boardupdate_field(monkeypatch, env):
         "outbound_webhook_url",
         "outbound_webhook_secret",
         "outbound_webhook_enabled",
+        "team_id",
     }
     assert sent["key"] == "PDN"
+    assert sent["team_id"] == 9
     assert not any(value is None for value in sent.values())
 
 
@@ -1831,6 +1882,127 @@ def test_board_delete_with_yes_reports_the_board_noun(monkeypatch, env, capsys):
     assert cli.run(["board", "delete", "5", "--yes"]) == 0
     assert fake.calls == [("delete_board", {"board_id": 5})]
     assert capsys.readouterr().out == "deleted board 5\n"
+
+
+# --- team (M9 V69, KAN-1058) -------------------------------------------------
+
+TEAM = {"id": 1, "name": "Platform", "role": "owner"}
+
+
+def test_team_list_calls_list_teams(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"teams": [TEAM]}))
+    assert cli.run(["team", "list"]) == 0
+    assert fake.calls == [("list_teams", {})]
+
+
+def test_team_create_passes_name(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=TEAM))
+    assert cli.run(["team", "create", "Platform"]) == 0
+    assert fake.calls == [("create_team", {"name": "Platform"})]
+
+
+def test_team_get_calls_get_team(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=TEAM))
+    assert cli.run(["team", "get", "1"]) == 0
+    assert fake.calls == [("get_team", {"team_id": 1})]
+
+
+def test_team_get_human_output_is_the_team_line(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=TEAM))
+    cli.run(["team", "get", "1"])
+    assert capsys.readouterr().out == "1\tPlatform\towner\n"
+
+
+def test_team_update_sends_name(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=TEAM))
+    assert cli.run(["team", "update", "1", "--name", "Core Platform"]) == 0
+    assert fake.calls == [("update_team", {"team_id": 1, "name": "Core Platform"})]
+
+
+def test_team_update_without_name_is_an_error(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result=TEAM))
+    assert cli.run(["team", "update", "1"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "invalid_input"
+    assert fake.calls == []
+
+
+def test_team_delete_refuses_without_yes(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result={"deleted": 1}))
+    assert cli.run(["team", "delete", "1"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "confirmation_required"
+    assert fake.calls == []
+
+
+def test_team_delete_with_yes_reports_the_team_noun(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result={"deleted": 1}))
+    assert cli.run(["team", "delete", "1", "--yes"]) == 0
+    assert fake.calls == [("delete_team", {"team_id": 1})]
+    assert capsys.readouterr().out == "deleted team 1\n"
+
+
+# --- team member (M9 V69, KAN-1058 — CLI-only, no MCP twin) -----------------
+
+MEMBER = {
+    "id": 5, "team_id": 1, "user_id": "u1", "email": "bob@example.com", "role": "viewer",
+}
+
+
+def test_team_member_list_calls_list_team_members(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"members": [MEMBER]}))
+    assert cli.run(["team", "member", "list", "1"]) == 0
+    assert fake.calls == [("list_team_members", {"team_id": 1})]
+
+
+def test_team_member_get_human_output_is_the_member_line(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result={"members": [MEMBER]}))
+    cli.run(["team", "member", "list", "1"])
+    assert data_out(capsys) == "5\tbob@example.com\tviewer\n1 member"
+
+
+def test_team_member_add_by_email_defaults_role_viewer(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=MEMBER))
+    assert cli.run(["team", "member", "add", "1", "--email", "bob@example.com"]) == 0
+    assert fake.calls == [
+        ("add_team_member", {
+            "team_id": 1, "user_id": None, "email": "bob@example.com", "role": "viewer",
+        }),
+    ]
+
+
+def test_team_member_add_by_user_id_with_role(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=MEMBER))
+    code = cli.run(["team", "member", "add", "1", "--user-id", "u1", "--role", "editor"])
+    assert code == 0
+    assert fake.calls == [
+        ("add_team_member", {"team_id": 1, "user_id": "u1", "email": None, "role": "editor"}),
+    ]
+
+
+def test_team_member_add_requires_exactly_one_identity(monkeypatch, env, capsys):
+    """--user-id / --email is a required mutually-exclusive pair, so omitting both
+    is an argparse usage error (exit 2), not a runtime one."""
+    fake = patch_client(monkeypatch, FakeClient(result=MEMBER))
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["team", "member", "add", "1"])
+    assert exc.value.code == cli.EXIT_USAGE
+    assert fake.calls == []
+
+
+def test_team_member_update_role_calls_update_team_member(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=MEMBER))
+    code = cli.run(["team", "member", "update-role", "1", "5", "--role", "editor"])
+    assert code == 0
+    assert fake.calls == [
+        ("update_team_member", {"team_id": 1, "member_id": 5, "role": "editor"}),
+    ]
+
+
+def test_team_member_rm_calls_remove_team_member(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result={"deleted": 5}))
+    assert cli.run(["team", "member", "rm", "1", "5"]) == 0
+    assert fake.calls == [("remove_team_member", {"team_id": 1, "member_id": 5})]
+    # noun="member" — the delete receipt is shape-identical across entities.
+    assert capsys.readouterr().out == "deleted member 5\n"
 
 
 # --- gap 2: `claim` — an atomic claim of a CHOSEN card ----------------------

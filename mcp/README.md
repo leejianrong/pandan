@@ -17,7 +17,7 @@ source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 
 > **Prefer the [`pandan` CLI](../pandan-cli/) if your agent can run one.** It is the
 > primary interface; this server is the deliberate **fallback**. See
-> [Why 49 tools, and why that is frozen](#why-49-tools-and-why-that-is-frozen) — it
+> [Why the surface is frozen](#why-the-surface-is-frozen) — it
 > is a measured decision, not an accident, and the measurement says the CLI is
 > ~11× cheaper per task.
 
@@ -27,10 +27,15 @@ source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 |------|----------|--------------|
 | `warmup()` | `GET /api/health` (unversioned) | — (wakes a scaled-to-zero server; soft status) |
 | `list_boards()` | `GET /boards` | — (lists boards you own) |
-| `create_board(name)` | `POST /boards` | — (creates one you own) |
+| `create_board(name, key?, team_id?)` | `POST /boards` | — (creates one you own) |
 | `get_board(board_id)` | `GET /boards/{id}` | — (by id) |
-| `update_board(board_id, name?)` | `PATCH /boards/{id}` | via the entity's own board |
+| `update_board(board_id, name?, ...)` | `PATCH /boards/{id}` | via the entity's own board |
 | `delete_board(board_id)` | `DELETE /boards/{id}` | via the entity's own board |
+| `list_teams(fields?)` | `GET /teams` | — (lists teams you're a member of; M9 V69) |
+| `create_team(name)` | `POST /teams` | — (creates one; you become its owner) |
+| `get_team(team_id)` | `GET /teams/{id}` | — (by id; any member) |
+| `update_team(team_id, name?)` | `PATCH /teams/{id}` | — (rename; owner-role members only) |
+| `delete_team(team_id)` | `DELETE /teams/{id}` | — (owner-role members only; linked boards are unclaimed) |
 | `list_cards(board_id?, column?, epic_id?, updated_since?, limit?, cursor?, fields?, full?)` | `GET /cards` (V3 query API) | `board_id` |
 | `list_epics(board_id?, fields?, full?)` | `GET /epics` | `board_id` |
 | `get_card(card_id, fields?, full?)` | `GET /cards/{id}` | — (by card id) |
@@ -144,22 +149,26 @@ uv run --with tiktoken python scripts/measure_read_payload_tokens.py --payload /
 > enumeration was never complete.) A test pins them that way; if you want to shape one,
 > measure it first.
 
-## Why 49 tools, and why that is frozen
+## Why the surface is frozen
 
-The surface is **frozen at 49 tools** by [ADR 0019](../docs/adr/0019-mcp-surface-right-sizing.md)
-(V49). It is deliberately broad, deliberately kept, and deliberately not growing.
-Recorded here because the resident-cost headline invites the wrong conclusion, and
-this decision should not be re-litigated from it.
+The surface is **frozen** by [ADR 0019](../docs/adr/0019-mcp-surface-right-sizing.md)
+(V49) — deliberately broad, deliberately kept, and deliberately not growing *silently*.
+It has grown exactly once since: **M9 V69 (KAN-1058) added 5 team tools, 49 → 54**,
+an ADR amendment (see [*Amendment: the M9 team
+tools*](../docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m9-team-tools-2026-09-01-kan-1058)),
+not a side effect of a CLI card. Recorded here because the resident-cost headline
+invites the wrong conclusion, and this decision should not be re-litigated from it.
 
 **What it costs.** Every one of these schemas loads into an agent's context before
-it does any work: **8,162 `o200k_base` tokens** as shipped (7,940 before KAN-517's three
-extra shaped reads; 7,388 before KAN-501's `fields`/`full` arguments; 8,775 before the
-schema compaction below). That counts `{name, description, input_schema}` per tool — a
-`tools/list` entry also carries an **`outputSchema`**, a further **836** compact if your
-client forwards it into the model's context (many will not: the Anthropic Messages API
-tool definition has no field for it). ADR 0019 § *The fourth field* (KAN-518) has the
-bracket, and why it is measured but deliberately **not** compacted. Re-measure any
-time — the harness is committed:
+it does any work: **9,505 `o200k_base` tokens** as shipped (8,951 before the M9 team
+tools; 8,162 before that at V49-era measurement — re-run the harness rather than
+trusting any of these forward, they drift with every argument addition too; 8,775
+before the original schema compaction below). That counts `{name, description,
+input_schema}` per tool — a `tools/list` entry also carries an **`outputSchema`**, a
+further **922** compact if your client forwards it into the model's context (many
+will not: the Anthropic Messages API tool definition has no field for it). ADR 0019
+§ *The fourth field* (KAN-518) has the bracket, and why it is measured but
+deliberately **not** compacted. Re-measure any time — the harness is committed:
 
 ```bash
 uv run --with tiktoken python scripts/measure_tool_schema_tokens.py [--per-tool]
@@ -181,7 +190,7 @@ the same FastMCP serializer:
 
 | option | tools | resident | verdict |
 |---|---:|---:|---|
-| today (frozen) | 49 | 8,162 | **chosen** |
+| today (frozen, incl. M9's team tools) | 54 | 9,505 | **chosen** |
 | (a) one tool per entity + an `action` arg | 11 | 4,338 | rejected |
 | (b) a single exec-`pandan` tool | 1 | 387 | rejected *for now* |
 
