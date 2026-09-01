@@ -16,12 +16,13 @@ boards, create = your earliest board). Card-id-addressed tools
 (``get_card``/``update_card``/``move_card``/``delete_card``) need no ``board_id``:
 the server authorizes via the card's own board.
 
-**The surface is frozen at 49 tools (V49, ADR 0019).** It was measured against a
-consolidated verb set and a single exec-``pandan`` tool and deliberately kept, as
-the documented fallback for a consumer that cannot run the CLI — but it does not
-grow. New board capability lands in the **CLI** first; adding a tool here means
-amending ADR 0019 and the pin in ``tests/test_schema.py``. See ``README.md``
-(*Why 49 tools, and why that is frozen*) for the reasoning and the numbers.
+**The surface is frozen (V49, ADR 0019) — currently at 54 tools.** It was measured
+against a consolidated verb set and a single exec-``pandan`` tool and deliberately
+kept, as the documented fallback for a consumer that cannot run the CLI — but it
+does not grow silently. New board capability lands in the **CLI** first; adding a
+tool here means amending ADR 0019 and the pin in ``tests/test_schema.py``, the way
+M9 V69 (KAN-1058) did to add the 5 team tools below. See ``README.md`` (*Why the
+surface is frozen*) for the reasoning and the numbers.
 
 **Two tests read THIS FILE, and both must stay green** (KAN-502): the freeze pin in
 ``tests/test_schema.py``, and ``pandan-cli/tests/test_parity.py``, which parses the
@@ -124,7 +125,7 @@ def list_boards(fields: list[str] | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
-def create_board(name: str, key: str | None = None) -> dict[str, Any]:
+def create_board(name: str, key: str | None = None, team_id: int | None = None) -> dict[str, Any]:
     """Create a new board owned by you; returns it (including its id and key).
 
     ``key`` is the board's short ref prefix — the ``ENG`` in a board-local ``ENG-14``
@@ -132,8 +133,12 @@ def create_board(name: str, key: str | None = None) -> dict[str, Any]:
     YOUR boards (another user may hold the same key). Usually omit it: one is derived
     from the name and suffixed on collision, so a create never fails on naming. Pass
     it to ask for a specific prefix: malformed or reserved (``KAN``/``EPIC``) is a
-    422, already used by your boards is a 409."""
-    return _client_instance().create_board(name, key=key)
+    422, already used by your boards is a 409.
+
+    ``team_id`` (M9 V67) optionally links the board to a team you belong to — call
+    ``list_teams`` to find one. 403 if you aren't a member (uniformly for an unknown
+    id too). Omit it and the board stays personal (``team_id: null``)."""
+    return _client_instance().create_board(name, key=key, team_id=team_id)
 
 
 @mcp.tool()
@@ -153,6 +158,7 @@ def update_board(
     outbound_webhook_url: str | None = None,
     outbound_webhook_secret: str | None = None,
     outbound_webhook_enabled: bool | None = None,
+    team_id: int | None = None,
 ) -> dict[str, Any]:
     """Update a board's settings (only the arguments you pass are changed): ``name``;
     ``key`` (the board-local ref prefix — safe to change, since nothing about a card
@@ -161,12 +167,14 @@ def update_board(
     the GitHub PR auto-sync opt-in — ``autosync_enabled`` (master switch; PRs mentioning
     a ticket attach links and post CI comments) and ``autosync_advance_to_done``
     (separately allow a merged PR to move the card to done; effective only while
-    ``autosync_enabled`` is on); and the V38 signed outbound webhook opt-in —
+    ``autosync_enabled`` is on); the V38 signed outbound webhook opt-in —
     ``outbound_webhook_url`` (the target), ``outbound_webhook_secret`` (the write-only
     HMAC-SHA256 key; never read back), and ``outbound_webhook_enabled`` (turn delivery
-    on/off). When enabled with a URL set, every notification is POSTed there, signed
-    like the inbound GitHub webhook. Authorized via the board's own id — you must own
-    it."""
+    on/off); and ``team_id`` (M9 V67) to link the board to a team you belong to (403
+    otherwise) — this argument only *sets* the link, since omitted args are left
+    untouched, not cleared. When enabled with a URL set, every notification is POSTed
+    there, signed like the inbound GitHub webhook. Authorized via the board's own id —
+    you must own it."""
     return _client_instance().update_board(
         board_id,
         name=name,
@@ -176,6 +184,7 @@ def update_board(
         outbound_webhook_url=outbound_webhook_url,
         outbound_webhook_secret=outbound_webhook_secret,
         outbound_webhook_enabled=outbound_webhook_enabled,
+        team_id=team_id,
     )
 
 
@@ -184,6 +193,54 @@ def delete_board(board_id: int) -> dict[str, Any]:
     """Delete a board by id; its cards + epics cascade away. Authorized via the
     board's own id — you must own it."""
     return _client_instance().delete_board(board_id)
+
+
+# --- teams (M9 V69, KAN-1058; ADR 0021, ADR 0019 amendment) -----------------
+#
+# Five tools, mirroring the board CRUD group above 1:1 (list/create/get/update/
+# delete) — the surface grows 49 -> 54, an ADR 0019 amendment (see the ADR's
+# 2026-09-01 amendment note). Team *membership* management has deliberately NO
+# MCP twin here, mirroring board_member (which has none either): it is a
+# CLI/human-ergonomics affordance (`pandan team member add/rm/list/set-role`),
+# not something an agent's normal workflow needs. Re-opening that is a further
+# ADR 0019 amendment, not a side effect of a CLI card (the `label update` /
+# `cycle update` precedent — see pandan-cli/tests/test_parity.py's CLI_ONLY dict).
+
+
+@mcp.tool()
+def list_teams(fields: list[str] | None = None) -> dict[str, Any]:
+    """List the teams you are a member of. Call this to discover a ``team_id`` for
+    ``create_board``/``update_board``'s ``team_id`` argument. A row also carries
+    your role on the team, so pass ``fields=["id","name"]`` to shave it if you
+    don't need it."""
+    return shape(_client_instance().list_teams(), fields=fields)
+
+
+@mcp.tool()
+def create_team(name: str) -> dict[str, Any]:
+    """Create a new team; you are auto-added as its **owner**-role member. Returns
+    it (including its id — link a board to it with ``create_board``/
+    ``update_board``'s ``team_id``)."""
+    return _client_instance().create_team(name)
+
+
+@mcp.tool()
+def get_team(team_id: int) -> dict[str, Any]:
+    """Fetch a single team by its numeric id. You must be a member (any role)."""
+    return _client_instance().get_team(team_id)
+
+
+@mcp.tool()
+def update_team(team_id: int, name: str | None = None) -> dict[str, Any]:
+    """Rename a team. Owner-role members only — 403 otherwise."""
+    return _client_instance().update_team(team_id, name=name)
+
+
+@mcp.tool()
+def delete_team(team_id: int) -> dict[str, Any]:
+    """Delete a team. Owner-role members only. Any board linked to it is
+    **unclaimed** (its ``team_id`` set to null), not deleted."""
+    return _client_instance().delete_team(team_id)
 
 
 # --- cards + epics (board-scoped) ------------------------------------------

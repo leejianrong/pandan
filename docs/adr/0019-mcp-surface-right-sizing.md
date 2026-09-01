@@ -5,7 +5,10 @@
 - **Date:** 2026-07-31 · **amended 2026-08-01 (KAN-518)** — the resident measurement omitted
   `outputSchema` silently; it is now measured as its own bracketed row, deliberately kept out of the
   headline, and deliberately **not** compacted. See [*The fourth field*](#the-fourth-field-outputschema-kan-518).
-  Superseded figures below are annotated, not deleted.
+  Superseded figures below are annotated, not deleted. · **amended 2026-09-01 (M9 V69, KAN-1058)** —
+  the freeze's first actual growth: **+5 tools** (49 → 54), a `team` CRUD group mirroring the `board`
+  one 1:1. See [*Amendment: the M9 team tools*](#amendment-the-m9-team-tools-2026-09-01-kan-1058) for
+  the measured delta and why team *membership* management stayed CLI-only.
 - **Context source:** Milestone 7 ("Name & Sharpen the Tools"), slice **V49** / **KAN-432**, shaped
   requirement **R3.1** (measure the schema token cost of the tool surface and of each alternative) and
   Shape A part **A8**. Builds on ADR 0005 (API-first — the CLI and MCP server are both thin adapters,
@@ -488,3 +491,66 @@ The general lesson, and the reason the safety argument is structured the way it 
 model (`fn_metadata.arg_model`, used by `Tool.run` at `tools/base.py:101`). That separation is what
 makes this change safe — but "I only touched the advertised copy" is an assertion about a third-party
 library's internals, so it is pinned by a test rather than trusted.
+
+## Amendment: the M9 team tools (2026-09-01, KAN-1058)
+
+**The freeze's first actual growth.** Every prior slice that touched the surface (KAN-501, KAN-517,
+V51's `key` argument) added *arguments* to existing tools — the freeze's own text says that "is not"
+an amendment. Milestone 9 ("Teams", [ADR 0021](0021-organization-team-tier.md)) is the first to ask for
+new *tools*, because a team is a new addressable entity (`/api/v1/teams`), not a new field on one that
+already has a tool.
+
+**Decision: add exactly 5 tools — `list_teams`, `create_team`, `get_team`, `update_team`,
+`delete_team` — mirroring the `board` CRUD group above 1:1, and decline a sixth capability
+(team-member management) from this surface entirely.**
+
+- **Why 5, not fewer.** A team is addressable the same way a board is (discover → create → read →
+  rename → delete), and ADR 0021's own design gives it the same five REST verbs
+  (`/api/v1/teams` `GET`/`POST`, `/api/v1/teams/{id}` `GET`/`PATCH`/`DELETE`). Collapsing to fewer tools
+  (e.g. folding `get`/`update`/`delete` behind a shared `team_id` an agent must already have) would
+  re-litigate option (a) from this ADR's own *Options considered* — rejected there for dissolving typed
+  schemas into unions — at team scale rather than the whole-surface scale it was rejected at.
+- **Why not team *membership* (`POST`/`PATCH`/`DELETE /teams/{id}/members`).** This is the part that is
+  actually new reasoning, not a restatement of the freeze. **`board_member` — the closest existing
+  analogue, with a complete, tested `/api/v1/boards/{id}/members` REST surface and a CLI (`pandan team
+  member …` has no board equivalent because none was ever added) — has *zero* MCP tools today**, and
+  nobody has asked for one across ten milestones. That is not an oversight; it is the shape of what an
+  agent's normal workflow needs: reading and writing *board content* (cards, epics, comments), never
+  *who else can see the board*. Team membership is the same kind of call — administrative, human-facing,
+  infrequent — so it stays where "new capability goes in the CLI" (this ADR's own §Decision, item 1)
+  already says new capability defaults to. `pandan team member add/rm/list/update-role` exist in the
+  CLI (M9 V69, KAN-1058) with **no MCP twin**, and `pandan-cli/tests/test_parity.py`'s `CLI_ONLY` dict
+  records the decision by name (the same "reason 2" pattern KAN-614's `me` and KAN-982's `label update`
+  already established) rather than leaving it as a silent gap `MCP_ONLY` would otherwise have to explain.
+- **The board tools grow two arguments, not two tools.** `create_board`/`update_board` gain `team_id`
+  (M9 V67, KAN-1056's board↔team link) — an *argument* addition, explicitly not an amendment under this
+  ADR's own rule, the same way V51's `key` wasn't.
+
+**Measurement**, via the same harness (`mcp/scripts/measure_tool_schema_tokens.py`), comparing
+immediately before and after this change on the same commit/interpreter (methodologically tighter than
+comparing against an old headline number, which the *Measurement* section above has already shown
+drifts on its own from unrelated argument additions):
+
+| surface | tools | compact | `indent=2` | `outputSchema` alone (compact) |
+|---|---:|---:|---:|---:|
+| before (main, pre-V69) | 49 | 8,951 | 12,211 | 836 |
+| **after (+5 team tools)** | **54** | **9,505** | **12,982** | **922** |
+| **delta** | **+5** | **+554 (+6.2%)** | **+771** | **+86** |
+
++554 compact tokens for five tools is ~111 tokens/tool — close to the ~150-per-tool average V49 found
+for the original 49 (8,775 ÷ 49), which is expected: these are typed CRUD tools of the same shape as
+`board`'s, not a leaner or richer design. The resident figure most recently recorded in `CLAUDE.md`
+(8,641, itself already flagged as drifted) is now **9,505** — re-run the script rather than quoting
+either number forward, per that file's own standing advice.
+
+**Both freeze pins were updated in the same PR, per this ADR's own requirement**: `FROZEN_TOOLS` (+5
+names) and `FROZEN_TOOL_COUNT` (49 → 54) in [`mcp/tests/test_schema.py`](../../mcp/tests/test_schema.py),
+and `pandan-cli/tests/test_parity.py`'s `MCP_TO_CLI` (+5 mappings to `team list/get/create/update/
+delete`) and `CLI_ONLY` (+4 entries for the declined `team member` verbs). `mcp/README.md`'s tool table
+and *"why the surface is frozen"* section were updated to match.
+
+**Consequence for the freeze's own framing.** "Freeze against growth" always meant *silent* growth —
+the pin test's own failure message has said "that is an ADR amendment, not a test edit" since V49. This
+amendment is that mechanism doing exactly what it was built for: a deliberate, measured, documented
+exception, not evidence the freeze doesn't hold. The next tool addition still needs its own amendment
+here, not a precedent-by-example from this one.

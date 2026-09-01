@@ -3,10 +3,10 @@ compaction that pays for keeping it is proven cosmetic.
 
 Two jobs, and they are different:
 
-* **The pin** — the surface is frozen at exactly these 49 tools. This is a
-  *decision* guard, not a correctness one: it exists so that adding a tool is a
-  deliberate act with an ADR amendment behind it, rather than something that
-  happens by appending a decorator.
+* **The pin** — the surface is frozen at exactly these tools (54, since M9 V69
+  amended the original 49). This is a *decision* guard, not a correctness one: it
+  exists so that adding a tool is a deliberate act with an ADR amendment behind
+  it, rather than something that happens by appending a decorator.
 * **The compaction guards** — ``pandan_mcp.schema`` rewrites the schema clients
   are shown. Every test below that touches it is there to prove the rewrite
   cannot change behaviour, because "it only affects the advertised schema" is an
@@ -33,14 +33,19 @@ from mcp.server.mcpserver.tools.base import Tool
 from pandan_mcp.schema import COLLAPSIBLE_SIBLING_KEYS, compact_schema
 from pandan_mcp.server import mcp
 
-#: **The V49 freeze.** Bare tool names (the agent sees ``mcp__pandan__<name>``;
+#: **The freeze, amended.** Bare tool names (the agent sees ``mcp__pandan__<name>``;
 #: the ``mcp__pandan__`` prefix comes from the client's ``mcpServers`` key, not
-#: from here). ADR 0019 measured this surface at 8,775 ``o200k_base`` tokens
-#: resident and kept it *as a frozen fallback* for consumers that cannot run the
-#: CLI. New capability goes in the CLI.
+#: from here). ADR 0019 (V49) measured the original 49-tool surface at 8,775
+#: ``o200k_base`` tokens resident and kept it *as a frozen fallback* for consumers
+#: that cannot run the CLI. **Amended 2026-09-01 (M9 V69, KAN-1058)**: +5 tools
+#: (``list_teams``/``create_team``/``get_team``/``update_team``/``delete_team``),
+#: mirroring the board CRUD group 1:1 — see the ADR's amendment note for the
+#: token delta and why team *membership* management stayed CLI-only. New
+#: capability still goes in the CLI by default; this is the deliberate exception.
 FROZEN_TOOLS = frozenset(
     {
         "list_boards", "create_board", "get_board", "update_board", "delete_board",
+        "list_teams", "create_team", "get_team", "update_team", "delete_team",
         "list_cards", "get_card", "create_card", "create_cards", "update_card",
         "update_cards", "move_card", "claim_card", "delete_card",
         "list_epics", "get_epic", "create_epic", "update_epic", "delete_epic",
@@ -58,18 +63,19 @@ FROZEN_TOOLS = frozenset(
     }
 )
 
-FROZEN_TOOL_COUNT = 49
+FROZEN_TOOL_COUNT = 54
 
 _WHY_FROZEN = """
-The MCP tool surface is FROZEN at {count} tools by ADR 0019 (V49) — this failure is
-by design, not a stale fixture to update.
+The MCP tool surface is FROZEN at {count} tools by ADR 0019 (V49, amended M9 V69) —
+this failure is by design, not a stale fixture to update.
 
-V49 measured the surface at 8,775 o200k_base tokens of schema that load into EVERY
-agent session before it does any work, and deliberately kept the breadth as the
-documented fallback for consumers that cannot run the CLI (e.g. the ghcr image,
-which ships no CLI binary). The price of keeping it is that it does not grow: new
-board capability lands in the `pandan` CLI, which costs a session nothing until it
-is used.
+V49 measured the original 49-tool surface at 8,775 o200k_base tokens of schema that
+load into EVERY agent session before it does any work, and deliberately kept the
+breadth as the documented fallback for consumers that cannot run the CLI (e.g. the
+ghcr image, which ships no CLI binary). The price of keeping it is that it does not
+grow SILENTLY: new board capability lands in the `pandan` CLI by default, which
+costs a session nothing until it is used. M9 V69 (KAN-1058) amended the freeze to
+add exactly 5 team tools, mirroring the board CRUD group.
 
 If you are ADDING a tool: that is an ADR amendment, not a test edit. Say why the
 CLI cannot serve the need, update docs/adr/0019-mcp-surface-right-sizing.md, and

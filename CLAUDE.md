@@ -57,11 +57,14 @@ question was answered by a standalone ADR *before* this milestone's shaping pass
 `docs/milestone-9/SHAPING.md` mostly points at the ADR rather than re-deriving it. Runs independently of
 M8 (different schema surface, no shared code path) rather than waiting for M8 to finish. V65 is schema
 (`team`/`team_member` tables, a nullable `board.team_id`) and lands alone; V66–V68 are a strict
-membership → board-linking → authorization chain; V69 (CLI/MCP — needs its own ADR-0019-style token
-measurement before landing, since it grows the frozen 49-tool count) and V70 (a Teams SPA view, which can
-slip to a later pass) both depend only on V68 and can ship in either order.
+membership → board-linking → authorization chain; V69 (CLI/MCP) and V70 (a Teams SPA view, which can
+slip to a later pass) both depend only on V68 and can ship in either order. **V65–V69 have shipped**:
+V69 (KAN-1058) added `pandan team` CLI verbs (list/get/create/update/delete + a CLI-only
+`member add/rm/list/update-role`, mirroring `board_member`'s own long-standing MCP absence) and grew
+the MCP surface by 5 tools (49 → 54, an ADR 0019 amendment — see below); only V70 (the Teams SPA view)
+remains.
 
-The **49-tool** MCP surface was right-sized in V49: measured at 8,775 `o200k_base` tokens of resident
+The MCP surface was right-sized in V49 at **49 tools**: measured at 8,775 `o200k_base` tokens of resident
 schema per session, shipped at **7,388** (compact; 10,307 pretty-printed) after
 `mcp/pandan_mcp/schema.py` stripped 1,387 tokens of pure Pydantic serializer artefact. The decision is
 [ADR 0019](docs/adr/0019-mcp-surface-right-sizing.md) — **keep the breadth, freeze its growth** —
@@ -71,25 +74,34 @@ CLI was ~11× cheaper. **That gap is now largely closed from the MCP side** (KAN
 the tokens measurably were take `fields` + `full`, worth **−82% across five real reads** for **+552
 resident tokens**. **KAN-517** then measured the nine reads KAN-501 left raw and extended exactly three
 more — `list_notifications` (an unpaginated inbox: 14,326 tokens over 127 rows), `list_boards` and
-`get_epic` — for a further +222. The resident figure was written here as **8,391** and has since drifted
-twice more: on 2026-08-25 `main` measured **8,426** before M8 V51 and **8,641** after it (the `key`
-argument on `create_board`/`update_board`, +215). It also read 8,162 once while `main` measured 8,266.
-**Re-run the script rather than quoting this line** — three recorded drifts is enough to treat the
-number as an order of magnitude and nothing finer. The other six
-stay raw *on measurement*, at 7–474 tokens each: shaping a small payload is the opposite of the trade
-ADR 0019 endorsed, and a test pins them that way. That figure counts `{name, description, input_schema}` per
-tool; a `tools/list` entry also carries an **`outputSchema`** worth a further **836** compact if your
-client forwards it — measured and bracketed separately in
+`get_epic` — for a further +222. The resident figure was written here as **8,391** and had drifted
+twice more even before the count itself moved: on 2026-08-25 `main` measured **8,426** before M8 V51 and
+**8,641** after it (the `key` argument on `create_board`/`update_board`, +215). It also read 8,162 once
+while `main` measured 8,266. **The count itself then moved for the first time** (M9 V69, KAN-1058):
+**49 → 54 tools**, a `team` CRUD group (`list_teams`/`create_team`/`get_team`/`update_team`/
+`delete_team`, mirroring `board`'s own 5-tool shape) — an ADR 0019 *amendment*, not an argument addition,
+per [the amendment note](docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m9-team-tools-2026-09-01-kan-1058).
+Team *membership* management (`add`/`remove`/list a member, change a role) deliberately got **no** MCP
+tool — mirroring `board_member`'s own long-standing absence from this surface — and lives CLI-only as
+`pandan team member add/rm/list/update-role`. Measured immediately before/after on the same commit
+(tighter than comparing against a drifted headline): **8,951 → 9,505** compact (+554, +6.2%),
+`outputSchema` alone **836 → 922**. **Re-run the script rather than quoting this line** — four recorded
+drifts (three from arguments, one from an actual tool-count change) is enough to treat any number here
+as an order of magnitude and nothing finer. The other six
+read-tools stay raw *on measurement*, at 7–474 tokens each: shaping a small payload is the opposite of
+the trade ADR 0019 endorsed, and a test pins them that way. That figure counts `{name, description,
+input_schema}` per tool; a `tools/list` entry also carries an **`outputSchema`** worth a further
+**~900** compact if your client forwards it — measured and bracketed separately in
 [ADR 0019](docs/adr/0019-mcp-surface-right-sizing.md) § *The fourth field* (KAN-518), deliberately not
 folded into the headline and deliberately **not** compacted, because unlike `inputSchema` the advertised
 `outputSchema` is the very object the SDK validates every tool result against.
 Both measurements are re-runnable —
 `mcp/scripts/measure_tool_schema_tokens.py` for the resident schema,
-`mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The 49-tool surface is pinned by
-`mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit** (adding an
-*argument*, as KAN-501 did, is not). **Per-slice status goes stale here faster than anywhere else in
-this file; read [docs/milestone-8/SLICES.md](docs/milestone-8/SLICES.md) and the board, not this
-paragraph.**
+`mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The surface (54 tools as of M9
+V69) is pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit**
+(adding an *argument*, as KAN-501 and V67's `team_id` did, is not). **Per-slice status goes stale here
+faster than anywhere else in this file; read [docs/milestone-8/SLICES.md](docs/milestone-8/SLICES.md)/
+[docs/milestone-9/SLICES.md](docs/milestone-9/SLICES.md) and the board, not this paragraph.**
 
 Three things the rebrand deliberately did **not** rename, so don't "finish" it:
 - **The `KAN-` / `EPIC-` ticket prefixes** — immutable per-table Postgres sequences (ADR 0006/0009);
@@ -720,7 +732,10 @@ intended behavior:
   have since landed** — payload shaping in KAN-501 and the four CLI gaps in KAN-502, which also pins
   parity **both ways** via `pandan-cli/tests/test_parity.py`. ADR 0019 still stands, because the
   single-exec-tool option needs a second precondition that remains unmet: the published ghcr image
-  carries no `pandan` binary to exec. **Board keys** — `board.key`, `^[A-Z][A-Z0-9]{1,9}$`,
+  carries no `pandan` binary to exec. **The freeze itself has since grown exactly once, by amendment**
+  (M9 V69, KAN-1058): +5 team tools (49→54), mirroring `board`'s own CRUD shape, while team *membership*
+  management stayed CLI-only — see the MCP-surface paragraph above for the measured delta.
+  **Board keys** — `board.key`, `^[A-Z][A-Z0-9]{1,9}$`,
   unique **per owner** so two users can each hold `ENG`, with `KAN`/`EPIC` reserved and no hyphens
   (which is what lets a ref split on its first one); derived at create so creation never blocks on
   naming, and editable because nothing about a card is stored per key (0020, M8 V51). Newest are two
