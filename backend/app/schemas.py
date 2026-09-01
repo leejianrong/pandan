@@ -738,6 +738,64 @@ class TeamRead(BaseModel):
     updated_at: datetime
 
 
+class TeamUpdate(BaseModel):
+    """Rename a team (M9 V66, KAN-1055). Owner-role members only. Renaming does not
+    touch any board's ``team_id`` — a team's boards are a separate pointer
+    (``board.team_id``) that this schema has no field for."""
+
+    name: Annotated[str | None, Field(max_length=MAX_NAME_LEN)] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_non_empty(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("name must not be empty")
+        return v
+
+
+class TeamMemberCreate(BaseModel):
+    """Add a member to a team (M9 V66, KAN-1055): identify the user by **either**
+    ``user_id`` or ``email`` (exactly one), with a ``role`` (defaults to
+    ``viewer``). Mirrors ``MemberCreate`` (board membership) exactly."""
+
+    user_id: uuid.UUID | None = None
+    email: Annotated[str | None, Field(max_length=MAX_EMAIL_LEN)] = None
+    role: RoleEnum = RoleEnum.viewer
+
+    @field_validator("email")
+    @classmethod
+    def email_non_empty(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("email must not be empty")
+        return v
+
+    @model_validator(mode="after")
+    def exactly_one_identity(self) -> TeamMemberCreate:
+        if (self.user_id is None) == (self.email is None):
+            raise ValueError("provide exactly one of user_id or email")
+        return self
+
+
+class TeamMemberUpdate(BaseModel):
+    """Change a team member's role (M9 V66, KAN-1055)."""
+
+    role: RoleEnum
+
+
+class TeamMemberRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    team_id: int
+    user_id: uuid.UUID
+    # The member's email, populated by the router from the user table (not an ORM
+    # column on team_member) — mirrors MemberRead.email.
+    email: str | None = None
+    role: RoleEnum
+    created_at: datetime
+    updated_at: datetime
+
+
 class ActivityRead(BaseModel):
     """One append-only audit record of a board-domain mutation (KAN-17 write path,
     KAN-18 read side). Mirrors the ``Activity`` model's real columns; there is no
