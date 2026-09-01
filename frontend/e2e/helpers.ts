@@ -214,6 +214,47 @@ export async function cleanupE2eBoards(
   }
 }
 
+// Delete every e2e-prefixed team the given user(s) own (owner-role gated delete),
+// via the API. Teams are user-scoped (not board-scoped), so — unlike a board —
+// nothing cascades them away when a board is deleted; the standing autouse fixture
+// only cleans up boards, so a team-touching spec must call this itself.
+export async function cleanupE2eTeams(emails: string[] = [E2E_USER.email]): Promise<void> {
+  for (const email of emails) {
+    const ctx: APIRequestContext = await request.newContext({ baseURL: API_ORIGIN });
+    try {
+      await ctx.post("/auth/test-login", { data: { email }, maxRedirects: 0 });
+      const teams = await ctx.get("/api/v1/teams");
+      if (teams.ok()) {
+        for (const team of await teams.json()) {
+          if (
+            typeof team.name === "string" &&
+            team.name.startsWith(E2E_PREFIX) &&
+            team.role === "owner"
+          ) {
+            await ctx.delete(`/api/v1/teams/${team.id}`);
+          }
+        }
+      }
+    } finally {
+      await ctx.dispose();
+    }
+  }
+}
+
+// The team card (in the Teams view) matched by its name.
+export function teamItem(page: Page, name: string): Locator {
+  return page.locator(".team-card", { has: page.getByText(name, { exact: true }) });
+}
+
+// Create a team via the Teams view. Leaves the Teams view open.
+export async function createTeam(page: Page, name: string): Promise<void> {
+  await openView(page, "Teams");
+  await page.getByRole("button", { name: "New team" }).click();
+  await page.getByPlaceholder("Team name (required)").fill(name);
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(teamItem(page, name)).toBeVisible();
+}
+
 // --- documentation screenshots ---------------------------------------------
 // The specs that shoot the UI for the docs used to drop a "review copy" at the
 // worktree root (../dashboard-light.png and friends), which meant eight PNGs sat

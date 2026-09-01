@@ -12,14 +12,24 @@
     activeBoard,
   } from "../board.svelte";
   import { DropdownMenu, Select, TextInput } from "./ui";
-  import type { MenuItem } from "./ui";
+  import type { MenuItem, SelectOption } from "./ui";
+  import { teamStore } from "../teams.svelte";
 
   import type { Board, Role } from "../api";
 
   type Mode = "idle" | "creating" | "renaming" | "confirmDelete";
   let mode = $state<Mode>("idle");
   let name = $state("");
+  // The Team picker (M9 V70, KAN-1059): "" means no team (personal board). Only
+  // teams the caller belongs to are offered — the API 403s on any other team_id,
+  // so restricting the options here means that 403 can never actually happen.
+  let teamId = $state("");
   let busy = $state(false);
+
+  const teamOptions = $derived<SelectOption[]>([
+    { value: "", label: "No team" },
+    ...teamStore.teams.map((t) => ({ value: String(t.id), label: t.name })),
+  ]);
 
   // A board the caller doesn't own is "shared" — surface the role (KAN-15).
   // The option label carries the role in text and the active board also gets a
@@ -55,15 +65,19 @@
 
   function startCreate() {
     name = "";
+    teamId = "";
     mode = "creating";
   }
   function startRename() {
-    name = activeBoard()?.name ?? "";
+    const b = activeBoard();
+    name = b?.name ?? "";
+    teamId = b?.team_id != null ? String(b.team_id) : "";
     mode = "renaming";
   }
   function cancel() {
     mode = "idle";
     name = "";
+    teamId = "";
   }
 
   async function submit() {
@@ -73,7 +87,7 @@
       if (!trimmed) return;
       busy = true;
       try {
-        await addBoard(trimmed);
+        await addBoard(trimmed, teamId ? Number(teamId) : null);
         cancel();
       } finally {
         busy = false;
@@ -83,7 +97,7 @@
       if (!b || !trimmed) return;
       busy = true;
       try {
-        await editBoard(b.id, trimmed);
+        await editBoard(b.id, trimmed, teamId ? Number(teamId) : null);
         cancel();
       } finally {
         busy = false;
@@ -117,6 +131,14 @@
         bind:value={name}
         aria-label="Board name"
       />
+      <div class="board-team-select">
+        <Select
+          aria-label="Team"
+          bind:value={teamId}
+          options={teamOptions}
+          placeholder="No team"
+        />
+      </div>
       <button type="submit" class="primary" disabled={!name.trim() || busy}>
         {mode === "creating" ? "Create" : "Save"}
       </button>
@@ -165,6 +187,12 @@
   .board-select {
     width: 12rem;
     max-width: 12rem;
+  }
+  /* The Team picker (M9 V70) in the create/rename form — same constrained width
+     as the board switcher's own select, so it doesn't stretch the top bar. */
+  .board-team-select {
+    width: 10rem;
+    max-width: 10rem;
   }
   /* Role pill for a shared board (KAN-15): you're a member, not the owner. */
   .role-badge {

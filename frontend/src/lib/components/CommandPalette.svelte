@@ -63,6 +63,7 @@
     { id: "activity", label: "Activity" },
     { id: "tokens", label: "Tokens" },
     { id: "members", label: "Members" },
+    { id: "teams", label: "Teams" },
     { id: "trash", label: "Trash" },
     { id: "settings", label: "Settings" },
   ];
