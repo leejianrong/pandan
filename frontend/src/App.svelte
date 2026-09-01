@@ -15,12 +15,14 @@
   import type { DrawerView } from "./lib/components/SideNav.svelte";
   import Tokens from "./lib/components/Tokens.svelte";
   import Members from "./lib/components/Members.svelte";
+  import Teams from "./lib/components/Teams.svelte";
   import Trash from "./lib/components/Trash.svelte";
   import ShortcutsHelp from "./lib/components/ShortcutsHelp.svelte";
   import { DropdownMenu } from "./lib/components/ui";
   import type { MenuItem } from "./lib/components/ui";
   import { refetch, refetchBoards, refetchEpics, refetchLabels, refetchViews, setQuery } from "./lib/board.svelte";
   import { refetchTokens } from "./lib/tokens.svelte";
+  import { refetchTeams } from "./lib/teams.svelte";
   import {
     startNotificationPolling,
     stopNotificationPolling,
@@ -42,6 +44,7 @@
     | "activity"
     | "tokens"
     | "members"
+    | "teams"
     | "trash"
     | "settings"
   >("board");
@@ -108,6 +111,10 @@
       refetchEpics();
       refetchLabels();
       refetchViews();
+      // Teams are user-scoped, not board-scoped (M9 V70) — load once here, not
+      // per-board-switch, and eagerly (not lazily like Tokens) because the
+      // BoardSwitcher's Team picker needs the list too.
+      refetchTeams();
       // Start polling the notification inbox (V39, KAN-303) — user-scoped, so it
       // runs independent of the active board and keeps the top-bar badge fresh.
       startNotificationPolling();
@@ -251,6 +258,8 @@
       <Tokens />
     {:else if view === "members"}
       <Members />
+    {:else if view === "teams"}
+      <Teams />
     {:else if view === "settings"}
       <section class="settings-stub">
         <h2>Settings</h2>

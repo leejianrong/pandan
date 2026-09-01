@@ -106,14 +106,18 @@ export async function setActiveBoard(id: number): Promise<void> {
   await Promise.all([refetch(), refetchEpics(), refetchLabels(), refetchViews()]);
 }
 
-export async function addBoard(name: string): Promise<void> {
-  const created = await createBoard({ name });
+export async function addBoard(name: string, teamId?: number | null): Promise<void> {
+  const created = await createBoard({ name, team_id: teamId ?? undefined });
   await refetchBoards();
   await setActiveBoard(created.id); // creating a board switches to it
 }
 
-export async function editBoard(id: number, name: string): Promise<void> {
-  await updateBoard(id, { name });
+export async function editBoard(
+  id: number,
+  name: string,
+  teamId?: number | null,
+): Promise<void> {
+  await updateBoard(id, { name, team_id: teamId });
   await refetchBoards();
 }
 

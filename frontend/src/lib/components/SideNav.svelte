@@ -16,6 +16,7 @@
     Tag,
     Trash2,
     Users,
+    UsersRound,
     X,
   } from "lucide-svelte";
   import type { Icon } from "lucide-svelte";
@@ -28,6 +29,7 @@
     | "activity"
     | "tokens"
     | "members"
+    | "teams"
     | "trash";
 
   let {
@@ -57,6 +59,7 @@
     { id: "activity", label: "Activity", icon: Activity },
     { id: "tokens", label: "Tokens", icon: KeyRound },
     { id: "members", label: "Members", icon: Users },
+    { id: "teams", label: "Teams", icon: UsersRound },
     { id: "trash", label: "Trash", icon: Trash2 },
   ];
 

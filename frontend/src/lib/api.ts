@@ -213,6 +213,9 @@ export interface Board {
   // The caller's effective role on this board (KAN-15): "owner" if they own it,
   // else their membership role. Drives the switcher's shared-board badge.
   role?: Role | null;
+  // The team this board is linked to, or null for a personal board (M9 V67,
+  // KAN-1056; ADR 0021). At most one team — no join table.
+  team_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -222,11 +225,16 @@ export interface BoardCreate {
   // Optional: omit and the server derives one from the name, suffixing on
   // collision, so a create never fails on naming.
   key?: string;
+  // Optional: link the new board to a team the caller is a member of (403 if
+  // not). Omitted → NULL, a personal board (today's unchanged default).
+  team_id?: number | null;
 }
 
 export interface BoardUpdate {
   name?: string;
   key?: string;
+  // Set or clear (null) the board's team link. Omitted → unchanged.
+  team_id?: number | null;
 }
 
 export interface EpicUpdate {
@@ -632,6 +640,126 @@ export async function updateBoard(id: number, payload: BoardUpdate): Promise<Boa
 
 export async function deleteBoard(id: number): Promise<void> {
   const res = await fetch(`${API}/boards/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+}
+
+// --- Teams (Milestone 9, ADR 0021) ------------------------------------------
+// A team is the tenant tier above a user: a group of members whose "owner" role
+// (a team may have several) manages membership, and to whose boards a team role
+// grants a default viewer/editor/owner access a board's own BoardMember rows can
+// still override (V68, KAN-1057). Teams are user-scoped, not board-scoped — a
+// user sees only the teams they belong to (membership IS the visibility rule).
+
+export interface Team {
+  id: number;
+  name: string;
+  // The caller's role on this team (viewer/editor/owner) — never null on a
+  // response reached through the router, since every visible team is one the
+  // caller is a member of.
+  role: Role | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamCreate {
+  name: string;
+}
+
+export interface TeamUpdate {
+  name?: string;
+}
+
+export async function listTeams(): Promise<Team[]> {
+  const res = await fetch(`${API}/teams`);
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function createTeam(payload: TeamCreate): Promise<Team> {
+  const res = await fetch(`${API}/teams`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function updateTeam(id: number, payload: TeamUpdate): Promise<Team> {
+  const res = await fetch(`${API}/teams/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function deleteTeam(id: number): Promise<void> {
+  const res = await fetch(`${API}/teams/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+}
+
+// Team membership (mirrors board Member exactly — add/remove/re-role, owner-role
+// gated). `team_id` lives in the path (mounted under /teams/{id}/members).
+
+export interface TeamMember {
+  id: number;
+  team_id: number;
+  user_id: string;
+  email: string | null;
+  role: Role;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TeamMemberCreate {
+  email?: string;
+  user_id?: string;
+  role?: Role;
+}
+
+export interface TeamMemberUpdate {
+  role: Role;
+}
+
+export async function listTeamMembers(teamId: number): Promise<TeamMember[]> {
+  const res = await fetch(`${API}/teams/${teamId}/members`);
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function addTeamMember(
+  teamId: number,
+  payload: TeamMemberCreate,
+): Promise<TeamMember> {
+  const res = await fetch(`${API}/teams/${teamId}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function updateTeamMember(
+  teamId: number,
+  memberId: number,
+  payload: TeamMemberUpdate,
+): Promise<TeamMember> {
+  const res = await fetch(`${API}/teams/${teamId}/members/${memberId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function removeTeamMember(teamId: number, memberId: number): Promise<void> {
+  const res = await fetch(`${API}/teams/${teamId}/members/${memberId}`, {
+    method: "DELETE",
+  });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
 }
 
