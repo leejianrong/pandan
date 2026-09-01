@@ -8,6 +8,15 @@ description: What Pandan does not do yet, stated plainly, so you can tell whethe
 An honest list of what Pandan does not do. Better to know now than to find out after you have moved your
 work onto it.
 
+## Access
+
+**There is no admin role, invite list, or signup allowlist.** Anyone who can complete GitHub OAuth
+against your registered app can log in and start creating boards — access control is applied after
+login, at the board level (owner, then shared members), not before it. If you are self-hosting for a
+team and need to restrict who can even reach the login button, do it at the network layer (a VPN, an
+internal network) rather than looking for a setting in the app, because there isn't one. See
+[self-hosting: who can sign in](../self-hosting/local.md#who-can-sign-in-and-who-is-the-admin).
+
 ## Collaboration
 
 **A board has exactly one owner.** Ownership does not transfer from the interface. If the owner's account
