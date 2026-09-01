@@ -31,6 +31,7 @@ from .routers import (
     me,
     members,
     notifications,
+    team_members,
     teams,
     templates,
     tokens,
@@ -191,6 +192,7 @@ app.include_router(cycles.router, prefix="/api/v1")  # V33 (KAN-297): cycles / i
 app.include_router(tokens.router, prefix="/api/v1")  # M3 V9 (ADR 0014): agent PATs
 app.include_router(notifications.router, prefix="/api/v1")  # V37 (KAN-301): inbox
 app.include_router(teams.router, prefix="/api/v1")  # M9 V65 (KAN-1054, ADR 0021): teams
+app.include_router(team_members.router, prefix="/api/v1")  # M9 V66 (KAN-1055): team membership
 # Who-am-I for the acting principal (KAN-530). Board-less: it resolves the
 # principal and returns its id + email, so a bearer holder can finally ask who it
 # is — fastapi-users' /users/me below is cookie-only.
