@@ -49,6 +49,7 @@ from ..activity import record_activity
 from ..auth_models import User
 from ..authz import Access, authorize_board, get_principal, visible_board_ids
 from ..board_keys import allocate_board_key
+from ..board_seq import card_ref
 from ..db import get_db
 from ..metrics import compute_metrics, move_target
 from ..models import Activity, Board, BoardMember, Card, TeamMember
@@ -616,16 +617,24 @@ def board_metrics(
         select(
             Card.id,
             Card.ticket_number,
+            Card.board_seq,
             Card.column,
             Card.assignee,
             Card.created_at,
             Card.deleted_at,
         ).where(Card.board_id == board_id)
     ).all()
+    # ``ref`` rides along (V54, KAN-975) so the dashboard's aging-WIP bars read
+    # ``ENG-77`` like every other card label. The key is this board's, resolved once
+    # — a metrics readout showing the canonical ticket while the board beside it shows
+    # the board-local one would be the one place the two forms disagreed on screen.
+    board = db.get(Board, board_id)
+    board_key = board.key if board is not None else None
     cards = [
         {
             "id": row.id,
             "ticket_number": row.ticket_number,
+            "ref": card_ref(board_key, row.board_seq) if board_key else None,
             "column": row.column,
             "assignee": row.assignee,
             "created_at": row.created_at,

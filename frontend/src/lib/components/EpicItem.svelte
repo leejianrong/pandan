@@ -83,7 +83,7 @@
     onkeydown={onKeydown}
   >
     <div class="card-top">
-      <span class="ticket epic-ticket">{displayRef(epic)}</span>
+      <span class="ticket epic-ticket" title={epic.ticket_number}>{displayRef(epic)}</span>
       <span class="epic-count">{total} {total === 1 ? "story" : "stories"}</span>
       {#if health}
         <span class="health-pill {epic.health}" title="Health: {health.label}">
@@ -120,7 +120,7 @@
         {#each stories as story (story.id)}
           <li class:is-done={story.column === "done"}>
             <span class="sdot {story.column}" aria-hidden="true"></span>
-            <span class="ticket">{displayRef(story)}</span>
+            <span class="ticket" title={story.ticket_number}>{displayRef(story)}</span>
             <span class="stitle">{story.title}</span>
           </li>
         {/each}

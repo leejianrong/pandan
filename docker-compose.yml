@@ -19,7 +19,11 @@ services:
       POSTGRES_PASSWORD: kanban
       POSTGRES_DB: kanban
     ports:
-      - "5432:5432"
+      # Host port is overridable so a machine already running a Postgres on 5432 can
+      # still bring this one up; `make dev` picks a free one and passes it. The
+      # CONTAINER side stays 5432, so the `app` service's compose-network DSN
+      # (`db:5432`) is unaffected by whatever the host publishes.
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - kanban_pgdata:/var/lib/postgresql/data
     healthcheck:

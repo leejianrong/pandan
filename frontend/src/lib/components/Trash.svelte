@@ -26,6 +26,9 @@
     kind: "card" | "epic";
     id: number;
     ticket: string;
+    // The canonical ticket, kept beside the displayed ref as the hover/copy value
+    // (V54, KAN-975) — a trashed card is exactly the one you may need to quote.
+    canonical: string;
     title: string;
     deleted_at: string;
   };
@@ -38,6 +41,7 @@
         kind: "card" as const,
         id: c.id,
         ticket: displayRef(c),
+        canonical: c.ticket_number,
         title: c.title,
         deleted_at: c.deleted_at,
       })),
@@ -45,6 +49,7 @@
         kind: "epic" as const,
         id: e.id,
         ticket: displayRef(e),
+        canonical: e.ticket_number,
         title: e.name,
         deleted_at: e.deleted_at,
       })),
@@ -158,7 +163,7 @@
           </span>
           <div class="trash-body">
             <p class="trash-title">
-              <span class="ticket">{e.ticket}</span>
+              <span class="ticket" title={e.canonical}>{e.ticket}</span>
               <span class="ttitle">{e.title}</span>
             </p>
             <p class="trash-meta">

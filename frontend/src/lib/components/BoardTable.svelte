@@ -52,7 +52,7 @@
       // key is a genuine string or rank, so the relational compare is right there.
       let cmp =
         sortKey === "ticket_number"
-          ? compareTicketRefs(a.ticket_number, b.ticket_number)
+          ? compareTicketRefs(displayRef(a), displayRef(b))
           : compare(value(a, sortKey), value(b, sortKey));
       if (cmp === 0) cmp = a.id - b.id; // stable tiebreak
       return desc ? -cmp : cmp;
@@ -99,7 +99,7 @@
     <tbody>
       {#each rows as card (card.id)}
         <tr>
-          <td class="mono">{displayRef(card)}</td>
+          <td class="mono" title={card.ticket_number}>{displayRef(card)}</td>
           <td class="title-cell">{card.title}</td>
           <td>{COLUMN_LABEL[card.column] ?? card.column}</td>
           <td class="cap">{card.priority}</td>

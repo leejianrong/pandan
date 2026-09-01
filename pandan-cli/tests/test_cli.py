@@ -1363,6 +1363,50 @@ def test_epic_line_shows_board_local_ref(monkeypatch, env, capsys):
     assert "EPIC-7" not in out
 
 
+def test_a_key_naming_two_boards_in_one_result_falls_back_to_canonical(
+    monkeypatch, env, capsys
+):
+    """A cross-board read where one key names two boards (V54): those rows print the
+    canonical ticket instead, because ``ENG-14`` would name two different cards in the
+    same output. Ambiguity is a property of the RESULT SET, not of a board — board
+    keys are unique per owner, so this needs a shared board whose owner reuses a key
+    you also use."""
+    cards = {"cards": [
+        {"ticket_number": "KAN-1", "ref": "ENG-14", "board_id": 1,
+         "column": "todo", "title": "Mine", "story_points": None},
+        {"ticket_number": "KAN-2", "ref": "ENG-14", "board_id": 2,
+         "column": "todo", "title": "Theirs", "story_points": None},
+        {"ticket_number": "KAN-3", "ref": "OPS-9", "board_id": 3,
+         "column": "todo", "title": "Unaffected", "story_points": None},
+    ]}
+    patch_client(monkeypatch, FakeClient(result=cards))
+    assert cli.run(["list"]) == 0
+    out = data_out(capsys)
+    # The colliding key degrades to the canonical form on BOTH rows...
+    assert "KAN-1\ttodo\tMine" in out
+    assert "KAN-2\ttodo\tTheirs" in out
+    assert "ENG-14" not in out
+    # ...while a key that names only one board in this result set is untouched.
+    assert "OPS-9\ttodo\tUnaffected" in out
+
+
+def test_the_same_key_on_one_board_is_not_ambiguous(monkeypatch, env, capsys):
+    """Two rows sharing a key AND a board are the normal case — the same board — and
+    must keep their board-local refs. Only a key spanning two ``board_id``s degrades."""
+    cards = {"cards": [
+        {"ticket_number": "KAN-1", "ref": "ENG-1", "board_id": 7,
+         "column": "todo", "title": "One", "story_points": None},
+        {"ticket_number": "KAN-2", "ref": "ENG-2", "board_id": 7,
+         "column": "todo", "title": "Two", "story_points": None},
+    ]}
+    patch_client(monkeypatch, FakeClient(result=cards))
+    assert cli.run(["list"]) == 0
+    out = data_out(capsys)
+    assert "ENG-1\ttodo\tOne" in out
+    assert "ENG-2\ttodo\tTwo" in out
+    assert "KAN-" not in out
+
+
 def test_label_list_renders_labels(monkeypatch, env, capsys):
     """`pandan label list` on a real ``{"labels": [...]}`` response renders one line
     per label (id, name, color) — the legitimate consumer of the labels branch."""

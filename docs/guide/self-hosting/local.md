@@ -75,6 +75,20 @@ resolve `import app`.
     Keep the `+psycopg` suffix if you change the URL. It selects the psycopg 3 driver, which is what the
     code expects.
 
+!!! tip "Already running something on 5432, 8000 or 5173?"
+
+    `make dev` handles it: it prefers those ports, falls through to the next free one when a port is
+    taken, and prints the three URLs it settled on. Nothing to configure.
+
+    Running the steps by hand instead, you own the conflict — and it is worth knowing what it looks
+    like, because none of the three announce themselves as a port clash. Another Postgres on `:5432`
+    answers and rejects the `kanban` credentials, so migrations fail with `password authentication
+    failed` as though the URL were wrong. Another app on `:8000` will happily answer the SPA's proxied
+    `/api` calls with its own responses. Set `DB_PORT` before `docker compose up -d db` to publish
+    Postgres elsewhere (and point `DATABASE_URL` at it), pass `--port` to uvicorn, and set
+    `BACKEND_PORT` / `FRONTEND_PORT` for Vite, which reads both — the second is its own port, the
+    first is the backend it proxies to.
+
 ## Enabling login
 
 With no OAuth credentials the instance still boots, the landing page still renders, and login is simply

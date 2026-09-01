@@ -279,7 +279,7 @@
               <ul class="inflight-list">
                 {#each group.cards as card (card.id)}
                   <li class="inflight-row">
-                    <span class="ticket">{displayRef(card)}</span>
+                    <span class="ticket" title={card.ticket_number}>{displayRef(card)}</span>
                     <span class="inflight-title" title={card.title}>{card.title}</span>
                     <span class="inflight-badges">
                       {#if card.needs_human}
@@ -325,7 +325,7 @@
           {#each dashboardStore.attention as card (card.id)}
             <li class="attn-row">
               <div class="attn-top">
-                <span class="ticket">{displayRef(card)}</span>
+                <span class="ticket" title={card.ticket_number}>{displayRef(card)}</span>
                 <span class="attn-title" title={card.title}>{card.title}</span>
                 {#if navigate}
                   <button class="row-link" onclick={goToBoard} title="Open on the board">
@@ -416,7 +416,7 @@
               {@const stale = item.age_seconds >= STALE_SECONDS}
               <li class="bar-row">
                 <span class="bar-label mono" title={item.assignee ?? "Unassigned"}>
-                  {item.ticket_number}
+                  {displayRef(item)}
                 </span>
                 <div class="bar-line">
                   <div
@@ -424,7 +424,7 @@
                     class:stale
                     style="width: {pct(item.age_seconds, agingMax)}%"
                     role="img"
-                    aria-label="{item.ticket_number}: in progress {fmtDuration(item.age_seconds)}"
+                    aria-label="{displayRef(item)}: in progress {fmtDuration(item.age_seconds)}"
                   ></div>
                   <span class="bar-val">{fmtDuration(item.age_seconds)}</span>
                   {#if stale}<span class="mini-badge attn">stale</span>{/if}
