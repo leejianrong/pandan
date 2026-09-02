@@ -897,6 +897,43 @@ def test_generate_cycles_sends_planning_interval_id():
     assert seen["requests"][0]["body"]["planning_interval_id"] == 9
 
 
+def test_close_cycle_posts_rollover_to_and_adds_cycle_id():
+    handler, seen = record_requests(
+        httpx.Response(
+            200,
+            json={"closed_at": "2026-09-02T00:00:00Z", "rolled_over_count": 4, "rollover_to": 8},
+        )
+    )
+    out = make_client(handler).close_cycle(3, 7, rollover_to=8)
+    req = seen["requests"][0]
+    assert req["method"] == "POST"
+    assert req["path"] == "/api/v1/boards/3/cycles/7/close"
+    assert req["body"] == {"rollover_to": 8}
+    assert out == {
+        "cycle_id": 7,
+        "closed_at": "2026-09-02T00:00:00Z",
+        "rolled_over_count": 4,
+        "rollover_to": 8,
+    }
+
+
+def test_close_cycle_sends_null_rollover_to_unconditionally():
+    """``rollover_to=None`` means "to the backlog" and MUST be sent, not stripped —
+    unlike every optional field elsewhere, which ``_clean`` omits when ``None``."""
+    handler, seen = record_requests(
+        httpx.Response(
+            200,
+            json={
+                "closed_at": "2026-09-02T00:00:00Z",
+                "rolled_over_count": 0,
+                "rollover_to": None,
+            },
+        )
+    )
+    make_client(handler).close_cycle(3, 7, rollover_to=None)
+    assert seen["requests"][0]["body"] == {"rollover_to": None}
+
+
 # --- planning intervals (M8 V57, KAN-978) -----------------------------------
 
 

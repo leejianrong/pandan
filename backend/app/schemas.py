@@ -1308,6 +1308,34 @@ class CycleRead(BaseModel):
     ends_on: datetime | None
     created_at: datetime
     planning_interval_id: int | None = None
+    # Explicit close (M8 V59, KAN-980): NULL = open. When closed, the frozen
+    # committed/completed snapshot (``{"count": int, "points": int}``, the same
+    # shape ``cycle_metrics`` reports) is what that endpoint reads from instead of
+    # recomputing from live membership.
+    closed_at: datetime | None = None
+    frozen_committed: dict[str, int] | None = None
+    frozen_completed: dict[str, int] | None = None
+
+
+class CycleClose(BaseModel):
+    """``POST /boards/{id}/cycles/{cycle_id}/close`` (M8 V59, KAN-980).
+
+    ``rollover_to`` is **required, not defaulted** — the caller states a target
+    rather than falling through to an implicit default: an existing open cycle id
+    on the same board moves every card still not ``done`` there; ``null`` moves
+    them to the backlog (``cycle_id = NULL``, M8 V56). The router validates it
+    references another open cycle on the same board (``422`` otherwise)."""
+
+    rollover_to: int | None
+
+
+class CycleCloseRead(BaseModel):
+    """What closing a cycle reports: what moved, not the cycle itself (the CLI's
+    one-line summary reads straight from this)."""
+
+    closed_at: datetime
+    rolled_over_count: int
+    rollover_to: int | None
 
 
 # --- cycle metrics: burndown / velocity (V34, KAN-298) ---------------------

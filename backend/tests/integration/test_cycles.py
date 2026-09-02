@@ -480,3 +480,161 @@ def test_non_member_cannot_generate_cycles(client, login_as):
     )
     assert r.status_code == 403
     assert client.get(_cycles(1)).json() == []
+
+
+# --- close: explicit close + rollover (M8 V59, KAN-980) ---------------------
+
+
+def _close(client, board_id, cycle_id, rollover_to):
+    return client.post(
+        f"{_cycles(board_id)}/{cycle_id}/close", json={"rollover_to": rollover_to}
+    )
+
+
+def test_close_stamps_closed_at_and_freezes_committed_completed(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    _create_card(
+        client, title="done story", cycle_id=cycle["id"], column="done", story_points=5
+    )
+    _create_card(
+        client, title="wip story", cycle_id=cycle["id"], column="in_progress",
+        story_points=3,
+    )
+
+    r = _close(client, 1, cycle["id"], None)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["closed_at"] is not None
+    assert body["rolled_over_count"] == 1
+    assert body["rollover_to"] is None
+
+    got = client.get(f"{_cycles(1)}/{cycle['id']}").json()
+    assert got["closed_at"] is not None
+    assert got["frozen_committed"] == {"count": 2, "points": 8}
+    assert got["frozen_completed"] == {"count": 1, "points": 5}
+
+
+def test_close_moves_unfinished_cards_to_target_cycle_leaves_done_alone(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    target = client.post(_cycles(1), json={"name": "Sprint 2"}).json()
+    done_card = _create_card(client, title="done", cycle_id=cycle["id"], column="done")
+    wip_card = _create_card(
+        client, title="wip", cycle_id=cycle["id"], column="in_progress"
+    )
+
+    r = _close(client, 1, cycle["id"], target["id"])
+    assert r.status_code == 200
+    assert r.json()["rolled_over_count"] == 1
+    assert r.json()["rollover_to"] == target["id"]
+
+    assert client.get(f"{CARDS}/{done_card['id']}").json()["cycle_id"] == cycle["id"]
+    assert client.get(f"{CARDS}/{wip_card['id']}").json()["cycle_id"] == target["id"]
+
+
+def test_close_with_null_rollover_moves_unfinished_to_backlog(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    wip_card = _create_card(
+        client, title="wip", cycle_id=cycle["id"], column="in_progress"
+    )
+    _close(client, 1, cycle["id"], None)
+    assert client.get(f"{CARDS}/{wip_card['id']}").json()["cycle_id"] is None
+
+
+def test_close_leaves_deleted_cards_alone(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    card = _create_card(client, title="wip", cycle_id=cycle["id"], column="in_progress")
+    assert client.delete(f"{CARDS}/{card['id']}").status_code == 204
+    r = _close(client, 1, cycle["id"], None)
+    assert r.json()["rolled_over_count"] == 0
+
+
+def test_cycle_metrics_after_close_reports_frozen_numbers_and_empty_burndown(client):
+    cycle = client.post(
+        _cycles(1),
+        json={
+            "name": "Sprint 1",
+            "starts_on": "2026-01-01T00:00:00Z",
+            "ends_on": "2026-01-14T00:00:00Z",
+        },
+    ).json()
+    _create_card(
+        client, title="done", cycle_id=cycle["id"], column="done", story_points=5
+    )
+    wip = _create_card(
+        client, title="wip", cycle_id=cycle["id"], column="in_progress", story_points=3
+    )
+
+    before = client.get(f"{_cycles(1)}/{cycle['id']}/metrics").json()
+    assert before["committed"] == {"count": 2, "points": 8}
+    assert before["burndown"]  # non-empty: a dated window
+
+    other = client.post(_cycles(1), json={"name": "Sprint 2"}).json()
+    _close(client, 1, cycle["id"], other["id"])
+
+    after = client.get(f"{_cycles(1)}/{cycle['id']}/metrics").json()
+    # Frozen at close time — still 2/8 committed even though `wip` has since left.
+    assert after["committed"] == {"count": 2, "points": 8}
+    assert after["completed"] == {"count": 1, "points": 5}
+    assert after["velocity"] == 5
+    assert after["burndown"] == []
+
+    # Rollover really did move the card out.
+    assert client.get(f"{CARDS}/{wip['id']}").json()["cycle_id"] == other["id"]
+
+
+def test_close_rejects_rollover_to_a_closed_cycle(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    other = client.post(_cycles(1), json={"name": "Sprint 2"}).json()
+    _close(client, 1, other["id"], None)  # close the target first
+
+    r = _close(client, 1, cycle["id"], other["id"])
+    assert r.status_code == 422
+    assert client.get(f"{_cycles(1)}/{cycle['id']}").json()["closed_at"] is None
+
+
+def test_close_rejects_rollover_to_a_cross_board_cycle(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    other_board = client.post("/api/v1/boards", json={"name": "Other"}).json()
+    other_cycle = client.post(_cycles(other_board["id"]), json={"name": "elsewhere"}).json()
+
+    r = _close(client, 1, cycle["id"], other_cycle["id"])
+    assert r.status_code == 422
+
+
+def test_close_rejects_rollover_to_a_nonexistent_cycle(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    assert _close(client, 1, cycle["id"], 9999).status_code == 422
+
+
+def test_close_rejects_rollover_to_itself(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    assert _close(client, 1, cycle["id"], cycle["id"]).status_code == 422
+
+
+def test_close_requires_rollover_to_field(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    r = client.post(f"{_cycles(1)}/{cycle['id']}/close", json={})
+    assert r.status_code == 422
+
+
+def test_closing_an_already_closed_cycle_is_409(client):
+    cycle = client.post(_cycles(1), json={"name": "Sprint 1"}).json()
+    assert _close(client, 1, cycle["id"], None).status_code == 200
+    r = _close(client, 1, cycle["id"], None)
+    assert r.status_code == 409
+
+
+def test_close_missing_or_cross_board_cycle_is_404(client):
+    other = client.post("/api/v1/boards", json={"name": "Other"}).json()
+    cycle = client.post(_cycles(1), json={"name": "on-1"}).json()
+    assert _close(client, 1, 9999, None).status_code == 404
+    r = _close(client, other["id"], cycle["id"], None)
+    assert r.status_code == 404
+
+
+def test_non_member_cannot_close_a_cycle(client, login_as):
+    cycle = client.post(_cycles(1), json={"name": "private"}).json()
+    stranger = login_as("stranger4@example.com", "gh-stranger4")
+    r = _close(stranger, 1, cycle["id"], None)
+    assert r.status_code == 403
+    assert client.get(f"{_cycles(1)}/{cycle['id']}").json()["closed_at"] is None

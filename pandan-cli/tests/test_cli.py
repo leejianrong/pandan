@@ -259,6 +259,9 @@ class FakeClient:
     def generate_cycles(self, board_id, **kw):
         return self._call("generate_cycles", board_id=board_id, **kw)
 
+    def close_cycle(self, board_id, cycle_id, **kw):
+        return self._call("close_cycle", board_id=board_id, cycle_id=cycle_id, **kw)
+
     def list_planning_intervals(self, board_id):
         return self._call("list_planning_intervals", board_id=board_id)
 
@@ -952,6 +955,75 @@ def test_cycle_generate_requires_the_flags(monkeypatch, env, capsys):
         cli.run(["cycle", "generate", "--board", "3"])
     assert exc.value.code == cli.EXIT_USAGE
     assert "required" in capsys.readouterr().out
+
+
+# --- cycle close (M8 V59, KAN-980) ------------------------------------------
+
+
+CLOSE_RESULT = {
+    "cycle_id": 7,
+    "closed_at": "2026-09-02T00:00:00Z",
+    "rolled_over_count": 4,
+    "rollover_to": 8,
+}
+
+
+def test_cycle_close_rollover_to_passes_the_target(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=CLOSE_RESULT))
+    assert cli.run(["cycle", "close", "7", "--board", "3", "--rollover-to", "8"]) == 0
+    assert fake.calls == [
+        ("close_cycle", {"board_id": 3, "cycle_id": 7, "rollover_to": 8})
+    ]
+
+
+def test_cycle_close_backlog_passes_null(monkeypatch, env):
+    fake = patch_client(
+        monkeypatch, FakeClient(result={**CLOSE_RESULT, "rollover_to": None})
+    )
+    assert cli.run(["cycle", "close", "7", "--board", "3", "--backlog"]) == 0
+    assert fake.calls == [
+        ("close_cycle", {"board_id": 3, "cycle_id": 7, "rollover_to": None})
+    ]
+
+
+def test_cycle_close_requires_a_target(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=CLOSE_RESULT))
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["cycle", "close", "7", "--board", "3"])
+    assert exc.value.code == cli.EXIT_USAGE
+    assert "required" in capsys.readouterr().out
+
+
+def test_cycle_close_rejects_both_flags_together(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=CLOSE_RESULT))
+    with pytest.raises(SystemExit) as exc:
+        cli.run(
+            ["cycle", "close", "7", "--board", "3", "--rollover-to", "8", "--backlog"]
+        )
+    assert exc.value.code == cli.EXIT_USAGE
+
+
+def test_cycle_close_renders_a_one_line_summary(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=CLOSE_RESULT))
+    assert cli.run(["cycle", "close", "7", "--board", "3", "--rollover-to", "8"]) == 0
+    out = capsys.readouterr().out
+    assert out == "closed cycle 7 at 2026-09-02T00:00:00Z · rolled over 4 to cycle 8\n"
+
+
+def test_cycle_close_renders_backlog_target(monkeypatch, env, capsys):
+    patch_client(
+        monkeypatch, FakeClient(result={**CLOSE_RESULT, "rollover_to": None})
+    )
+    assert cli.run(["cycle", "close", "7", "--board", "3", "--backlog"]) == 0
+    out = capsys.readouterr().out
+    assert "to the backlog" in out
+
+
+def test_cycle_line_shows_closed_marker():
+    open_cycle = {"id": 7, "name": "Sprint 12", "starts_on": None, "ends_on": None}
+    closed_cycle = {**open_cycle, "closed_at": "2026-09-02T00:00:00Z"}
+    assert cli._cycle_line(open_cycle) == "7\tSprint 12\t-\t-"
+    assert cli._cycle_line(closed_cycle) == "7\tSprint 12\t-\t-\tclosed"
 
 
 # --- pi subcommands (M8 V57 / KAN-978) --------------------------------------

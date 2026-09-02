@@ -720,6 +720,10 @@ def _humanize(
         return _card_block(card, limit=limit) if card else "(no card ready)"
     if isinstance(result, dict) and "deleted" in result:  # delete_{card,epic,label,view}
         return f"deleted {noun} {result['deleted']}"
+    # close_cycle's receipt (M8 V59, KAN-980): ``rolled_over_count`` is distinctive
+    # (nothing else carries it) — matched before the generic branches below.
+    if isinstance(result, dict) and "rolled_over_count" in result:
+        return _cycle_close_line(result)
     if isinstance(result, dict) and "status" in result:  # warmup
         return _warmup_line(result)
     if isinstance(result, dict) and "velocity" in result and "burndown" in result:
@@ -1010,17 +1014,38 @@ def _view_line(view: dict[str, Any]) -> str:
 
 
 def _cycle_line(cycle: dict[str, Any]) -> str:
-    """One concise line for a cycle: id, name, starts_on, ends_on (tab-separated).
+    """One concise line for a cycle: id, name, starts_on, ends_on (tab-separated),
+    plus a trailing ``closed`` marker (M8 V59, KAN-980) when ``closed_at`` is set —
+    appended rather than a fixed column, so an already-open cycle's line is
+    byte-identical to before this field existed.
 
     Dates read the API's ``starts_on`` / ``ends_on`` (rendered ``-`` when unset), so
     an iteration's window is visible without ``--json``."""
-    return "\t".join(
-        (
-            str(cycle.get("id", "?")),
-            _flatten(str(cycle.get("name", ""))),
-            str(cycle.get("starts_on") or "-"),
-            str(cycle.get("ends_on") or "-"),
-        )
+    parts = [
+        str(cycle.get("id", "?")),
+        _flatten(str(cycle.get("name", ""))),
+        str(cycle.get("starts_on") or "-"),
+        str(cycle.get("ends_on") or "-"),
+    ]
+    if cycle.get("closed_at"):
+        parts.append("closed")
+    return "\t".join(parts)
+
+
+def _cycle_close_line(result: dict[str, Any]) -> str:
+    """One line reporting what ``cycle close`` moved (M8 V59, KAN-980) — built
+    straight from the API's ``{closed_at, rolled_over_count, rollover_to}`` receipt
+    (the adapter's own ``cycle_id`` on top), not a re-fetch of the cycle: no
+    committed/completed counts or cycle *names* here on purpose, since the API
+    response deliberately doesn't carry them (SLICES.md's V59 entry)."""
+    target = (
+        f"cycle {result['rollover_to']}"
+        if result.get("rollover_to") is not None
+        else "the backlog"
+    )
+    return (
+        f"closed cycle {result.get('cycle_id', '?')} at {result.get('closed_at', '?')} · "
+        f"rolled over {result.get('rolled_over_count', 0)} to {target}"
     )
 
 
@@ -2870,6 +2895,19 @@ def _cmd_cycle_generate(client: PandanClient, config: Config, args: argparse.Nam
     )
 
 
+def _cmd_cycle_close(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """Close a cycle explicitly (M8 V59, KAN-980): freezes its committed/completed
+    snapshot and moves unfinished cards to another open cycle or the backlog.
+
+    ``--rollover-to``/``--backlog`` are a required mutually exclusive pair, mirroring
+    the API's own ``rollover_to`` (required, not defaulted) — closing without saying
+    where unfinished work goes is refused by argparse before a request is even made."""
+    rollover_to = None if args.backlog else args.rollover_to
+    return client.close_cycle(
+        _require_view_board(args, config), args.cycle_id, rollover_to=rollover_to
+    )
+
+
 # --- planning interval handlers (M8 V57 / KAN-978) --------------------------
 # Planning intervals are board-scoped, mirroring `pandan cycle`'s shape exactly.
 # Assigning a cycle to a planning interval is a field edit —
@@ -4182,7 +4220,8 @@ def build_parser() -> argparse.ArgumentParser:
     # Board-scoped, named iterations. Assign a card to one with
     # `pandan update <card> --cycle <id>`; filter with `pandan list --cycle <id>`.
     p_cycle = sub.add_parser(
-        "cycle", help="manage cycles / iterations (list / create / update / delete / generate)"
+        "cycle",
+        help="manage cycles / iterations (list / create / update / delete / generate / close)",
     )
     cycle_sub = p_cycle.add_subparsers(
         dest="cycle_command", metavar="<subcommand>", required=True
@@ -4271,6 +4310,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_fields_arg(p_cycle_generate, "id,name,starts_on,ends_on")
     p_cycle_generate.set_defaults(func=_cmd_cycle_generate, noun="cycle")
+
+    p_cycle_close = cycle_sub.add_parser(
+        "close",
+        parents=[common],
+        help="close a cycle, freezing its numbers and rolling over unfinished work (M8 V59)",
+    )
+    p_cycle_close.add_argument("cycle_id", type=int)
+    p_cycle_close.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    rollover_group = p_cycle_close.add_mutually_exclusive_group(required=True)
+    rollover_group.add_argument(
+        "--rollover-to", dest="rollover_to", type=int, metavar="CYCLE_ID",
+        help="move every unfinished card to this other open cycle",
+    )
+    rollover_group.add_argument(
+        "--backlog", action="store_true",
+        help="move every unfinished card to the backlog (cycle_id cleared, M8 V56)",
+    )
+    p_cycle_close.set_defaults(func=_cmd_cycle_close, noun="cycle")
 
     # --- pi subcommands (M8 V57 / KAN-978): planning intervals ---------------
     # A grouping one level above the cycle. Assign a cycle to one with
