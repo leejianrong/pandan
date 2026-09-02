@@ -168,6 +168,7 @@ def test_card_read_dependency_arrays_default_empty():
         due_date=None,
         needs_human=False,
         attention_note=None,
+        parked=False,
         created_at="2026-07-09T00:00:00Z",
         updated_at="2026-07-09T00:00:00Z",
     )
@@ -211,6 +212,7 @@ def test_card_read_links_default_empty():
         due_date=None,
         needs_human=False,
         attention_note=None,
+        parked=False,
         created_at="2026-07-10T00:00:00Z",
         updated_at="2026-07-10T00:00:00Z",
     )

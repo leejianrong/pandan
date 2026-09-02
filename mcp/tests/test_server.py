@@ -457,6 +457,29 @@ def test_create_card_passes_cycle_id(monkeypatch):
     assert json.loads(seen["content"]) == {"board_id": 3, "title": "T", "cycle_id": 4}
 
 
+# --- backlog / parked (M8 V56, KAN-977) -------------------------------------
+# Arguments on the existing list_cards/create_card/update_card tools, not a new
+# tool — free against ADR 0019's tool-count freeze, same disposition as cycle_id.
+
+
+def test_list_cards_passes_backlog_and_parked(monkeypatch):
+    seen = _capture_get(monkeypatch, httpx.Response(200, json=[]))
+    server.list_cards(board_id=3, backlog=True, parked=False)
+    assert seen["params"] == {"board_id": "3", "backlog": "true", "parked": "false"}
+
+
+def test_create_card_passes_parked(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(201, json={"id": 1}))
+    server.create_card("T", parked=True)
+    assert json.loads(seen["content"]) == {"title": "T", "parked": True}
+
+
+def test_update_card_passes_parked(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(200, json={"id": 1}))
+    server.update_card(1, parked=False)
+    assert json.loads(seen["content"]) == {"parked": False}
+
+
 # --- update_board: the autosync pair (KAN-529) + the board key (V51) --------
 # `autosync_enabled` / `autosync_advance_to_done` are two of the `BoardUpdate` fields
 # and were reachable from NEITHER adapter, so opting a board into EPIC-10 / ADR 0016

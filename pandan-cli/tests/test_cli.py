@@ -455,6 +455,8 @@ def test_list_maps_all_filters(monkeypatch, env):
                 "due_before": None,
                 "overdue": None,
                 "needs_human": None,
+                "backlog": None,
+                "parked": None,
                 "assignee": None,
                 "q": None,
                 "sort": None,
@@ -476,6 +478,43 @@ def test_list_maps_card_field_filters(monkeypatch, env):
     assert call["label"] == 4
     assert call["due_before"] == "2026-08-01"
     assert call["overdue"] is True
+
+
+def test_list_maps_backlog_and_parked(monkeypatch, env):
+    # M8 V56 (KAN-977): both are store_true, like --overdue/--needs-human.
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": [CARD]}))
+    code = cli.run(["list", "--backlog", "--parked"])
+    assert code == 0
+    call = fake.calls[0][1]
+    assert call["backlog"] is True
+    assert call["parked"] is True
+
+
+def test_list_without_backlog_or_parked_sends_none(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": [CARD]}))
+    assert cli.run(["list"]) == 0
+    call = fake.calls[0][1]
+    assert call["backlog"] is None
+    assert call["parked"] is None
+
+
+def test_create_maps_parked(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient())
+    assert cli.run(["create", "S", "--parked"]) == 0
+    assert fake.calls[0][1]["parked"] is True
+
+
+def test_update_parked_and_no_parked(monkeypatch, env):
+    # --parked/--no-parked is a store_const True/False/None trio (mirrors
+    # --autosync-enabled/--autosync-disabled) so unmarking is reachable, unlike
+    # the `x or None`-style flags on `list`.
+    fake = patch_client(monkeypatch, FakeClient())
+    assert cli.run(["update", "7", "--parked"]) == 0
+    assert fake.calls[-1][1]["parked"] is True
+    assert cli.run(["update", "7", "--no-parked"]) == 0
+    assert fake.calls[-1][1]["parked"] is False
+    assert cli.run(["update", "7", "--title", "x"]) == 0
+    assert fake.calls[-1][1]["parked"] is None
 
 
 def test_list_maps_assignee_and_sort(monkeypatch, env):
@@ -1052,6 +1091,7 @@ def test_create_maps_all_options(monkeypatch, env):
                 "priority": None,
                 "due_date": None,
                 "label_ids": None,
+                "parked": None,
             },
         )
     ]
@@ -1091,6 +1131,7 @@ def test_update_maps_fields(monkeypatch, env):
                 "priority": None,
                 "due_date": None,
                 "label_ids": None,
+                "parked": None,
             },
         )
     ]
@@ -3198,7 +3239,7 @@ def test_update_epic_link_accepts_epic_ticket(monkeypatch, env):
             {
                 "card_id": 7, "title": None, "description": None, "story_points": None,
                 "assignee": None, "epic_id": 9, "cycle_id": None, "priority": None,
-                "due_date": None, "label_ids": None,
+                "due_date": None, "label_ids": None, "parked": None,
             },
         ),
     ]

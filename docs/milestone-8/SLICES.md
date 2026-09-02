@@ -46,10 +46,10 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | **V62 · Dual-theme palette** ✅ | + colour validation | C | KAN-983 | 3 | Every label is readable in both themes; a bad colour is a `422` |
 | **V63 · Epic colour** | 🗄️ | C | KAN-984 | 2 | An epic's stories are recognisable on the board without reading them |
 | **V64 · Label emoji** | 🗄️ | C | KAN-985 | 2 | Two labels sharing a colour are still distinguishable at a glance |
-| **V56 · Backlog** | derived, groomable | B | KAN-977 | 3 | The backlog is a place you can open; parked ≠ never scheduled |
+| **V56 · Backlog** ✅ | derived, groomable 🗄️ | B | KAN-977 | 3 | The backlog is a place you can open; parked ≠ never scheduled |
 | **V57 · Planning intervals** | 🗄️ | B | KAN-978 | 5 | Six cycles roll up into one PI with a single committed-vs-completed number |
 | **V58 · Cadence** | generate N cycles | B | KAN-979 | 2 | "Two weeks per sprint, six sprints" is one command |
-| **V59 · Explicit close** | + rollover | B | KAN-980 | 3 | Closing is deliberate and reported; past velocity numbers stop moving |
+| **V59 · Explicit close** | + rollover 🗄️ | B | KAN-980 | 3 | Closing is deliberate and reported; past velocity numbers stop moving |
 | **V60 · Observed throughput** | agent vs human | B | KAN-981 | 3 | `agent: 6.2 pts/day (n=143)` — a budget backed by evidence, not a multiplier |
 
 🗄️ = carries a migration, lands alone. ✅ = shipped.
@@ -353,7 +353,7 @@ Three field-level decisions worth keeping, all in `CycleUpdate`'s own docstring:
   unscheduling is reachable from the API and not the CLI. Left as the existing convention rather than
   special-cased for one field.
 
-### V56 · Backlog — KAN-977
+### V56 · Backlog — KAN-977 ✅ 🗄️
 
 Derived from `cycle_id IS NULL`, **not** a fifth `column` value. The varchar+CHECK design (ADR 0008)
 would have made a new column value free of `ALTER TYPE`, so it was genuinely on the table — and it is
@@ -361,18 +361,101 @@ rejected because it double-models scheduling: a card could sit in the `backlog` 
 a cycle (SHAPING D8). Ships a `--backlog` filter, a grooming view, and one nullable field marking
 *deliberately parked* as distinct from *not yet scheduled*.
 
+**Shaped 2026-09-02.** Three decisions, each weighed against a cheaper alternative and rejected in
+favour of the more direct one:
+
+- **`card.parked`, a real column** (`bool NOT NULL default false`), not a repurposed label. A
+  conventional "Parked" label would ship with no migration, but V61/V62 just gave labels a specific
+  job — per-board, arbitrary-named, palette-coloured tagging — and scheduling state is a different
+  axis from that. This is the column D8 already called for ("one nullable field"); the `SLICES.md`
+  summary table was missing its 🗄️ marker for it before this pass — fixed above. Shape mirrors
+  `needs_human` ([`models.py:622-631`](../../backend/app/models.py)): boolean, `NOT NULL`, backfills
+  every existing row to `false`.
+- **A dedicated Backlog tab**, not a filter toggle bolted onto the board view. `App.svelte` gets one
+  more view (alongside `board`/`dashboard`/`epics`/`trash`); a new `Backlog.svelte`, modeled loosely
+  on `Epics.svelte`, lists cards where `cycle_id IS NULL` and lets a viewer mark/unmark `parked`
+  inline. This is what "a place you can open" (R2.2) actually means — a filtered slice of the board
+  view would leave the backlog as a mode of the board rather than its own thing.
+- **Plain boolean, no reason field.** `card.parked` alone, not `parked` + `parked_reason`. R2.2 only
+  asks that *deliberately parked* be distinguishable from *not yet scheduled*; a reason field is
+  scope the requirement never asked for (the `needs_human`/`attention_note` pairing is not a template
+  to reflexively repeat).
+
+**Wiring, end to end:**
+
+| Layer | Change |
+|---|---|
+| Migration 🗄️ | `card.parked bool NOT NULL DEFAULT false`, additive, backfills existing rows |
+| `schemas.py` | `CardQuery.backlog: bool \| None`, `CardQuery.parked: bool \| None` (`:1067` area); `CardUpdate.parked: bool \| None` (`:146-184`); `CardRead.parked: bool` passthrough |
+| `routers/cards.py` `list_cards` | `backlog` → `Card.cycle_id.is_(None)` / `.is_not(None)`, same derived-boolean shape as the existing `overdue` filter (`:675-692`); `parked` → `Card.parked == value`. Independent axes — combinable, neither implies the other |
+| CLI | `--backlog` / `--parked` flags on `pandan list` (`p_list`, `:3358`), `store_true` with the `args.x or None` convention already used for `--overdue`/`--needs-human`; `--parked` also on `create`/`update` as a field edit, matching how `--cycle` already works (no new subcommand — `cli.py:2741`'s existing convention) |
+| MCP | `backlog` + `parked` as new arguments on the existing `list_cards` tool (`server.py:249`), `parked` also on `update_card` (`:449`) — no new tool, same precedent as `cycle_id` itself (ADR 0019-safe) |
+| SPA | New `Backlog` tab in `App.svelte`; `Backlog.svelte` calls `listCards(boardId, {backlog: true})`; `CardQuery` in `api.ts` (`:274-287`) gains `backlog`/`parked` |
+
+Demo: `pandan list --backlog` shows every unscheduled card; `pandan update KAN-42 --parked` marks it
+deliberately parked without moving it into a cycle; opening the SPA's Backlog tab shows the same set,
+with parked cards visually distinct; `pandan list --backlog --parked` narrows to just the parked ones.
+
 ### V57 · Planning intervals — KAN-978 🗄️
 
 A new board-scoped `planning_interval` table plus `cycle.planning_interval_id` — structurally the
 identical move V33 made for cycles, down to the flat no-ticket_number shape and the
 `ON DELETE SET NULL` detach.
 
+**Shaped 2026-09-02, resolving Q4.** `cycle_metrics` (`routers/cycles.py:111-189`) computes a per-cycle
+**day-by-day burndown series** via `compute_cycle_metrics` (`metrics.py:253`) — that shape doesn't
+compose across a PI's member cycles into anything meaningful. A rollup, per this slice's own demo line
+("six cycles roll up into one PI with a single committed-vs-completed number"), is a **sum**, not a
+series: **Q4 resolves to a dedicated metrics endpoint, not a filter on `cycle_metrics`.** The one place a
+plain filter *does* fit is browsing membership — `list_cycles` gains `planning_interval_id` as an
+ordinary list filter, same shape as any other.
+
+MCP gets exactly two new tools for this entity — `list_planning_intervals` + `planning_interval_metrics`
+— **not** full CRUD. Creating/renaming/deleting a PI is a human planning-setup action, the same
+disposition `update_cycle` already has (V55: shipped to API+CLI, declined on MCP); reading rolled-up
+progress is the part an agent plausibly wants. Two new tools is still a **count change against the
+frozen surface** (ADR 0019 — `mcp/tests/test_schema.py` pins 54 by name and count), so this needs the
+same kind of amendment note V69/KAN-1058 got for `team`, recorded when it ships.
+
+**Wiring, end to end:**
+
+| Layer | Change |
+|---|---|
+| Migration 🗄️ | new `planning_interval` table (`id`, `board_id` FK CASCADE, `name`, `starts_on`, `ends_on`, `created_at` — flat, no `ticket_number`, mirrors `Cycle` exactly); `cycle.planning_interval_id` nullable FK → `planning_interval.id`, `ON DELETE SET NULL` |
+| `schemas.py` | `PlanningIntervalCreate`/`Update`/`Read` mirroring `CycleCreate`/`Update`/`Read` field-for-field (same `name` non-nullable / dates nullable convention from V55); `CycleCreate`/`CycleUpdate` gain `planning_interval_id: int \| None` |
+| `routers/planning_intervals.py` (new) | `GET`/`POST /boards/{id}/planning-intervals`, `GET`/`PATCH`/`DELETE /boards/{id}/planning-intervals/{pi_id}` — mirrors `routers/cycles.py` structure exactly, **PATCH ships from day one** (learn from V55's gap, don't repeat it); `GET .../planning-intervals/{pi_id}/metrics` — loads member cycles, calls the same per-cycle computation each of them already uses, sums `committed`/`completed`/`velocity` (unit = `"points"` if any member cycle has `committed.points > 0`, else `"count"`, same rule as today); **no burndown field** — a PI-level series is out of scope per the slice's own demo line |
+| `routers/cycles.py` `list_cycles` | new `planning_interval_id: int \| None` query filter, ordinary equality `where` |
+| CLI | new `pandan pi` group — `list`/`create`/`get`/`update`/`delete`/`metrics` — mirroring `pandan cycle`'s five-plus-metrics shape exactly; `--pi PLANNING_INTERVAL_ID` flag added to `cycle create`/`cycle update` (assignment is a field edit on the cycle, same convention `--cycle` already set for cards) |
+| MCP | two new tools: `list_planning_intervals(board_id=None)` and `planning_interval_metrics(planning_interval_id, board_id=None, fields=None)`, matching `list_cycles`/`cycle_metrics`'s own signatures; create/update/delete stay CLI-only, recorded as `CLI_ONLY` entries in `pandan-cli/tests/test_parity.py` (same disposition as V55's declined `update_cycle`) |
+| SPA | `Dashboard.svelte`'s cycle `<select>` (`:456-535`) gains an optional PI grouping/filter; a PI's rollup number renders wherever cycle burndown already does, one level up |
+
+Demo: `pandan pi create "Q4 Planning" && pandan cycle update 12 --pi 3 && pandan cycle update 13 --pi 3`
+then `pandan pi metrics 3` reports one committed-vs-completed number summed across cycles 12 and 13.
+
 ### V58 · Cadence — KAN-979
 
 `POST /boards/{id}/cycles/generate`. Pure convenience over existing create, no new state, which is why
 it is cheap and late. Guards against generating cycles that overlap existing ones.
 
-### V59 · Explicit close — KAN-980
+**Shaped 2026-09-02.** Body: `{start: date, length_days: int, count: int, name_template: str,
+planning_interval_id: int | None}` — `name_template` interpolates `{n}` (1-indexed), e.g.
+`"Sprint {n}"` → `Sprint 1`, `Sprint 2`, ... `count` is `Field(le=52)` (a plain range guard on a
+UX-facing count, not a payload-size hardening knob like `MAX_BATCH_ITEMS` — no env var). Each
+generated cycle's `[starts_on, ends_on)` window is checked against every existing cycle on the board
+(`starts_on < existing.ends_on and existing.starts_on < ends_on`); any overlap is a `422` naming the
+colliding cycle, and the whole batch is rejected rather than partially created. Returns
+`201` + `list[CycleRead]`, mirroring `create_card`'s batch sibling (`create_cards`)'s
+all-or-nothing semantics.
+
+**CLI-only** — declined for MCP. An agent that wants N cycles can already call `create_cycle` N times;
+`generate` is a human-typing shortcut ("one command instead of six"), not a new agent capability, so it
+doesn't spend against the frozen surface (ADR 0019).
+
+Demo: `pandan cycle generate --start 2026-09-07 --length-days 14 --count 6 --name-template "Sprint {n}"`
+creates six fortnightly sprints in one call; running it again with an overlapping start is a clean
+`422` naming which existing cycle collides.
+
+### V59 · Explicit close — KAN-980 🗄️
 
 `POST /cycles/{id}/close {rollover_to}` moves unfinished cards, stamps the cycle closed, and **freezes
 its committed set** so velocity stops being recomputed from live membership.
@@ -380,6 +463,47 @@ its committed set** so velocity stops being recomputed from live membership.
 Auto-rollover on the `ends_on` date is rejected (SHAPING D9): it silently rewrites history that
 `cycle metrics` has already reported, which is the standard regret in sprint tooling and
 un-diagnosable after the fact.
+
+**Shaped 2026-09-02.** "Freezes its committed set" (D9) is more than a boolean — closing must capture
+a snapshot that survives cards leaving the cycle on rollover, so `cycle_metrics` can keep reporting the
+same numbers after the roster changes underneath it. New columns on `Cycle`, mirroring the existing
+`SavedView.query` / `Template.cards` precedent for a small structured payload as `JSON` rather than a
+spray of int columns:
+
+- `closed_at: datetime | None` — `NULL` = open (the existing behaviour, untouched); non-`NULL` = closed.
+- `frozen_committed: JSON | None` — `{"count": int, "points": int}`, captured at close time from
+  exactly the same live query `cycle_metrics` runs today.
+- `frozen_completed: JSON | None` — same shape, the `done` subset at close time.
+
+`cycle_metrics` (`routers/cycles.py:114`) branches on `closed_at`: **open** → today's live-query path,
+unchanged; **closed** → `committed`/`completed`/`velocity` come straight from the frozen fields, no
+query. **`burndown` is empty for a closed cycle** — the day-by-day series is derived from the committed
+roster's done-times, and that roster no longer matches reality once rollover moves cards out; freezing
+an accurate historical burndown too is real scope (a full timeseries snapshot, not two numbers) and
+isn't asked for by R2.5, so it's declined here rather than silently attempted.
+
+`POST /boards/{id}/cycles/{id}/close` body: `{rollover_to: int | None}` — **required, not
+defaulted**, so the caller states a target rather than falling through to an implicit default:
+`rollover_to: <cycle_id>` moves every card still not `done` to that cycle (must be another open cycle
+on the same board — `422` if it's closed or cross-board); `rollover_to: null` moves them to the
+backlog (`cycle_id = NULL`, V56). Closing an already-closed cycle is `409` (a conflict with current
+state, matching the board-key-collision convention elsewhere in this API), not a silent no-op — closing
+twice with two different rollover targets would otherwise be a real footgun. Response reports what
+moved: `{closed_at, rolled_over_count, rollover_to}`, which is what the CLI's one-line summary reads
+from.
+
+**MCP gets `close_cycle(cycle_id, rollover_to=None, board_id=None)`** — the one write op in this batch
+added to the frozen surface (a third addition alongside V57's two read tools). Unlike `update_cycle`
+(a human fixing a typo) or planning-interval setup (a human's planning structure), ending a cycle and
+rolling over unfinished work is exactly the loop a short, agent-paced cycle (D10) needs to run itself
+without shelling out to a CLI subprocess.
+
+**Net MCP surface change across V57+V59: 54 → 57** (+2 read-only PI tools, +1 `close_cycle`), each an
+ADR 0019 amendment note alongside V69/KAN-1058's `team` precedent, recorded when they ship.
+
+Demo: `pandan cycle close 7 --rollover-to 8` reports
+`closed Sprint 12 · 9/13 done · 4 rolled over to Sprint 13`; `pandan cycle metrics 7` afterwards still
+reports 13 committed / 9 completed, unchanged by the 4 cards that moved to Sprint 13.
 
 ### V60 · Observed throughput — KAN-981
 
@@ -402,6 +526,46 @@ reported alongside each figure so a thin sample is visibly thin.
 
 "Agent sprints are a day" then needs no new time model at all: that is a cycle whose bounds are a day
 apart, expressible today.
+
+**Shaped 2026-09-02.** `compute_metrics` (`metrics.py:116`) already computes `by_assignee` (per current
+assignee: throughput + open WIP) and, inline, a `cycle_seconds` list for the board's `cycle_time`
+figure — but neither is split by **class** (agent vs. human) nor expressed as a rate. This extends the
+same function, reusing the same done-in-period iteration rather than adding a second pass over the
+activity feed:
+
+- **Classification**: `"agent"` if `assignee` starts with `"agent:"` (the prefix already established
+  in `notifications.py:18`), `"human"` if it's any other non-null string, `"unassigned"` if `None`.
+- **Eligibility**: a done-in-period card contributes to its class's rate only if it has both
+  `story_points is not None` **and** a recorded cycle time (`first_in_progress` at/before
+  `first_done`) — the same two conditions `cycle_time` already requires, so a card silently excluded
+  from the board's overall cycle time is silently excluded here too, for the same reason.
+- **Rate**: `points_per_day = Σ(story_points) / Σ(cycle_seconds / 86400)` over a class's eligible
+  cards — a ratio of sums, not an average of per-card ratios, so a handful of large/slow cards don't
+  get outvoted by many small/fast ones. `n` is the **count of eligible cards** (not points) — matches
+  reading `agent: 6.2 pts/day (n=143)` as "143 cards backed this number."
+- A class with zero eligible cards is **omitted** from the list entirely (matching `by_assignee`'s own
+  "only assignees that appear" convention), not reported as a zero.
+
+**Schema**: `BoardMetricsRead` (`schemas.py:989`) gains `by_assignee_class: list[AssigneeClassMetrics] =
+[]`, `AssigneeClassMetrics = {assignee_class: Literal["agent","human","unassigned"], points_per_day:
+float | None, n: int}`. Always computed and always present in the response — no new query param,
+matching how `by_assignee` itself isn't gated behind a flag. (The `--by-assignee-class` CLI flag
+floated in `SHAPING.md`'s affordances section doesn't fit `pandan metrics`'s existing shape — that
+command has no `--fields`-style section filter today, `--since`/`--window` being its only flags — so
+this ships as one more always-shown section in the CLI's human output, the same treatment
+`by_assignee` gets, rather than a new flag.)
+
+**No MCP changes** — the existing `metrics` tool's response schema grows a field; tool count and
+argument shape are untouched, so this is free against ADR 0019.
+
+Demo: `pandan metrics` now prints an additional section —
+```
+by assignee class:
+  agent  6.2 pts/day  (n=143)
+  human  1.4 pts/day  (n=38)
+```
+— giving an agent planning a one-day cycle an evidence-backed budget instead of a guess, with no new
+unit invented.
 
 ## Part C — Colour (EPIC-124, issue #278)
 

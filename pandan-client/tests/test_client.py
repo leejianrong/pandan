@@ -252,6 +252,14 @@ def test_list_cards_scopes_by_board_id():
     assert seen["params"] == {"board_id": "7"}
 
 
+def test_list_cards_passes_backlog_and_parked():
+    # M8 V56 (KAN-977): backlog (derived) and parked (stored) are independent,
+    # both plain bool params like overdue/needs_human.
+    handler, seen = capture(httpx.Response(200, json=[]))
+    make_client(handler).list_cards(backlog=True, parked=False)
+    assert seen["params"] == {"backlog": "true", "parked": "false"}
+
+
 # --- batch read by id / ticket ref (issue #254) ----------------------------
 
 
@@ -362,6 +370,15 @@ def test_create_card_includes_board_id_when_given():
     assert json.loads(seen["content"]) == {"board_id": 7, "title": "T"}
 
 
+def test_create_card_includes_parked_when_given():
+    import json
+
+    # M8 V56 (KAN-977). Omitted (None) → dropped, same as every other optional field.
+    handler, seen = capture(httpx.Response(201, json={"id": 1}))
+    make_client(handler).create_card("T", parked=True)
+    assert json.loads(seen["content"]) == {"title": "T", "parked": True}
+
+
 def test_create_epic_posts_name():
     import json
 
@@ -402,6 +419,15 @@ def test_update_card_patches_provided_fields():
     assert seen["method"] == "PATCH"
     assert seen["path"] == "/api/v1/cards/3"
     assert json.loads(seen["content"]) == {"title": "new"}
+
+
+def test_update_card_includes_parked_false_not_dropped():
+    import json
+
+    # M8 V56 (KAN-977): `_clean` drops None, not False — unmarking must survive.
+    handler, seen = capture(httpx.Response(200, json={"id": 3}))
+    make_client(handler).update_card(3, parked=False)
+    assert json.loads(seen["content"]) == {"parked": False}
 
 
 def test_update_epic_patches_only_provided_fields():

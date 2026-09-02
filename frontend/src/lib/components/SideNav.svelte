@@ -9,6 +9,7 @@
   // picked via `onNavigate`, and open/close via `open` + `onClose`.
   import {
     Activity,
+    Archive,
     Inbox,
     KeyRound,
     Layers,
@@ -26,6 +27,7 @@
     | "dashboard"
     | "epics"
     | "labels"
+    | "backlog"
     | "activity"
     | "tokens"
     | "members"
@@ -56,6 +58,7 @@
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "epics", label: "Epics", icon: Layers },
     { id: "labels", label: "Labels", icon: Tag },
+    { id: "backlog", label: "Backlog", icon: Archive },
     { id: "activity", label: "Activity", icon: Activity },
     { id: "tokens", label: "Tokens", icon: KeyRound },
     { id: "members", label: "Members", icon: Users },
