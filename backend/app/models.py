@@ -417,6 +417,47 @@ class Cycle(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # A cycle belongs to zero-or-one planning interval (M8 V57, KAN-978): the
+    # grouping one level above the cycle, e.g. a quarter grouping its sprints.
+    # ``ON DELETE SET NULL`` mirrors ``card.epic_id`` — deleting a planning
+    # interval detaches its member cycles rather than cascading them away.
+    planning_interval_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("planning_interval.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+
+class PlanningInterval(Base):
+    """A board-scoped grouping one level above the cycle (M8 V57, KAN-978) — e.g.
+    a quarter containing six two-week sprints.
+
+    Structurally identical to :class:`Cycle`: flat, no ``ticket_number``, no
+    soft-delete, addressed under its board. ``board_id`` FK → ``board``
+    (``ON DELETE CASCADE`` — hard-deleted with its board). A cycle links to
+    zero-or-one planning interval via the nullable ``Cycle.planning_interval_id``
+    (``ON DELETE SET NULL`` — deleting a planning interval detaches its member
+    cycles, never cascades them). The non-empty ``name`` rule is enforced by the
+    Pydantic schema (:class:`app.schemas.PlanningIntervalCreate`), not the table.
+    """
+
+    __tablename__ = "planning_interval"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    board_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("board.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    starts_on: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ends_on: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class CardDependency(Base):

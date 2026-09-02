@@ -256,6 +256,39 @@ class FakeClient:
     def cycle_metrics(self, board_id, cycle_id):
         return self._call("cycle_metrics", board_id=board_id, cycle_id=cycle_id)
 
+    def list_planning_intervals(self, board_id):
+        return self._call("list_planning_intervals", board_id=board_id)
+
+    def create_planning_interval(self, board_id, name, **kw):
+        return self._call("create_planning_interval", board_id=board_id, name=name, **kw)
+
+    def get_planning_interval(self, board_id, planning_interval_id):
+        return self._call(
+            "get_planning_interval", board_id=board_id, planning_interval_id=planning_interval_id
+        )
+
+    def update_planning_interval(self, board_id, planning_interval_id, **kw):
+        return self._call(
+            "update_planning_interval",
+            board_id=board_id,
+            planning_interval_id=planning_interval_id,
+            **kw,
+        )
+
+    def delete_planning_interval(self, board_id, planning_interval_id):
+        return self._call(
+            "delete_planning_interval",
+            board_id=board_id,
+            planning_interval_id=planning_interval_id,
+        )
+
+    def planning_interval_metrics(self, board_id, planning_interval_id):
+        return self._call(
+            "planning_interval_metrics",
+            board_id=board_id,
+            planning_interval_id=planning_interval_id,
+        )
+
     def add_dependency(self, card_id, blocker_id):
         return self._call("add_dependency", card_id=card_id, blocker_id=blocker_id)
 
@@ -721,6 +754,7 @@ def test_cycle_create_passes_name_and_bounds(monkeypatch, env):
                 "name": "sprint-1",
                 "starts_on": "2026-01-01T00:00:00Z",
                 "ends_on": "2026-01-14T00:00:00Z",
+                "planning_interval_id": None,
             },
         )
     ]
@@ -744,6 +778,7 @@ def test_cycle_update_passes_only_the_fields_given(monkeypatch, env):
                 "name": "Sprint 12",
                 "starts_on": None,
                 "ends_on": "2026-09-05T00:00:00Z",
+                "planning_interval_id": None,
             },
         )
     ]
@@ -807,6 +842,154 @@ def test_cycle_metrics_json(monkeypatch, env, capsys):
     assert cli.run(["cycle", "metrics", "4", "--board", "3", "--json"]) == 0
     out = capsys.readouterr().out
     assert json.loads(out)["velocity"] == 11
+
+
+def test_cycle_create_passes_pi(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"id": 4, "name": "sprint-1"}))
+    assert cli.run(["cycle", "create", "sprint-1", "--board", "3", "--pi", "9"]) == 0
+    assert fake.calls == [
+        (
+            "create_cycle",
+            {
+                "board_id": 3,
+                "name": "sprint-1",
+                "starts_on": None,
+                "ends_on": None,
+                "planning_interval_id": 9,
+            },
+        )
+    ]
+
+
+def test_cycle_update_passes_pi_alone(monkeypatch, env):
+    """`--pi` alone is a valid update — it must not be swallowed by the
+    nothing-to-update guard alongside name/starts-on/ends-on."""
+    fake = patch_client(monkeypatch, FakeClient(result={"id": 4}))
+    assert cli.run(["cycle", "update", "4", "--board", "3", "--pi", "9"]) == 0
+    assert fake.calls == [
+        (
+            "update_cycle",
+            {
+                "board_id": 3,
+                "cycle_id": 4,
+                "name": None,
+                "starts_on": None,
+                "ends_on": None,
+                "planning_interval_id": 9,
+            },
+        )
+    ]
+
+
+# --- pi subcommands (M8 V57 / KAN-978) --------------------------------------
+
+
+def test_pi_list_calls_client(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"planning_intervals": []}))
+    assert cli.run(["pi", "list", "--board", "3"]) == 0
+    assert fake.calls == [("list_planning_intervals", {"board_id": 3})]
+
+
+def test_pi_create_passes_name_and_bounds(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"id": 9, "name": "Q4"}))
+    code = cli.run(
+        ["pi", "create", "Q4", "--board", "3",
+         "--starts-on", "2026-10-01T00:00:00Z", "--ends-on", "2026-12-31T00:00:00Z"]
+    )
+    assert code == 0
+    assert fake.calls == [
+        (
+            "create_planning_interval",
+            {
+                "board_id": 3,
+                "name": "Q4",
+                "starts_on": "2026-10-01T00:00:00Z",
+                "ends_on": "2026-12-31T00:00:00Z",
+            },
+        )
+    ]
+
+
+def test_pi_get_calls_client(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"id": 9, "name": "Q4"}))
+    assert cli.run(["pi", "get", "9", "--board", "3"]) == 0
+    assert fake.calls == [("get_planning_interval", {"board_id": 3, "planning_interval_id": 9})]
+
+
+def test_pi_update_passes_only_the_fields_given(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"id": 9, "name": "Q4 2026"}))
+    code = cli.run(
+        ["pi", "update", "9", "--board", "3", "--name", "Q4 2026",
+         "--ends-on", "2026-12-15T00:00:00Z"]
+    )
+    assert code == 0
+    assert fake.calls == [
+        (
+            "update_planning_interval",
+            {
+                "board_id": 3,
+                "planning_interval_id": 9,
+                "name": "Q4 2026",
+                "starts_on": None,
+                "ends_on": "2026-12-15T00:00:00Z",
+            },
+        )
+    ]
+
+
+def test_pi_update_with_no_fields_is_a_named_error(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result={}))
+    assert cli.run(["pi", "update", "9", "--board", "3"]) == 1
+    assert fake.calls == []
+    row = capsys.readouterr().out.strip().split("\t")
+    assert row[0] == "error" and row[1] == "nothing_to_update"
+
+
+def test_pi_delete_requires_yes(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"deleted": 9}))
+    assert cli.run(["pi", "delete", "9", "--board", "3"]) == 1
+    assert fake.calls == []
+    assert cli.run(["pi", "delete", "9", "--board", "3", "--yes"]) == 0
+    assert fake.calls == [
+        ("delete_planning_interval", {"board_id": 3, "planning_interval_id": 9})
+    ]
+
+
+PI_METRICS = {
+    "board_id": 3,
+    "planning_interval_id": 9,
+    "generated_at": "2026-09-02T12:00:00Z",
+    "cycle_count": 2,
+    "committed": {"count": 4, "points": 21},
+    "completed": {"count": 3, "points": 16},
+    "velocity": 16,
+    "unit": "points",
+}
+
+
+def test_pi_metrics_maps_board_and_pi(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=PI_METRICS))
+    assert cli.run(["pi", "metrics", "9", "--board", "3"]) == 0
+    assert fake.calls == [
+        ("planning_interval_metrics", {"board_id": 3, "planning_interval_id": 9})
+    ]
+
+
+def test_pi_metrics_pretty_renders_rollup(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=PI_METRICS))
+    assert cli.run(["pi", "metrics", "9", "--board", "3"]) == 0
+    out = capsys.readouterr().out
+    assert "velocity:    16 pts done" in out
+    assert "committed:   4 stories  21 pts" in out
+    assert "2 cycles" in out
+    assert "burndown" not in out
+
+
+def test_pi_metrics_json(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=PI_METRICS))
+    assert cli.run(["pi", "metrics", "9", "--board", "3", "--json"]) == 0
+    out = capsys.readouterr().out
+    assert json.loads(out)["velocity"] == 16
 
 
 def test_list_filters_by_cycle(monkeypatch, env):

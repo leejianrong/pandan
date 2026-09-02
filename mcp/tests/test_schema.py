@@ -3,10 +3,11 @@ compaction that pays for keeping it is proven cosmetic.
 
 Two jobs, and they are different:
 
-* **The pin** — the surface is frozen at exactly these tools (54, since M9 V69
-  amended the original 49). This is a *decision* guard, not a correctness one: it
-  exists so that adding a tool is a deliberate act with an ADR amendment behind
-  it, rather than something that happens by appending a decorator.
+* **The pin** — the surface is frozen at exactly these tools (56, since M9 V69
+  amended the original 49 to 54, and M8 V57 amended it again to 56). This is a
+  *decision* guard, not a correctness one: it exists so that adding a tool is a
+  deliberate act with an ADR amendment behind it, rather than something that
+  happens by appending a decorator.
 * **The compaction guards** — ``pandan_mcp.schema`` rewrites the schema clients
   are shown. Every test below that touches it is there to prove the rewrite
   cannot change behaviour, because "it only affects the advertised schema" is an
@@ -42,6 +43,11 @@ from pandan_mcp.server import mcp
 #: mirroring the board CRUD group 1:1 — see the ADR's amendment note for the
 #: token delta and why team *membership* management stayed CLI-only. New
 #: capability still goes in the CLI by default; this is the deliberate exception.
+#: **Amended again 2026-09-02 (M8 V57, KAN-978)**: +2 read-only tools
+#: (``list_planning_intervals``/``planning_interval_metrics``) — creating,
+#: renaming and deleting a planning interval stayed CLI-only
+#: (``pandan pi create/update/delete``), the same disposition ``update_cycle``
+#: already has.
 FROZEN_TOOLS = frozenset(
     {
         "list_boards", "create_board", "get_board", "update_board", "delete_board",
@@ -59,15 +65,16 @@ FROZEN_TOOLS = frozenset(
         "list_views", "create_view", "delete_view",
         "list_templates", "create_template", "delete_template", "apply_template",
         "list_cycles", "create_cycle", "delete_cycle", "cycle_metrics",
+        "list_planning_intervals", "planning_interval_metrics",
         "warmup",
     }
 )
 
-FROZEN_TOOL_COUNT = 54
+FROZEN_TOOL_COUNT = 56
 
 _WHY_FROZEN = """
-The MCP tool surface is FROZEN at {count} tools by ADR 0019 (V49, amended M9 V69) —
-this failure is by design, not a stale fixture to update.
+The MCP tool surface is FROZEN at {count} tools by ADR 0019 (V49, amended M9 V69
+and M8 V57) — this failure is by design, not a stale fixture to update.
 
 V49 measured the original 49-tool surface at 8,775 o200k_base tokens of schema that
 load into EVERY agent session before it does any work, and deliberately kept the
@@ -75,7 +82,8 @@ breadth as the documented fallback for consumers that cannot run the CLI (e.g. t
 ghcr image, which ships no CLI binary). The price of keeping it is that it does not
 grow SILENTLY: new board capability lands in the `pandan` CLI by default, which
 costs a session nothing until it is used. M9 V69 (KAN-1058) amended the freeze to
-add exactly 5 team tools, mirroring the board CRUD group.
+add exactly 5 team tools, mirroring the board CRUD group; M8 V57 (KAN-978) amended
+it again to add exactly 2 read-only planning-interval tools.
 
 If you are ADDING a tool: that is an ADR amendment, not a test edit. Say why the
 CLI cannot serve the need, update docs/adr/0019-mcp-surface-right-sizing.md, and

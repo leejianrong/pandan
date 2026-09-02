@@ -142,6 +142,13 @@ POPULATED: dict[str, tuple[list[str], dict, str]] = {
         ]},
         "1 cycle",
     ),
+    "pi list": (
+        ["pi", "list", "--board", "5"],
+        {"planning_intervals": [
+            {"id": 1, "name": "Q4", "starts_on": "2026-10-01", "ends_on": "2026-12-31"}
+        ]},
+        "1 planning interval",
+    ),
     "notify list": (
         ["notify", "list"],
         {"notifications": [
@@ -232,6 +239,11 @@ EMPTY: dict[str, tuple[list[str], dict, str]] = {
     ),
     "cycle list": (
         ["cycle", "list", "--board", "5"], {"cycles": []}, "(no cycles)\n0 cycles\n"
+    ),
+    "pi list": (
+        ["pi", "list", "--board", "5"],
+        {"planning_intervals": []},
+        "(no planning_intervals)\n0 planning intervals\n",
     ),
     "notify list": (
         ["notify", "list"],

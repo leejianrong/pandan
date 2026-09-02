@@ -187,6 +187,10 @@ MCP_TO_CLI: dict[str, tuple[str, ...]] = {
     "list_cycles": ("cycle", "list"),
     "create_cycle": ("cycle", "create"),
     "delete_cycle": ("cycle", "delete"),
+    # planning intervals (M8 V57, KAN-978 — the 2-tool read pair ADR 0019 was
+    # amended to admit)
+    "list_planning_intervals": ("pi", "list"),
+    "planning_interval_metrics": ("pi", "metrics"),
 }
 
 # MCP tools with no CLI route. **Asserted empty** — that assertion IS the deliverable of
@@ -268,6 +272,29 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
     ("team", "member", "list"): (
         "reason 2 (M9 V69, KAN-1058) — see (\"team\", \"member\", \"add\")"
     ),
+    ("pi", "create"): (
+        "reason 2 (M8 V57, KAN-978): `POST /boards/{b}/planning-intervals` IS a "
+        "board API call, so this is a declined tool and not a missing one. "
+        "Defining a planning interval's name and dates is a human planning-setup "
+        "action, the same disposition `cycle update` already has for cycles one "
+        "level down. ADR 0019 freezes the MCP surface (amended to 56 in the same "
+        "PR that added the `list_planning_intervals`/`planning_interval_metrics` "
+        "read pair above) — re-opening this is a further amendment, not an edit "
+        "here."
+    ),
+    ("pi", "get"): (
+        "reason 2 (M8 V57, KAN-978): `GET /boards/{b}/planning-intervals/{id}` IS "
+        "a board API call, so this is a declined tool and not a missing one. The "
+        "frozen surface has no single-cycle read either (`list_cycles`/"
+        "`create_cycle`/`delete_cycle`/`cycle_metrics`, no `get_cycle`) — this "
+        "mirrors that CRUD-lite shape one level up. Re-opening this is a further "
+        "ADR 0019 amendment, not an edit here."
+    ),
+    ("pi", "update"): (
+        "reason 2 (M8 V57, KAN-978) — see (\"pi\", \"create\"); mirrors "
+        "(\"cycle\", \"update\")'s own reasoning one level up."
+    ),
+    ("pi", "delete"): "reason 2 (M8 V57, KAN-978) — see (\"pi\", \"create\")",
     ("config", "set"): "local config file",
     ("config", "unset"): "local config file (issue #277)",
     ("config", "show"): "local config file",
@@ -514,9 +541,10 @@ def test_the_four_gaps_kan_502_closed_are_reachable():
 
 
 def test_the_mcp_surface_is_still_the_frozen_count():
-    """ADR 0019 froze the surface (54 tools as of M9 V69, KAN-1058 — up from the
-    original 49); ``mcp/tests/test_schema.py`` is the authoritative pin. Restating
-    the count here is what makes the ``cli`` job notice a *removal* on the MCP
-    side, which is the direction that would break parity from the other end — and
-    it keeps this file's own mapping honest about its scope."""
-    assert len(mcp_tool_names()) == 54
+    """ADR 0019 froze the surface (56 tools as of M8 V57, KAN-978 — up from 54 at
+    M9 V69, up from the original 49); ``mcp/tests/test_schema.py`` is the
+    authoritative pin. Restating the count here is what makes the ``cli`` job
+    notice a *removal* on the MCP side, which is the direction that would break
+    parity from the other end — and it keeps this file's own mapping honest
+    about its scope."""
+    assert len(mcp_tool_names()) == 56

@@ -837,6 +837,113 @@ def test_delete_cycle_issues_delete():
     assert out == {"deleted": 4}
 
 
+def test_list_cycles_sends_planning_interval_id_filter():
+    handler, seen = capture(httpx.Response(200, json=[]))
+    make_client(handler).list_cycles(3, planning_interval_id=7)
+    assert seen["path"] == "/api/v1/boards/3/cycles"
+    assert seen["params"] == {"planning_interval_id": "7"}
+
+
+def test_list_cycles_omits_unset_planning_interval_filter():
+    handler, seen = capture(httpx.Response(200, json=[]))
+    make_client(handler).list_cycles(3)
+    assert seen["params"] == {}
+
+
+def test_create_cycle_sends_planning_interval_id():
+    handler, seen = record_requests(httpx.Response(201, json={"id": 4}))
+    make_client(handler).create_cycle(3, "sprint-1", planning_interval_id=7)
+    assert seen["requests"][0]["body"] == {
+        "name": "sprint-1",
+        "planning_interval_id": 7,
+    }
+
+
+def test_update_cycle_sends_planning_interval_id():
+    handler, seen = record_requests(httpx.Response(200, json={"id": 4}))
+    make_client(handler).update_cycle(3, 4, planning_interval_id=7)
+    req = seen["requests"][0]
+    assert req["method"] == "PATCH"
+    assert req["body"] == {"planning_interval_id": 7}
+
+
+# --- planning intervals (M8 V57, KAN-978) -----------------------------------
+
+
+def test_list_planning_intervals_reads_board_planning_intervals():
+    handler, seen = record_requests(
+        httpx.Response(200, json=[{"id": 9, "name": "Q4"}])
+    )
+    out = make_client(handler).list_planning_intervals(3)
+    assert seen["requests"][0]["path"] == "/api/v1/boards/3/planning-intervals"
+    assert out == {"planning_intervals": [{"id": 9, "name": "Q4"}]}
+
+
+def test_create_planning_interval_posts_name_and_bounds():
+    handler, seen = record_requests(httpx.Response(201, json={"id": 9}))
+    make_client(handler).create_planning_interval(
+        3, "Q4", starts_on="2026-10-01T00:00:00Z", ends_on="2026-12-31T00:00:00Z"
+    )
+    req = seen["requests"][0]
+    assert req["method"] == "POST"
+    assert req["path"] == "/api/v1/boards/3/planning-intervals"
+    assert req["body"] == {
+        "name": "Q4",
+        "starts_on": "2026-10-01T00:00:00Z",
+        "ends_on": "2026-12-31T00:00:00Z",
+    }
+
+
+def test_create_planning_interval_omits_unset_bounds():
+    handler, seen = record_requests(httpx.Response(201, json={"id": 9}))
+    make_client(handler).create_planning_interval(3, "Q4")
+    assert seen["requests"][0]["body"] == {"name": "Q4"}
+
+
+def test_get_planning_interval_reads_one():
+    handler, seen = record_requests(httpx.Response(200, json={"id": 9}))
+    make_client(handler).get_planning_interval(3, 9)
+    req = seen["requests"][0]
+    assert req["method"] == "GET"
+    assert req["path"] == "/api/v1/boards/3/planning-intervals/9"
+
+
+def test_update_planning_interval_sends_only_set_fields():
+    handler, seen = record_requests(httpx.Response(200, json={"id": 9}))
+    make_client(handler).update_planning_interval(3, 9, name="Q4 2026")
+    req = seen["requests"][0]
+    assert req["method"] == "PATCH"
+    assert req["path"] == "/api/v1/boards/3/planning-intervals/9"
+    assert req["body"] == {"name": "Q4 2026"}
+
+
+def test_delete_planning_interval_issues_delete():
+    handler, seen = record_requests(httpx.Response(204))
+    out = make_client(handler).delete_planning_interval(3, 9)
+    req = seen["requests"][0]
+    assert req["method"] == "DELETE"
+    assert req["path"] == "/api/v1/boards/3/planning-intervals/9"
+    assert out == {"deleted": 9}
+
+
+def test_planning_interval_metrics_reads_the_rollup():
+    body = {
+        "board_id": 3,
+        "planning_interval_id": 9,
+        "cycle_count": 2,
+        "committed": {"count": 4, "points": 21},
+        "completed": {"count": 3, "points": 16},
+        "velocity": 16,
+        "unit": "points",
+    }
+    handler, seen = record_requests(httpx.Response(200, json=body))
+    out = make_client(handler).planning_interval_metrics(3, 9)
+    req = seen["requests"][0]
+    assert req["method"] == "GET"
+    assert req["path"] == "/api/v1/boards/3/planning-intervals/9/metrics"
+    assert out == body
+
+
 def test_list_cards_sends_cycle_id_filter():
     handler, seen = capture(httpx.Response(200, json=[]))
     make_client(handler).list_cards(cycle_id=4)
