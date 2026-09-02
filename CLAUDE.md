@@ -33,7 +33,7 @@ the board assumed one user with one board, and all three problems are that assum
 **M8 is the first milestone since M6 to change the schema** — M7's no-API/no-schema/no-migration
 constraint expired with it — so seven slices carry an additive migration and each lands alone (two of
 the seven, V56 and V59, were missing their marker in `docs/milestone-8/SLICES.md` until V56's own
-shaping pass caught it — V59's has since been added too). **Eleven slices have shipped**: V61 and V62 (label
+shaping pass caught it — V59's has since been added too). **Twelve slices have shipped**: V61 and V62 (label
 management UI + the measured seven-token palette), V55
 (`PATCH /cycles/{id}`, the edit a sprint never had), **V56 — Backlog** (`card.parked` 🗄️, a dedicated
 Backlog view, and the `backlog`/`parked` filters across API/CLI/MCP), **V57 — Planning intervals**
@@ -58,7 +58,17 @@ recomputing from a roster rollover has since changed; closing an already-closed 
 silent no-op; MCP gets exactly the one write, `close_cycle`, the first ADR 0019 amendment that is a
 write rather than a read, 56 → 57 — an agent pacing its own short cycles needs to end one and roll
 unfinished work forward without shelling out to the CLI, unlike `update_cycle`/planning-interval setup
-which stay CLI-only), **V51 — `board.key`, the head of the four-slice
+which stay CLI-only), **V60 — Observed throughput** (SHAPING D10: the issue thread's proposed second
+point scale — "1 agent point = 3–5 human points" — is deliberately not built, because a declared
+multiplier is unfalsifiable and re-argued every planning session while a measured one improves on its
+own; `compute_metrics` gains `by_assignee_class`, splitting the same done-in-period cards `by_assignee`
+already iterates into `agent`/`human`/`unassigned` buckets by the `assignee` string's `agent:` prefix,
+reporting `points_per_day` as a **ratio of sums** (Σ points ÷ Σ cycle days, not an average of per-card
+ratios, so a handful of large/slow cards can't be outvoted by many small/fast ones) with `n` the count
+of eligible cards; eligibility mirrors `cycle_time`'s own two conditions exactly (a recorded
+`story_points` and a recorded `in_progress`→`done` cycle time) — no schema change, no new query, and a
+class with no eligible cards is omitted rather than zeroed; **no MCP change** — `metrics`'s response
+schema just grows a field), **V51 — `board.key`, the head of the four-slice
 identity chain** ([ADR 0020](docs/adr/0020-board-keys.md)), **V52 — `card.board_seq` /
 `epic.board_seq`, so every card and epic carries a gapless board-local `ref` in its payload**,
 **V53 — every resolver now accepts both forms** (the batch read, autosync's branch-name scan, and the
@@ -71,8 +81,8 @@ form), put the canonical ticket on every rendered ref's `title` attribute so it 
 copyable, moved sorting onto the *displayed* form, and made the CLI fall back to the canonical ticket
 when one key names two boards in a single result set. **Part A (identity) is
 now fully shipped** — the four-slice chain V51–V54 is complete, so a user never sees a reference
-something in the system can't parse. Remaining: Part B (V60, observed throughput — V56, V57, V58 and
-V59 have shipped) and V63–V64 (Part C's epic/label colour).
+something in the system can't parse. **Part B (V56–V60) is now fully shipped.** Remaining: V63–V64
+(Part C's epic/label colour).
 Two decisions are settled and load-bearing before anyone starts: **`card.ticket_number` is never
 touched** (the board-local `ENG-14` is added *beside* it, and the canonical `KAN-955` becomes the
 cross-board addressing mode), and **board keys are unique per owner**, which is exactly why a

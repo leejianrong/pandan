@@ -50,7 +50,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | **V57 · Planning intervals** ✅ | 🗄️ | B | KAN-978 | 5 | Six cycles roll up into one PI with a single committed-vs-completed number |
 | **V58 · Cadence** ✅ | generate N cycles | B | KAN-979 | 2 | "Two weeks per sprint, six sprints" is one command |
 | **V59 · Explicit close** ✅ | + rollover 🗄️ | B | KAN-980 | 3 | Closing is deliberate and reported; past velocity numbers stop moving |
-| **V60 · Observed throughput** | agent vs human | B | KAN-981 | 3 | `agent: 6.2 pts/day (n=143)` — a budget backed by evidence, not a multiplier |
+| **V60 · Observed throughput** ✅ | agent vs human | B | KAN-981 | 3 | `agent: 6.2 pts/day (n=143)` — a budget backed by evidence, not a multiplier |
 
 🗄️ = carries a migration, lands alone. ✅ = shipped.
 
@@ -514,7 +514,7 @@ Demo: `pandan cycle close 7 --rollover-to 8` reports
 `closed Sprint 12 · 9/13 done · 4 rolled over to Sprint 13`; `pandan cycle metrics 7` afterwards still
 reports 13 committed / 9 completed, unchanged by the 4 cards that moved to Sprint 13.
 
-### V60 · Observed throughput — KAN-981
+### V60 · Observed throughput — KAN-981 ✅
 
 **The most interesting slice in the milestone, and the one that answers the issue's hardest question
 by refusing its proposal.** The thread suggested a second point scale — "1 agent story point = 3 or 5

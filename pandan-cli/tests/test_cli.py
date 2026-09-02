@@ -1197,6 +1197,10 @@ METRICS = {
         ],
     },
     "by_assignee": [{"assignee": "agent-a", "throughput": 2, "wip": 0}],
+    "by_assignee_class": [
+        {"assignee_class": "agent", "points_per_day": 6.2, "n": 143},
+        {"assignee_class": "human", "points_per_day": 1.4, "n": 38},
+    ],
 }
 
 
@@ -1225,6 +1229,34 @@ def test_metrics_human_output(monkeypatch, env, capsys):
     assert "cycle time:" in out
     assert "KAN-3" in out and "agent-b" in out
     assert "agent-a\tdone 2\twip 0" in out
+    # Observed throughput by assignee class (M8 V60, KAN-981).
+    assert "by assignee class:" in out
+    assert "agent\t6.2 pts/day\t(n=143)" in out
+    assert "human\t1.4 pts/day\t(n=38)" in out
+
+
+def test_metrics_omits_assignee_class_section_when_empty(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result={**METRICS, "by_assignee_class": []}))
+    assert cli.run(["metrics", "--board", "2"]) == 0
+    out = capsys.readouterr().out
+    assert "by assignee class:" not in out
+
+
+def test_metrics_assignee_class_renders_null_rate_as_na(monkeypatch, env, capsys):
+    patch_client(
+        monkeypatch,
+        FakeClient(
+            result={
+                **METRICS,
+                "by_assignee_class": [
+                    {"assignee_class": "unassigned", "points_per_day": None, "n": 2}
+                ],
+            }
+        ),
+    )
+    assert cli.run(["metrics", "--board", "2"]) == 0
+    out = capsys.readouterr().out
+    assert "unassigned\tn/a\t(n=2)" in out
 
 
 ACTIVITY = [

@@ -85,6 +85,7 @@ def test_empty_board_returns_zeroed_metrics(client):
         "items": [],
     }
     assert m["by_assignee"] == []
+    assert m["by_assignee_class"] == []
     assert m["since"] is None
     assert m["until"] is not None
 
@@ -142,6 +143,43 @@ def test_metrics_derived_from_seeded_activity(client):
     by = {row["assignee"]: row for row in m["by_assignee"]}
     assert by["agent-a"] == {"assignee": "agent-a", "throughput": 2, "wip": 0}
     assert by["agent-b"] == {"assignee": "agent-b", "throughput": 0, "wip": 1}
+
+
+# --- observed throughput by assignee class (M8 V60, KAN-981) ----------------
+
+
+def test_metrics_by_assignee_class_end_to_end(client):
+    board_id = _board_id(client)
+    now = datetime.now(timezone.utc)
+
+    # Agent card: 5 pts over a 1-day cycle → 5.0 pts/day.
+    agent_card = _create(client, "A", assignee="agent:claude", story_points=5)
+    # Human card: 8 pts over a 2-day cycle → 4.0 pts/day.
+    human_card = _create(client, "B", assignee="alice@example.com", story_points=8)
+    # Unassigned card, still done, no story points: counts for throughput, not the rate.
+    bare_card = _create(client, "C", assignee=None, story_points=None)
+
+    for card in (agent_card, human_card, bare_card):
+        _move(client, card["id"], "in_progress")
+        _move(client, card["id"], "done")
+
+    _set_activity_ts(agent_card["id"], "in_progress", now - timedelta(days=1))
+    _set_activity_ts(agent_card["id"], "done", now)
+    _set_activity_ts(human_card["id"], "in_progress", now - timedelta(days=2))
+    _set_activity_ts(human_card["id"], "done", now)
+    _set_activity_ts(bare_card["id"], "in_progress", now - timedelta(days=1))
+    _set_activity_ts(bare_card["id"], "done", now)
+
+    m = _metrics(client, board_id)
+    assert m["throughput"] == 3
+
+    by_class = {row["assignee_class"]: row for row in m["by_assignee_class"]}
+    assert by_class["agent"] == {"assignee_class": "agent", "points_per_day": 5.0, "n": 1}
+    assert by_class["human"] == {"assignee_class": "human", "points_per_day": 4.0, "n": 1}
+    # The unassigned card has no story_points, so it's excluded from the rate
+    # entirely (like cycle_time excludes a never-in-progress card) — no zeroed
+    # "unassigned" bucket appears.
+    assert "unassigned" not in by_class
 
 
 def test_move_records_structured_transition_columns(client):
