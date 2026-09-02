@@ -33,10 +33,17 @@ the board assumed one user with one board, and all three problems are that assum
 **M8 is the first milestone since M6 to change the schema** — M7's no-API/no-schema/no-migration
 constraint expired with it — so seven slices carry an additive migration and each lands alone (two of
 the seven, V56 and V59, were missing their marker in `docs/milestone-8/SLICES.md` until V56's own
-shaping pass caught it — V59's is still open). **Eight slices have shipped**: V61 and V62 (label
+shaping pass caught it — V59's is still open). **Nine slices have shipped**: V61 and V62 (label
 management UI + the measured seven-token palette), V55
 (`PATCH /cycles/{id}`, the edit a sprint never had), **V56 — Backlog** (`card.parked` 🗄️, a dedicated
-Backlog view, and the `backlog`/`parked` filters across API/CLI/MCP), **V51 — `board.key`, the head of the four-slice
+Backlog view, and the `backlog`/`parked` filters across API/CLI/MCP), **V57 — Planning intervals**
+(`planning_interval` 🗄️, a board-scoped grouping one level above the cycle via the nullable
+`cycle.planning_interval_id`; a dedicated rollup endpoint — `GET
+.../planning-intervals/{id}/metrics` — sums committed/completed/velocity across member cycles rather
+than filtering `cycle_metrics`, because a per-cycle burndown series doesn't compose across a PI
+(SHAPING Q4); MCP gets exactly the 2 reads, `list_planning_intervals`/`planning_interval_metrics`,
+another ADR 0019 amendment, 54 → 56 — create/update/delete stayed CLI-only as `pandan pi
+create/update/delete`, the same disposition `update_cycle` already has), **V51 — `board.key`, the head of the four-slice
 identity chain** ([ADR 0020](docs/adr/0020-board-keys.md)), **V52 — `card.board_seq` /
 `epic.board_seq`, so every card and epic carries a gapless board-local `ref` in its payload**,
 **V53 — every resolver now accepts both forms** (the batch read, autosync's branch-name scan, and the
@@ -49,8 +56,8 @@ form), put the canonical ticket on every rendered ref's `title` attribute so it 
 copyable, moved sorting onto the *displayed* form, and made the CLI fall back to the canonical ticket
 when one key names two boards in a single result set. **Part A (identity) is
 now fully shipped** — the four-slice chain V51–V54 is complete, so a user never sees a reference
-something in the system can't parse. Remaining: Part B (V57–V60, sprints/backlog/planning intervals —
-V56 has shipped) and V63–V64 (Part C's epic/label colour).
+something in the system can't parse. Remaining: Part B (V58–V60, cadence/explicit-close/observed-
+throughput — V56 and V57 have shipped) and V63–V64 (Part C's epic/label colour).
 Two decisions are settled and load-bearing before anyone starts: **`card.ticket_number` is never
 touched** (the board-local `ENG-14` is added *beside* it, and the canonical `KAN-955` becomes the
 cross-board addressing mode), and **board keys are unique per owner**, which is exactly why a
@@ -92,9 +99,15 @@ Team *membership* management (`add`/`remove`/list a member, change a role) delib
 tool — mirroring `board_member`'s own long-standing absence from this surface — and lives CLI-only as
 `pandan team member add/rm/list/update-role`. Measured immediately before/after on the same commit
 (tighter than comparing against a drifted headline): **8,951 → 9,505** compact (+554, +6.2%),
-`outputSchema` alone **836 → 922**. **Re-run the script rather than quoting this line** — four recorded
-drifts (three from arguments, one from an actual tool-count change) is enough to treat any number here
-as an order of magnitude and nothing finer. The other six
+`outputSchema` alone **836 → 922**. **The count moved again** (M8 V57, KAN-978): **54 → 56 tools**, a
+2-tool read pair (`list_planning_intervals`/`planning_interval_metrics`) for the grouping-above-the-cycle
+entity V57 introduces — another ADR 0019 *amendment* (create/update/delete stayed CLI-only, the same
+disposition `update_cycle` already has), per
+[the amendment note](docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m8-v57-planning-interval-tools-2026-09-02-kan-978).
+Measured the same tight way: **9,665 → 10,085** compact (+420, +4.3%), `outputSchema` alone
+**922 → 960**. **Re-run the script rather than quoting this line** — five recorded drifts (three from
+arguments, two from an actual tool-count change) is enough to treat any number here as an order of
+magnitude and nothing finer. The other six
 read-tools stay raw *on measurement*, at 7–474 tokens each: shaping a small payload is the opposite of
 the trade ADR 0019 endorsed, and a test pins them that way. That figure counts `{name, description,
 input_schema}` per tool; a `tools/list` entry also carries an **`outputSchema`** worth a further
@@ -104,8 +117,8 @@ folded into the headline and deliberately **not** compacted, because unlike `inp
 `outputSchema` is the very object the SDK validates every tool result against.
 Both measurements are re-runnable —
 `mcp/scripts/measure_tool_schema_tokens.py` for the resident schema,
-`mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The surface (54 tools as of M9
-V69) is pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit**
+`mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The surface (56 tools as of M8
+V57) is pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit**
 (adding an *argument*, as KAN-501 and V67's `team_id` did, is not). **Per-slice status goes stale here
 faster than anywhere else in this file; read [docs/milestone-8/SLICES.md](docs/milestone-8/SLICES.md)/
 [docs/milestone-9/SLICES.md](docs/milestone-9/SLICES.md) and the board, not this paragraph.**

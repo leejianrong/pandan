@@ -31,6 +31,7 @@ from .routers import (
     me,
     members,
     notifications,
+    planning_intervals,
     team_members,
     teams,
     templates,
@@ -189,6 +190,9 @@ app.include_router(labels.router, prefix="/api/v1")  # M5 V11 (KAN-244): card la
 app.include_router(views.router, prefix="/api/v1")  # M5 V14 (KAN-247): saved views
 app.include_router(templates.router, prefix="/api/v1")  # M5 V19 (KAN-252): card templates
 app.include_router(cycles.router, prefix="/api/v1")  # V33 (KAN-297): cycles / iterations
+app.include_router(
+    planning_intervals.router, prefix="/api/v1"
+)  # M8 V57 (KAN-978): planning intervals
 app.include_router(tokens.router, prefix="/api/v1")  # M3 V9 (ADR 0014): agent PATs
 app.include_router(notifications.router, prefix="/api/v1")  # V37 (KAN-301): inbox
 app.include_router(teams.router, prefix="/api/v1")  # M9 V65 (KAN-1054, ADR 0021): teams

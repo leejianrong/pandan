@@ -327,3 +327,36 @@ def compute_cycle_metrics(
         "unit": unit,
         "burndown": burndown,
     }
+
+
+def compute_planning_interval_metrics(
+    member_metrics: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Roll up a planning interval's member cycles into one committed-vs-completed
+    number (M8 V57, KAN-978) — a **sum**, not a series.
+
+    ``member_metrics`` is a list of dicts already shaped like
+    :func:`compute_cycle_metrics`'s return value (one per member cycle; an empty
+    list, for a planning interval with no cycles assigned, sums to all zeros).
+    ``committed``/``completed`` sum count and points independently; ``velocity``
+    sums each member's completed points directly (every member's own ``velocity``
+    already *is* its completed points, so summing avoids recomputing them).
+    ``unit`` is ``"points"`` when any member cycle has estimated work
+    (``committed.points > 0`` overall), else ``"count"`` — the same rule
+    ``compute_cycle_metrics`` uses. Deliberately no ``burndown``: a per-cycle
+    day-by-day series doesn't compose across a PI's member cycles into anything
+    meaningful (SHAPING Q4).
+    """
+    committed_count = sum(m["committed"]["count"] for m in member_metrics)
+    committed_points = sum(m["committed"]["points"] for m in member_metrics)
+    completed_count = sum(m["completed"]["count"] for m in member_metrics)
+    completed_points = sum(m["completed"]["points"] for m in member_metrics)
+    velocity = sum(m["velocity"] for m in member_metrics)
+    unit = "points" if committed_points > 0 else "count"
+
+    return {
+        "committed": {"count": committed_count, "points": committed_points},
+        "completed": {"count": completed_count, "points": completed_points},
+        "velocity": velocity,
+        "unit": unit,
+    }

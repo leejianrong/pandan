@@ -1212,6 +1212,10 @@ class CycleCreate(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
     starts_on: datetime | None = None
     ends_on: datetime | None = None
+    # Optional membership in a planning interval (M8 V57, KAN-978) — the grouping
+    # one level above the cycle. Validated against the same board in the router
+    # (``_validate_planning_interval``, mirroring ``_validate_epic``).
+    planning_interval_id: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -1250,6 +1254,10 @@ class CycleUpdate(BaseModel):
     name: Annotated[str | None, Field(min_length=1, max_length=MAX_NAME_LEN)] = None
     starts_on: datetime | None = None
     ends_on: datetime | None = None
+    # Nullable like starts_on/ends_on (not tri-state like name): a cycle with no
+    # planning interval is already valid, so an explicit null genuinely means
+    # *detach* (M8 V57, KAN-978).
+    planning_interval_id: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -1270,6 +1278,7 @@ class CycleRead(BaseModel):
     starts_on: datetime | None
     ends_on: datetime | None
     created_at: datetime
+    planning_interval_id: int | None = None
 
 
 # --- cycle metrics: burndown / velocity (V34, KAN-298) ---------------------
@@ -1318,3 +1327,82 @@ class CycleMetricsRead(BaseModel):
     velocity: int
     unit: str
     burndown: list[BurndownPoint] = []
+
+
+# --- planning intervals (M8 V57, KAN-978) -----------------------------------
+# A grouping one level above the cycle — structurally identical to Cycle, field
+# for field, mirroring CycleCreate/CycleUpdate/CycleRead.
+
+
+class PlanningIntervalCreate(BaseModel):
+    """Create a planning interval (a board-scoped grouping of cycles, e.g. a
+    quarter). ``name`` is required non-empty; ``starts_on`` / ``ends_on`` are
+    optional ISO-8601 bounds. The board comes from the path
+    (``/boards/{id}/planning-intervals``), not the body."""
+
+    name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
+    starts_on: datetime | None = None
+    ends_on: datetime | None = None
+
+    @field_validator("name")
+    @classmethod
+    def name_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name must not be empty")
+        return v
+
+
+class PlanningIntervalUpdate(BaseModel):
+    """Field edits for a planning interval: ``PATCH
+    /boards/{id}/planning-intervals/{pi_id}`` — ships from day one (V55/cycles
+    shipped without an edit route as a bug; not repeating that gap here).
+
+    Same tri-state split as :class:`CycleUpdate`: ``name`` is not nullable (an
+    unnamed planning interval can't be listed or referred to); ``starts_on`` /
+    ``ends_on`` are nullable (a planning interval with no bounds is already
+    valid, so an explicit ``null`` genuinely means *unschedule*).
+    """
+
+    name: Annotated[str | None, Field(min_length=1, max_length=MAX_NAME_LEN)] = None
+    starts_on: datetime | None = None
+    ends_on: datetime | None = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_null_and_not_blank(cls, v: str | None) -> str:
+        if v is None:
+            raise ValueError("must not be null; omit the field to leave it unchanged")
+        if not v.strip():
+            raise ValueError("name must not be empty")
+        return v
+
+
+class PlanningIntervalRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    board_id: int
+    name: str
+    starts_on: datetime | None
+    ends_on: datetime | None
+    created_at: datetime
+
+
+class PlanningIntervalMetricsRead(BaseModel):
+    """Rolled-up committed/completed/velocity across a planning interval's member
+    cycles (M8 V57, KAN-978) — a **sum**, not a series: unlike
+    :class:`CycleMetricsRead` there is no ``burndown`` field, because a per-cycle
+    day-by-day series doesn't compose across a PI's member cycles into anything
+    meaningful (SHAPING Q4). ``unit`` is ``"points"`` when any member cycle has
+    estimated work (``committed.points > 0``), else ``"count"`` — the same rule
+    ``CycleMetricsRead`` uses. ``cycle_count`` is the number of member cycles
+    summed (0 for a planning interval with no cycles assigned, all totals zero)."""
+
+    board_id: int
+    planning_interval_id: int
+    generated_at: datetime
+    cycle_count: int
+    committed: WorkTotals
+    completed: WorkTotals
+    velocity: int
+    unit: str

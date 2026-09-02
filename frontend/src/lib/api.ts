@@ -1062,6 +1062,21 @@ export interface Cycle {
   starts_on: string | null;
   ends_on: string | null;
   created_at: string;
+  // The planning interval this cycle belongs to, if any (M8 V57, KAN-978) — a
+  // grouping one level above the cycle, e.g. a quarter containing several sprints.
+  planning_interval_id: number | null;
+}
+
+// A board-scoped grouping one level above the cycle (M8 V57, KAN-978) —
+// structurally identical to Cycle, field for field. Read-only here; creating/
+// renaming/deleting one is a CLI-only affordance (`pandan pi ...`) for now.
+export interface PlanningInterval {
+  id: number;
+  board_id: number;
+  name: string;
+  starts_on: string | null;
+  ends_on: string | null;
+  created_at: string;
 }
 
 export interface WorkTotals {
@@ -1100,6 +1115,12 @@ export async function getCycleMetrics(
   cycleId: number,
 ): Promise<CycleMetrics> {
   const res = await fetch(`${API}/boards/${boardId}/cycles/${cycleId}/metrics`);
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function listPlanningIntervals(boardId: number): Promise<PlanningInterval[]> {
+  const res = await fetch(`${API}/boards/${boardId}/planning-intervals`);
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
 }

@@ -11,11 +11,13 @@ import {
   listActivity,
   listCards,
   listCycles,
+  listPlanningIntervals,
   type Activity,
   type BoardMetrics,
   type Card,
   type Cycle,
   type CycleMetrics,
+  type PlanningInterval,
 } from "./api";
 import { boardStore } from "./board.svelte";
 import { compareTicketRefs, displayRef } from "./tickets";
@@ -42,6 +44,11 @@ export const dashboardStore = $state<{
   cycles: Cycle[];
   activeCycleId: number | null;
   cycleMetrics: CycleMetrics | null;
+  // The board's planning intervals (M8 V57, KAN-978) — a grouping one level
+  // above the cycle. `activePlanningIntervalId` narrows the cycle picker to one
+  // PI's member cycles; `null` (the default) shows every cycle, ungrouped.
+  planningIntervals: PlanningInterval[];
+  activePlanningIntervalId: number | null;
   // The deepened activity feed (filterable by actor/action), keyset-paginated.
   activity: Activity[];
   activityCursor: string | null;
@@ -60,6 +67,8 @@ export const dashboardStore = $state<{
   cycles: [],
   activeCycleId: null,
   cycleMetrics: null,
+  planningIntervals: [],
+  activePlanningIntervalId: null,
   activity: [],
   activityCursor: null,
   actorFilter: "",
@@ -82,41 +91,80 @@ export async function refetchDashboard(): Promise<void> {
     dashboardStore.cycles = [];
     dashboardStore.activeCycleId = null;
     dashboardStore.cycleMetrics = null;
+    dashboardStore.planningIntervals = [];
+    dashboardStore.activePlanningIntervalId = null;
     dashboardStore.activity = [];
     dashboardStore.activityCursor = null;
     return;
   }
   dashboardStore.loading = true;
   try {
-    const [inflight, attention, metrics, cycles, activityPage] = await Promise.all([
-      listCards(boardId, { column: "in_progress" }),
-      listCards(boardId, { needs_human: true }),
-      getBoardMetrics(boardId, dashboardStore.window ? { window: dashboardStore.window } : {}),
-      listCycles(boardId),
-      listActivity(boardId, {
-        limit: ACTIVITY_PAGE,
-        actor: dashboardStore.actorFilter || undefined,
-        action: dashboardStore.actionFilter || undefined,
-      }),
-    ]);
+    const [inflight, attention, metrics, cycles, planningIntervals, activityPage] =
+      await Promise.all([
+        listCards(boardId, { column: "in_progress" }),
+        listCards(boardId, { needs_human: true }),
+        getBoardMetrics(boardId, dashboardStore.window ? { window: dashboardStore.window } : {}),
+        listCycles(boardId),
+        listPlanningIntervals(boardId),
+        listActivity(boardId, {
+          limit: ACTIVITY_PAGE,
+          actor: dashboardStore.actorFilter || undefined,
+          action: dashboardStore.actionFilter || undefined,
+        }),
+      ]);
     dashboardStore.inflight = inflight;
     dashboardStore.attention = attention;
     dashboardStore.metrics = metrics;
     dashboardStore.cycles = cycles;
+    dashboardStore.planningIntervals = planningIntervals;
     dashboardStore.activity = activityPage.entries;
     dashboardStore.activityCursor = activityPage.nextCursor;
 
-    // Keep the current selection if it still exists; else pick the "active"
-    // cycle (its window contains now) or the most recent one.
-    const stillValid = cycles.some((c) => c.id === dashboardStore.activeCycleId);
+    // Drop a PI filter that no longer names a planning interval on this board.
+    if (!planningIntervals.some((p) => p.id === dashboardStore.activePlanningIntervalId)) {
+      dashboardStore.activePlanningIntervalId = null;
+    }
+
+    // Keep the current selection if it still exists (and still matches the PI
+    // filter); else pick the "active" cycle within scope (its window contains
+    // now) or the most recent one in scope.
+    const scoped = cyclesInScope(cycles, dashboardStore.activePlanningIntervalId);
+    const stillValid = scoped.some((c) => c.id === dashboardStore.activeCycleId);
     dashboardStore.activeCycleId = stillValid
       ? dashboardStore.activeCycleId
-      : pickActiveCycle(cycles);
+      : pickActiveCycle(scoped);
     await refetchCycleMetrics();
   } catch (e) {
     dashboardStore.error = e instanceof Error ? e.message : "Failed to load dashboard";
   } finally {
     dashboardStore.loading = false;
+  }
+}
+
+// Cycles narrowed to one planning interval (M8 V57, KAN-978), or every cycle
+// when `planningIntervalId` is null — the same filter the CLI/API's own
+// `planning_interval_id` query param applies, done client-side since the
+// cycles are already in hand.
+export function cyclesInScope(cycles: Cycle[], planningIntervalId: number | null): Cycle[] {
+  return planningIntervalId == null
+    ? cycles
+    : cycles.filter((c) => c.planning_interval_id === planningIntervalId);
+}
+
+// Change the planning-interval filter, re-picking a valid active cycle within
+// the new scope (same "current window, else most recent" rule as the initial
+// load) and reloading its metrics.
+export async function setActivePlanningInterval(planningIntervalId: number | null): Promise<void> {
+  dashboardStore.activePlanningIntervalId = planningIntervalId;
+  const scoped = cyclesInScope(dashboardStore.cycles, planningIntervalId);
+  const stillValid = scoped.some((c) => c.id === dashboardStore.activeCycleId);
+  dashboardStore.activeCycleId = stillValid
+    ? dashboardStore.activeCycleId
+    : pickActiveCycle(scoped);
+  try {
+    await refetchCycleMetrics();
+  } catch (e) {
+    dashboardStore.error = e instanceof Error ? e.message : "Failed to load cycle metrics";
   }
 }
 

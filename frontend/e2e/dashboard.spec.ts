@@ -162,6 +162,79 @@ test("dashboard renders the cycle burndown panel (V34)", async ({ page }) => {
   expect(await cyclePanel.locator(".bar-track").count()).toBeGreaterThanOrEqual(1);
 });
 
+// Seed a fresh board with two cycles, one of them grouped into a planning
+// interval (M8 V57, KAN-978), so the dashboard's PI filter has something to do.
+async function seedPlanningIntervalBoard(
+  page: Page,
+): Promise<{ piName: string; grouped: string; ungrouped: string }> {
+  await login(page);
+  const board = await (
+    await page.request.post("/api/v1/boards", { data: { name: uniqueTitle("pi-board") } })
+  ).json();
+  const boardId: number = board.id;
+
+  const piName = uniqueTitle("Q4");
+  const pi = await (
+    await page.request.post(`/api/v1/boards/${boardId}/planning-intervals`, {
+      data: { name: piName },
+    })
+  ).json();
+
+  const grouped = uniqueTitle("sprint-in-pi");
+  const grouped_cycle = await (
+    await page.request.post(`/api/v1/boards/${boardId}/cycles`, {
+      data: { name: grouped, planning_interval_id: pi.id },
+    })
+  ).json();
+
+  const ungrouped = uniqueTitle("sprint-solo");
+  await page.request.post(`/api/v1/boards/${boardId}/cycles`, { data: { name: ungrouped } });
+
+  await page.request.post("/api/v1/cards", {
+    data: { title: uniqueTitle("story"), board_id: boardId, cycle_id: grouped_cycle.id },
+  });
+
+  await page.addInitScript((id) => {
+    try {
+      localStorage.setItem("kanban.activeBoardId", String(id));
+    } catch {
+      /* ignore */
+    }
+  }, boardId);
+
+  return { piName, grouped, ungrouped };
+}
+
+test("dashboard's cycle picker narrows to a planning interval (M8 V57, KAN-978)", async ({
+  page,
+}) => {
+  const { piName, grouped, ungrouped } = await seedPlanningIntervalBoard(page);
+  await openDashboard(page);
+
+  const cyclePanel = page.locator("section", {
+    has: page.getByRole("heading", { name: "Cycle burndown" }),
+  });
+  await expect(cyclePanel).toBeVisible();
+
+  const piSelect = cyclePanel.getByLabel("Planning interval");
+  await expect(piSelect).toBeVisible();
+  const cycleSelect = cyclePanel.getByLabel("Active cycle");
+
+  // Unfiltered: both cycles are selectable options.
+  await expect(cycleSelect.locator("option", { hasText: grouped })).toHaveCount(1);
+  await expect(cycleSelect.locator("option", { hasText: ungrouped })).toHaveCount(1);
+
+  // Filtering to the planning interval narrows the cycle picker to its member.
+  await piSelect.selectOption({ label: piName });
+  await expect(cycleSelect.locator("option", { hasText: grouped })).toHaveCount(1);
+  await expect(cycleSelect.locator("option", { hasText: ungrouped })).toHaveCount(0);
+
+  // Clearing the filter restores every cycle.
+  await piSelect.selectOption({ label: "All planning intervals" });
+  await expect(cycleSelect.locator("option", { hasText: grouped })).toHaveCount(1);
+  await expect(cycleSelect.locator("option", { hasText: ungrouped })).toHaveCount(1);
+});
+
 test("dashboard activity feed filters by action", async ({ page }) => {
   await seedDashboardBoard(page);
   await openDashboard(page);

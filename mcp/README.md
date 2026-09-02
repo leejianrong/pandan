@@ -153,22 +153,26 @@ uv run --with tiktoken python scripts/measure_read_payload_tokens.py --payload /
 
 The surface is **frozen** by [ADR 0019](../docs/adr/0019-mcp-surface-right-sizing.md)
 (V49) — deliberately broad, deliberately kept, and deliberately not growing *silently*.
-It has grown exactly once since: **M9 V69 (KAN-1058) added 5 team tools, 49 → 54**,
-an ADR amendment (see [*Amendment: the M9 team
+It has grown twice since: **M9 V69 (KAN-1058) added 5 team tools, 49 → 54**, an ADR
+amendment (see [*Amendment: the M9 team
 tools*](../docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m9-team-tools-2026-09-01-kan-1058)),
-not a side effect of a CLI card. Recorded here because the resident-cost headline
+and **M8 V57 (KAN-978) added 2 planning-interval read tools, 54 → 56**, a further
+amendment (see [*Amendment: the M8 V57 planning-interval
+tools*](../docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m8-v57-planning-interval-tools-2026-09-02-kan-978)) —
+neither a side effect of a CLI card. Recorded here because the resident-cost headline
 invites the wrong conclusion, and this decision should not be re-litigated from it.
 
 **What it costs.** Every one of these schemas loads into an agent's context before
-it does any work: **9,505 `o200k_base` tokens** as shipped (8,951 before the M9 team
-tools; 8,162 before that at V49-era measurement — re-run the harness rather than
-trusting any of these forward, they drift with every argument addition too; 8,775
-before the original schema compaction below). That counts `{name, description,
-input_schema}` per tool — a `tools/list` entry also carries an **`outputSchema`**, a
-further **922** compact if your client forwards it into the model's context (many
-will not: the Anthropic Messages API tool definition has no field for it). ADR 0019
-§ *The fourth field* (KAN-518) has the bracket, and why it is measured but
-deliberately **not** compacted. Re-measure any time — the harness is committed:
+it does any work: **10,085 `o200k_base` tokens** as shipped (9,665 before the V57
+planning-interval tools; 8,951 before the M9 team tools; 8,162 before that at
+V49-era measurement — re-run the harness rather than trusting any of these forward,
+they drift with every argument addition too; 8,775 before the original schema
+compaction below). That counts `{name, description, input_schema}` per tool — a
+`tools/list` entry also carries an **`outputSchema`**, a further **960** compact if
+your client forwards it into the model's context (many will not: the Anthropic
+Messages API tool definition has no field for it). ADR 0019 § *The fourth field*
+(KAN-518) has the bracket, and why it is measured but deliberately **not**
+compacted. Re-measure any time — the harness is committed:
 
 ```bash
 uv run --with tiktoken python scripts/measure_tool_schema_tokens.py [--per-tool]
@@ -190,7 +194,7 @@ the same FastMCP serializer:
 
 | option | tools | resident | verdict |
 |---|---:|---:|---|
-| today (frozen, incl. M9's team tools) | 54 | 9,505 | **chosen** |
+| today (frozen, incl. M9's team + V57's planning-interval tools) | 56 | 10,085 | **chosen** |
 | (a) one tool per entity + an `action` arg | 11 | 4,338 | rejected |
 | (b) a single exec-`pandan` tool | 1 | 387 | rejected *for now* |
 

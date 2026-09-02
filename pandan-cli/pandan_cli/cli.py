@@ -657,6 +657,10 @@ def _humanize(
         )
     if envelope == "cycles":  # list_cycles
         return "\n".join(_cycle_line(c) for c in rows) if rows else "(no cycles)"
+    if envelope == "planning_intervals":  # list_planning_intervals
+        return (
+            "\n".join(_pi_line(p) for p in rows) if rows else "(no planning_intervals)"
+        )
     if envelope == "notifications":  # list_notifications
         return (
             "\n".join(_notification_line(n, limit=limit) for n in rows)
@@ -720,16 +724,27 @@ def _humanize(
         return _warmup_line(result)
     if isinstance(result, dict) and "velocity" in result and "burndown" in result:
         return _cycle_metrics_block(result)  # cycle metrics (V34)
+    # A planning-interval rollup carries ``velocity`` too, but no ``burndown``
+    # field at all (M8 V57, KAN-978 — deliberately, SHAPING Q4) and a distinctive
+    # ``cycle_count``; matched before the generic board-metrics branch below.
+    if isinstance(result, dict) and "velocity" in result and "cycle_count" in result:
+        return _pi_metrics_block(result)
     if isinstance(result, dict) and "throughput" in result and "cycle_time" in result:
         return _metrics_block(result)  # board metrics (V17)
     # A single saved view carries ``query`` (distinctive) — matched before the
     # generic name-without-title branch below (a view also has ``name``).
     if isinstance(result, dict) and "query" in result and "name" in result:
         return _view_line(result)
-    # A single cycle carries ``starts_on`` (distinctive) — matched before the
-    # generic name-without-title branch below.
-    if isinstance(result, dict) and "starts_on" in result and "name" in result:
+    # A single cycle carries ``planning_interval_id`` (distinctive — always
+    # present, even if null, since M8 V57; a planning interval never has this
+    # key) — matched before the generic name-without-title branch below.
+    if isinstance(result, dict) and "planning_interval_id" in result and "name" in result:
         return _cycle_line(result)
+    # A single planning interval carries ``starts_on`` + ``name`` like a cycle,
+    # but lacks ``planning_interval_id`` (M8 V57, KAN-978) — matched right after
+    # the cycle check above for exactly that reason.
+    if isinstance(result, dict) and "starts_on" in result and "name" in result:
+        return _pi_line(result)
     # A single label carries ``color`` (distinctive) — matched before the generic
     # name-without-title branch below.
     if isinstance(result, dict) and "color" in result and "name" in result:
@@ -1009,6 +1024,20 @@ def _cycle_line(cycle: dict[str, Any]) -> str:
     )
 
 
+def _pi_line(pi: dict[str, Any]) -> str:
+    """One concise line for a planning interval (M8 V57, KAN-978): id, name,
+    starts_on, ends_on (tab-separated) — structurally identical to
+    ``_cycle_line``, field for field."""
+    return "\t".join(
+        (
+            str(pi.get("id", "?")),
+            _flatten(str(pi.get("name", ""))),
+            str(pi.get("starts_on") or "-"),
+            str(pi.get("ends_on") or "-"),
+        )
+    )
+
+
 def _template_line(tmpl: dict[str, Any]) -> str:
     """One concise line for a card template: id, name, card count (tab-separated).
 
@@ -1161,6 +1190,25 @@ def _cycle_metrics_block(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _pi_metrics_block(result: dict[str, Any]) -> str:
+    """Render a planning-interval rollup (M8 V57, KAN-978) as a compact
+    multi-line readout — the same shape as ``_cycle_metrics_block`` minus the
+    ``burndown`` section, which doesn't exist for this endpoint (SHAPING Q4)."""
+    unit = result.get("unit", "points")
+    committed = result.get("committed", {})
+    completed = result.get("completed", {})
+    return "\n".join(
+        (
+            f"planning interval {result.get('planning_interval_id', '?')}  "
+            f"(board {result.get('board_id', '?')}, "
+            f"{result.get('cycle_count', 0)} cycles, unit: {unit})",
+            f"committed:   {committed.get('count', 0)} stories  {committed.get('points', 0)} pts",
+            f"completed:   {completed.get('count', 0)} stories  {completed.get('points', 0)} pts",
+            f"velocity:    {result.get('velocity', 0)} pts done",
+        )
+    )
+
+
 # --- dependency / link / comment render helpers (KAN-270) -------------------
 
 
@@ -1261,6 +1309,7 @@ _LIST_ENVELOPES = (
     "views",
     "templates",
     "cycles",
+    "planning_intervals",
     "notifications",
     "activity",
     "comments",
@@ -1291,6 +1340,7 @@ _ROW_NOUN = {
     "views": "view",
     "templates": "template",
     "cycles": "cycle",
+    "planning_intervals": "planning interval",
     "notifications": "notification",
     "activity": "activity",
     "comments": "comment",
@@ -1439,6 +1489,7 @@ _SUMMARY_NOUN: dict[str, tuple[str, str]] = {
     "views": ("view", "views"),
     "templates": ("template", "templates"),
     "cycles": ("cycle", "cycles"),
+    "planning_intervals": ("planning interval", "planning intervals"),
     "notifications": ("notification", "notifications"),
     # "activity" is already a mass noun — "50 activitys" is not a sentence.
     "activity": ("activity row", "activity rows"),
@@ -2759,6 +2810,7 @@ def _cmd_cycle_create(client: PandanClient, config: Config, args: argparse.Names
         args.name,
         starts_on=args.starts_on,
         ends_on=args.ends_on,
+        planning_interval_id=args.planning_interval_id,
     )
 
 
@@ -2769,11 +2821,16 @@ def _cmd_cycle_update(client: PandanClient, config: Config, args: argparse.Names
     no-op, so refuse it here rather than let a command silently do nothing. Clearing
     a bound is not offered — ``_clean`` drops a ``None``, which is the convention
     every other update verb here follows (`epic update --target-date` included)."""
-    if args.name is None and args.starts_on is None and args.ends_on is None:
+    if (
+        args.name is None
+        and args.starts_on is None
+        and args.ends_on is None
+        and args.planning_interval_id is None
+    ):
         raise CliError(
-            "nothing to update; pass --name, --starts-on and/or --ends-on",
+            "nothing to update; pass --name, --starts-on, --ends-on and/or --pi",
             code="nothing_to_update",
-            arg="--name/--starts-on/--ends-on",
+            arg="--name/--starts-on/--ends-on/--pi",
         )
     return client.update_cycle(
         _require_view_board(args, config),
@@ -2781,6 +2838,7 @@ def _cmd_cycle_update(client: PandanClient, config: Config, args: argparse.Names
         name=args.name,
         starts_on=args.starts_on,
         ends_on=args.ends_on,
+        planning_interval_id=args.planning_interval_id,
     )
 
 
@@ -2797,6 +2855,64 @@ def _cmd_cycle_delete(client: PandanClient, config: Config, args: argparse.Names
 def _cmd_cycle_metrics(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Derived burndown / velocity metrics for a cycle (V34, KAN-298)."""
     return client.cycle_metrics(_require_view_board(args, config), args.cycle_id)
+
+
+# --- planning interval handlers (M8 V57 / KAN-978) --------------------------
+# Planning intervals are board-scoped, mirroring `pandan cycle`'s shape exactly.
+# Assigning a cycle to a planning interval is a field edit —
+# `pandan cycle update <id> --pi <planning_interval_id>` / `cycle create --pi`.
+
+
+def _cmd_pi_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.list_planning_intervals(_require_view_board(args, config))
+
+
+def _cmd_pi_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.create_planning_interval(
+        _require_view_board(args, config),
+        args.name,
+        starts_on=args.starts_on,
+        ends_on=args.ends_on,
+    )
+
+
+def _cmd_pi_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.get_planning_interval(_require_view_board(args, config), args.pi_id)
+
+
+def _cmd_pi_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """Rename a planning interval / correct its bounds — ships from day one,
+    unlike cycles (which only got `update` in V55, KAN-976, after shipping
+    without one for a whole milestone)."""
+    if args.name is None and args.starts_on is None and args.ends_on is None:
+        raise CliError(
+            "nothing to update; pass --name, --starts-on and/or --ends-on",
+            code="nothing_to_update",
+            arg="--name/--starts-on/--ends-on",
+        )
+    return client.update_planning_interval(
+        _require_view_board(args, config),
+        args.pi_id,
+        name=args.name,
+        starts_on=args.starts_on,
+        ends_on=args.ends_on,
+    )
+
+
+def _cmd_pi_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    if not args.yes:
+        raise CliError(
+            f"refusing to delete planning interval {args.pi_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
+        )
+    return client.delete_planning_interval(_require_view_board(args, config), args.pi_id)
+
+
+def _cmd_pi_metrics(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """Rolled-up committed/completed/velocity across a planning interval's
+    member cycles (M8 V57, KAN-978) — a sum, not a series."""
+    return client.planning_interval_metrics(_require_view_board(args, config), args.pi_id)
 
 
 # --- batch update + card templates (M5 V19 API / KAN-252 adapter) ----------
@@ -4075,6 +4191,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--ends-on", dest="ends_on", metavar="ISO",
         help="iteration end (ISO-8601 timestamp)",
     )
+    p_cycle_create.add_argument(
+        "--pi", dest="planning_interval_id", type=int, metavar="PLANNING_INTERVAL_ID",
+        help="assign to a planning interval by id (M8 V57)",
+    )
     p_cycle_create.set_defaults(func=_cmd_cycle_create, noun="cycle")
 
     p_cycle_update = cycle_sub.add_parser(
@@ -4090,6 +4210,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_cycle_update.add_argument(
         "--ends-on", dest="ends_on", metavar="ISO",
         help="new end of the iteration (ISO-8601 timestamp)",
+    )
+    p_cycle_update.add_argument(
+        "--pi", dest="planning_interval_id", type=int, metavar="PLANNING_INTERVAL_ID",
+        help="(re)assign the planning interval by id (M8 V57)",
     )
     p_cycle_update.set_defaults(func=_cmd_cycle_update, noun="cycle")
 
@@ -4107,6 +4231,71 @@ def build_parser() -> argparse.ArgumentParser:
     p_cycle_metrics.add_argument("cycle_id", type=int)
     p_cycle_metrics.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_cycle_metrics.set_defaults(func=_cmd_cycle_metrics, noun="cycle")
+
+    # --- pi subcommands (M8 V57 / KAN-978): planning intervals ---------------
+    # A grouping one level above the cycle. Assign a cycle to one with
+    # `pandan cycle create/update --pi <id>`; `pi metrics` rolls up committed vs
+    # completed across the planning interval's member cycles.
+    p_pi = sub.add_parser(
+        "pi", help="manage planning intervals (list / create / update / delete / metrics)"
+    )
+    pi_sub = p_pi.add_subparsers(dest="pi_command", metavar="<subcommand>", required=True)
+
+    p_pi_list = pi_sub.add_parser(
+        "list", parents=[common], help="list a board's planning intervals"
+    )
+    p_pi_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    _add_fields_arg(p_pi_list, "id,name,starts_on,ends_on")
+    p_pi_list.set_defaults(func=_cmd_pi_list, noun="planning interval")
+
+    p_pi_create = pi_sub.add_parser("create", parents=[common], help="create a planning interval")
+    p_pi_create.add_argument("name")
+    p_pi_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_create.add_argument(
+        "--starts-on", dest="starts_on", metavar="ISO",
+        help="planning interval start (ISO-8601 timestamp)",
+    )
+    p_pi_create.add_argument(
+        "--ends-on", dest="ends_on", metavar="ISO",
+        help="planning interval end (ISO-8601 timestamp)",
+    )
+    p_pi_create.set_defaults(func=_cmd_pi_create, noun="planning interval")
+
+    p_pi_get = pi_sub.add_parser("get", parents=[common], help="read one planning interval")
+    p_pi_get.add_argument("pi_id", type=int)
+    p_pi_get.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_get.set_defaults(func=_cmd_pi_get, noun="planning interval")
+
+    p_pi_update = pi_sub.add_parser(
+        "update", parents=[common], help="rename a planning interval or correct its dates"
+    )
+    p_pi_update.add_argument("pi_id", type=int)
+    p_pi_update.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_update.add_argument("--name", help="new planning interval name")
+    p_pi_update.add_argument(
+        "--starts-on", dest="starts_on", metavar="ISO",
+        help="new start of the planning interval (ISO-8601 timestamp)",
+    )
+    p_pi_update.add_argument(
+        "--ends-on", dest="ends_on", metavar="ISO",
+        help="new end of the planning interval (ISO-8601 timestamp)",
+    )
+    p_pi_update.set_defaults(func=_cmd_pi_update, noun="planning interval")
+
+    p_pi_delete = pi_sub.add_parser("delete", parents=[common], help="delete a planning interval")
+    p_pi_delete.add_argument("pi_id", type=int)
+    p_pi_delete.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
+    p_pi_delete.set_defaults(func=_cmd_pi_delete, noun="planning interval")
+
+    p_pi_metrics = pi_sub.add_parser(
+        "metrics",
+        parents=[common],
+        help="rolled-up committed vs completed across a planning interval's member cycles",
+    )
+    p_pi_metrics.add_argument("pi_id", type=int)
+    p_pi_metrics.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_metrics.set_defaults(func=_cmd_pi_metrics, noun="planning interval")
 
     # --- batch create (KAN-502): N creates in one invocation -----------------
     # Deliberately NOT atomic and deliberately a separate verb from `batch-update`,

@@ -8,7 +8,10 @@
   Superseded figures below are annotated, not deleted. · **amended 2026-09-01 (M9 V69, KAN-1058)** —
   the freeze's first actual growth: **+5 tools** (49 → 54), a `team` CRUD group mirroring the `board`
   one 1:1. See [*Amendment: the M9 team tools*](#amendment-the-m9-team-tools-2026-09-01-kan-1058) for
-  the measured delta and why team *membership* management stayed CLI-only.
+  the measured delta and why team *membership* management stayed CLI-only. · **amended 2026-09-02
+  (M8 V57, KAN-978)** — **+2 tools** (54 → 56), the planning-interval read pair. See
+  [*Amendment: the M8 V57 planning-interval tools*](#amendment-the-m8-v57-planning-interval-tools-2026-09-02-kan-978)
+  for the measured delta and why create/update/delete stayed CLI-only.
 - **Context source:** Milestone 7 ("Name & Sharpen the Tools"), slice **V49** / **KAN-432**, shaped
   requirement **R3.1** (measure the schema token cost of the tool surface and of each alternative) and
   Shape A part **A8**. Builds on ADR 0005 (API-first — the CLI and MCP server are both thin adapters,
@@ -554,3 +557,70 @@ the pin test's own failure message has said "that is an ADR amendment, not a tes
 amendment is that mechanism doing exactly what it was built for: a deliberate, measured, documented
 exception, not evidence the freeze doesn't hold. The next tool addition still needs its own amendment
 here, not a precedent-by-example from this one.
+
+## Amendment: the M8 V57 planning-interval tools (2026-09-02, KAN-978)
+
+**The freeze's second growth, and the first driven by a *read-shape* argument rather than a new CRUD
+entity.** M8 ("Legible at Scale") V57 adds `planning_interval` — a board-scoped grouping one level
+above the cycle (e.g. a quarter containing several sprints), per
+[docs/milestone-8/SLICES.md](../milestone-8/SLICES.md)'s V57 entry. Unlike the M9 `team` amendment
+above, which added a full 5-tool CRUD group, this one is a **partial** amendment: only the two reads
+join the frozen surface.
+
+**Decision: add exactly 2 tools — `list_planning_intervals`, `planning_interval_metrics` — and decline
+create/update/delete from this surface entirely.**
+
+- **Why the two reads.** `list_planning_intervals` is the discovery step an agent needs before it can
+  use a planning interval's id anywhere else (as the `planning_interval_id` filter on `list_cycles`, or
+  the CLI's `cycle update --pi`). `planning_interval_metrics` is the rollup this slice exists to serve —
+  the whole point of grouping cycles is the summed committed-vs-completed number, and an agent asking
+  "how is this quarter tracking" is exactly the kind of question this ADR's own framing (§*Options
+  considered*) says the frozen surface should keep answering directly rather than pushing to a
+  subprocess.
+- **Why not create/update/delete.** This is the same reasoning the `("cycle", "update")` entry in
+  `pandan-cli/tests/test_parity.py`'s `CLI_ONLY` dict already made for cycles, one level up: defining a
+  planning interval's name and dates is a human planning-setup action, not a loop an agent runs on its
+  own. `update_cycle` was declined from this surface in V55 for exactly this reason (a bug fix "is not
+  the change that should be spending an ADR" — this ADR's own text), and a *new* entity's mutation
+  routes get the same default the CLI-first rule in this ADR's §Decision (item 1) already sets: new
+  capability lands in the CLI unless there's a specific agent workflow that needs it on MCP. There
+  isn't one here — assigning a cycle to a planning interval is `pandan cycle update <id> --pi <id>` or
+  `update_cycle(cycle_id, planning_interval_id=...)`, both already on the frozen surface (the latter is
+  an *argument* addition to an existing tool, not an amendment, the same way V51's `key` and M9 V67's
+  `team_id` weren't).
+- **`list_cycles` and `create_cycle`/`update_cycle` grow one argument, not a new tool.** `list_cycles`
+  gains a plain `planning_interval_id` filter (browsing membership from the cycle side); `create_cycle`/
+  `update_cycle` gain `planning_interval_id` itself. All three are argument additions under this ADR's
+  own rule, exactly like V51's `key` and M9 V67's `team_id`.
+
+**Measurement**, via the same harness (`mcp/scripts/measure_tool_schema_tokens.py`), comparing
+immediately before and after this change on the same commit/interpreter (the M9 amendment's own
+methodology — tighter than comparing against a drifted headline):
+
+| surface | tools | compact | `indent=2` | `outputSchema` alone (compact) |
+|---|---:|---:|---:|---:|
+| before (main, pre-V57) | 54 | 9,665 | 13,202 | 922 |
+| **after (+2 planning-interval tools)** | **56** | **10,085** | **13,725** | **960** |
+| **delta** | **+2** | **+420 (+4.3%)** | **+523** | **+38** |
+
++420 compact tokens for two tools is ~210 tokens/tool — higher than the M9 team tools' ~111/tool,
+because `planning_interval_metrics`' docstring carries the same "why no burndown" explanation the API
+route and the CLI's render dispatch also carry (SHAPING Q4): a reader hitting this tool cold needs to
+know the rollup is a sum, not a series, without cross-referencing the SLICES doc. The resident figure
+most recently recorded in `CLAUDE.md` (9,505, itself already flagged as drifted after the M9 amendment)
+is now **10,085** — re-run the script rather than quoting either number forward, per that file's own
+standing advice.
+
+**Both freeze pins were updated in the same PR, per this ADR's own requirement**: `FROZEN_TOOLS` (+2
+names) and `FROZEN_TOOL_COUNT` (54 → 56) in [`mcp/tests/test_schema.py`](../../mcp/tests/test_schema.py),
+and `pandan-cli/tests/test_parity.py`'s `MCP_TO_CLI` (+2 mappings to `pi list`/`pi metrics`) and
+`CLI_ONLY` (+4 entries for the declined `pi create`/`get`/`update`/`delete` verbs — `get` included,
+because the frozen surface has no single-planning-interval read either, the same CRUD-lite shape
+`list_cycles`/`create_cycle`/`delete_cycle`/`cycle_metrics` already has for cycles, minus a `get`).
+`mcp/README.md`'s tool table and *"why the surface is frozen"* section were updated to match.
+
+**Consequence for the freeze's own framing, restated.** Two amendments in, the pattern holds: each one
+names its own tools, measures its own delta, and updates both pins in the same PR the tools land in.
+Neither amendment argues the freeze should be abandoned — both argue a *specific*, *bounded* capability
+belongs on the surface despite it, and say why. The next tool addition still needs its own amendment
+here, not a precedent-by-example from either of these two.

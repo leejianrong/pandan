@@ -969,12 +969,19 @@ class PandanClient:
 
     # --- cycles / iterations (V33 API / KAN-297 adapter) --------------------
 
-    def list_cycles(self, board_id: int) -> dict[str, Any]:
+    def list_cycles(
+        self, board_id: int, *, planning_interval_id: int | None = None
+    ) -> dict[str, Any]:
         """List a board's cycles (id, name, starts_on, ends_on), oldest-first.
         Returns ``{"cycles": [<cycle>, ...]}``. Use a cycle's id as the ``cycle_id``
-        filter on ``list_cards`` or when assigning a card via ``update_card``."""
+        filter on ``list_cards`` or when assigning a card via ``update_card``.
+        Optional ``planning_interval_id`` narrows to the cycles belonging to one
+        planning interval (M8 V57, KAN-978)."""
+        params = _clean({"planning_interval_id": planning_interval_id})
         return {
-            "cycles": self._request("GET", f"/boards/{board_id}/cycles").json()
+            "cycles": self._request(
+                "GET", f"/boards/{board_id}/cycles", params=params
+            ).json()
         }
 
     def create_cycle(
@@ -984,11 +991,21 @@ class PandanClient:
         *,
         starts_on: str | None = None,
         ends_on: str | None = None,
+        planning_interval_id: int | None = None,
     ) -> dict[str, Any]:
-        """Create a cycle (a time-boxed iteration) on ``board_id`` — a ``name`` and
-        optional ISO-8601 ``starts_on`` / ``ends_on`` bounds. Returns the created
-        cycle; assign cards to it via ``update_card(card_id, cycle_id=...)``."""
-        payload = _clean({"name": name, "starts_on": starts_on, "ends_on": ends_on})
+        """Create a cycle (a time-boxed iteration) on ``board_id`` — a ``name``,
+        optional ISO-8601 ``starts_on`` / ``ends_on`` bounds, and an optional
+        ``planning_interval_id`` (M8 V57, KAN-978) grouping it one level up.
+        Returns the created cycle; assign cards to it via
+        ``update_card(card_id, cycle_id=...)``."""
+        payload = _clean(
+            {
+                "name": name,
+                "starts_on": starts_on,
+                "ends_on": ends_on,
+                "planning_interval_id": planning_interval_id,
+            }
+        )
         return self._request(
             "POST", f"/boards/{board_id}/cycles", json=payload
         ).json()
@@ -1008,18 +1025,28 @@ class PandanClient:
         name: str | None = None,
         starts_on: str | None = None,
         ends_on: str | None = None,
+        planning_interval_id: int | None = None,
     ) -> dict[str, Any]:
-        """Rename a cycle on ``board_id`` and/or correct its bounds (V55, KAN-976).
+        """Rename a cycle on ``board_id`` and/or correct its bounds (V55, KAN-976),
+        and/or (re)assign its planning interval (M8 V57, KAN-978).
 
         Only the arguments actually passed are sent (``_clean``), so this is a
         partial edit and the cycle keeps every card assigned to it — unlike
         ``delete_cycle``, which detaches them. 404 if the cycle isn't on that board.
 
         Like every other ``update_*`` here, ``None`` means *omit*, so the API's
-        ability to **clear** ``starts_on``/``ends_on`` with an explicit ``null`` is
-        not reachable through this method — the same limitation ``update_epic`` has
-        for ``target_date``, and deliberately not special-cased for one field."""
-        payload = _clean({"name": name, "starts_on": starts_on, "ends_on": ends_on})
+        ability to **clear** ``starts_on``/``ends_on``/``planning_interval_id``
+        with an explicit ``null`` is not reachable through this method — the same
+        limitation ``update_epic`` has for ``target_date``, and deliberately not
+        special-cased for one field."""
+        payload = _clean(
+            {
+                "name": name,
+                "starts_on": starts_on,
+                "ends_on": ends_on,
+                "planning_interval_id": planning_interval_id,
+            }
+        )
         return self._request(
             "PATCH", f"/boards/{board_id}/cycles/{cycle_id}", json=payload
         ).json()
@@ -1038,4 +1065,87 @@ class PandanClient:
         cycle doesn't exist or isn't on ``board_id``. Returns the metrics as-is."""
         return self._request(
             "GET", f"/boards/{board_id}/cycles/{cycle_id}/metrics"
+        ).json()
+
+    # --- planning intervals (M8 V57 API / KAN-978 adapter) -------------------
+    # Structurally identical to the cycle methods above, field for field.
+
+    def list_planning_intervals(self, board_id: int) -> dict[str, Any]:
+        """List a board's planning intervals (id, name, starts_on, ends_on),
+        oldest-first. Returns ``{"planning_intervals": [<pi>, ...]}``. Use a
+        planning interval's id as ``planning_interval_id`` when creating or
+        updating a cycle."""
+        return {
+            "planning_intervals": self._request(
+                "GET", f"/boards/{board_id}/planning-intervals"
+            ).json()
+        }
+
+    def create_planning_interval(
+        self,
+        board_id: int,
+        name: str,
+        *,
+        starts_on: str | None = None,
+        ends_on: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a planning interval (a grouping one level above the cycle) on
+        ``board_id`` — a ``name`` and optional ISO-8601 ``starts_on`` / ``ends_on``
+        bounds. Returns the created planning interval; assign cycles to it via
+        ``update_cycle(board_id, cycle_id, planning_interval_id=...)``."""
+        payload = _clean({"name": name, "starts_on": starts_on, "ends_on": ends_on})
+        return self._request(
+            "POST", f"/boards/{board_id}/planning-intervals", json=payload
+        ).json()
+
+    def get_planning_interval(self, board_id: int, planning_interval_id: int) -> dict[str, Any]:
+        """Fetch one planning interval on ``board_id`` by id. 404 if it doesn't
+        exist or isn't on that board."""
+        return self._request(
+            "GET", f"/boards/{board_id}/planning-intervals/{planning_interval_id}"
+        ).json()
+
+    def update_planning_interval(
+        self,
+        board_id: int,
+        planning_interval_id: int,
+        *,
+        name: str | None = None,
+        starts_on: str | None = None,
+        ends_on: str | None = None,
+    ) -> dict[str, Any]:
+        """Rename a planning interval on ``board_id`` and/or correct its bounds.
+
+        Only the arguments actually passed are sent (``_clean``), so this is a
+        partial edit and the planning interval keeps every cycle assigned to it —
+        unlike ``delete_planning_interval``, which detaches them. 404 if it isn't
+        on that board."""
+        payload = _clean({"name": name, "starts_on": starts_on, "ends_on": ends_on})
+        return self._request(
+            "PATCH",
+            f"/boards/{board_id}/planning-intervals/{planning_interval_id}",
+            json=payload,
+        ).json()
+
+    def delete_planning_interval(
+        self, board_id: int, planning_interval_id: int
+    ) -> dict[str, Any]:
+        """Delete a planning interval on ``board_id`` (its member cycles are
+        detached, not deleted). 204 No Content — no body to parse."""
+        self._request(
+            "DELETE", f"/boards/{board_id}/planning-intervals/{planning_interval_id}"
+        )
+        return {"deleted": planning_interval_id}
+
+    def planning_interval_metrics(
+        self, board_id: int, planning_interval_id: int
+    ) -> dict[str, Any]:
+        """Fetch the rolled-up committed/completed/velocity metrics across a
+        planning interval's member cycles (M8 V57, KAN-978): a **sum**, not a
+        series — no ``burndown`` field, unlike ``cycle_metrics``. 404 if the
+        planning interval doesn't exist or isn't on ``board_id``. Returns the
+        metrics as-is."""
+        return self._request(
+            "GET",
+            f"/boards/{board_id}/planning-intervals/{planning_interval_id}/metrics",
         ).json()

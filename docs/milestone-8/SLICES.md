@@ -47,7 +47,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | **V63 · Epic colour** | 🗄️ | C | KAN-984 | 2 | An epic's stories are recognisable on the board without reading them |
 | **V64 · Label emoji** | 🗄️ | C | KAN-985 | 2 | Two labels sharing a colour are still distinguishable at a glance |
 | **V56 · Backlog** ✅ | derived, groomable 🗄️ | B | KAN-977 | 3 | The backlog is a place you can open; parked ≠ never scheduled |
-| **V57 · Planning intervals** | 🗄️ | B | KAN-978 | 5 | Six cycles roll up into one PI with a single committed-vs-completed number |
+| **V57 · Planning intervals** ✅ | 🗄️ | B | KAN-978 | 5 | Six cycles roll up into one PI with a single committed-vs-completed number |
 | **V58 · Cadence** | generate N cycles | B | KAN-979 | 2 | "Two weeks per sprint, six sprints" is one command |
 | **V59 · Explicit close** | + rollover 🗄️ | B | KAN-980 | 3 | Closing is deliberate and reported; past velocity numbers stop moving |
 | **V60 · Observed throughput** | agent vs human | B | KAN-981 | 3 | `agent: 6.2 pts/day (n=143)` — a budget backed by evidence, not a multiplier |
@@ -396,7 +396,7 @@ Demo: `pandan list --backlog` shows every unscheduled card; `pandan update KAN-4
 deliberately parked without moving it into a cycle; opening the SPA's Backlog tab shows the same set,
 with parked cards visually distinct; `pandan list --backlog --parked` narrows to just the parked ones.
 
-### V57 · Planning intervals — KAN-978 🗄️
+### V57 · Planning intervals — KAN-978 ✅ 🗄️
 
 A new board-scoped `planning_interval` table plus `cycle.planning_interval_id` — structurally the
 identical move V33 made for cycles, down to the flat no-ticket_number shape and the
@@ -414,8 +414,17 @@ MCP gets exactly two new tools for this entity — `list_planning_intervals` + `
 — **not** full CRUD. Creating/renaming/deleting a PI is a human planning-setup action, the same
 disposition `update_cycle` already has (V55: shipped to API+CLI, declined on MCP); reading rolled-up
 progress is the part an agent plausibly wants. Two new tools is still a **count change against the
-frozen surface** (ADR 0019 — `mcp/tests/test_schema.py` pins 54 by name and count), so this needs the
-same kind of amendment note V69/KAN-1058 got for `team`, recorded when it ships.
+frozen surface** (ADR 0019 — `mcp/tests/test_schema.py` pinned 54 by name and count before this
+slice), so this needed the same kind of amendment note V69/KAN-1058 got for `team` — see
+[the amendment](../adr/0019-mcp-surface-right-sizing.md#amendment-the-m8-v57-planning-interval-tools-2026-09-02-kan-978),
+recorded now that it has shipped (54 → 56).
+
+**Shipped as shaped**, with one addition beyond the wiring table: `pi get`
+(`GET /boards/{id}/planning-intervals/{pi_id}`) exists on the CLI even though `cycle` has no `get`
+verb — the task that shaped this slice asked for the CLI's `pi` group to mirror `list/create/get/
+update/delete/metrics` explicitly, one verb wider than `cycle`'s own shape. It stayed CLI-only
+(`CLI_ONLY` in `pandan-cli/tests/test_parity.py`), matching the frozen MCP surface's existing
+CRUD-lite shape for cycles (no `get_cycle` either).
 
 **Wiring, end to end:**
 

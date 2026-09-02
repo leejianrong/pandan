@@ -31,11 +31,13 @@
   import type { ActivityAction } from "../api";
   import { activeBoard, boardStore } from "../board.svelte";
   import {
+    cyclesInScope,
     dashboardStore,
     inflightByAssignee,
     loadMoreDashboardActivity,
     refetchDashboard,
     setActiveCycle,
+    setActivePlanningInterval,
     setActivityFilters,
     setDashboardWindow,
     WINDOW_OPTIONS,
@@ -94,6 +96,12 @@
   const STALE_SECONDS = 2 * 24 * 3600;
 
   // --- cycle burndown / velocity (V34) ---------------------------------------
+  // The cycle picker's options, narrowed to the selected planning interval
+  // (M8 V57, KAN-978) when one is chosen — a grouping one level above the
+  // cycle, e.g. a quarter containing several sprints.
+  const visibleCycles = $derived(
+    cyclesInScope(dashboardStore.cycles, dashboardStore.activePlanningIntervalId),
+  );
   const cycleMetrics = $derived(dashboardStore.cycleMetrics);
   const cycleUnitLabel = $derived(cycleMetrics?.unit === "count" ? "cards" : "points");
   // Committed vs completed use the metric's own unit so an unestimated cycle still
@@ -459,6 +467,25 @@
     <header class="panel-head">
       <TrendingUp size={15} aria-hidden="true" />
       <h3 id="dash-cycle">Cycle burndown</h3>
+      {#if dashboardStore.planningIntervals.length > 0}
+        <label class="cycle-select">
+          <span class="sr-only">Planning interval</span>
+          <select
+            class="rail-select"
+            aria-label="Planning interval"
+            value={dashboardStore.activePlanningIntervalId ?? ""}
+            onchange={(e) => {
+              const raw = (e.currentTarget as HTMLSelectElement).value;
+              setActivePlanningInterval(raw === "" ? null : Number(raw));
+            }}
+          >
+            <option value="">All planning intervals</option>
+            {#each dashboardStore.planningIntervals as pi (pi.id)}
+              <option value={pi.id}>{pi.name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       {#if dashboardStore.cycles.length > 0}
         <label class="cycle-select">
           <span class="sr-only">Active cycle</span>
@@ -469,7 +496,7 @@
             onchange={(e) =>
               setActiveCycle(Number((e.currentTarget as HTMLSelectElement).value))}
           >
-            {#each dashboardStore.cycles as c (c.id)}
+            {#each visibleCycles as c (c.id)}
               <option value={c.id}>{c.name}</option>
             {/each}
           </select>
@@ -479,6 +506,8 @@
 
     {#if dashboardStore.cycles.length === 0}
       <p class="empty">No cycles on this board yet — create one to track a burndown.</p>
+    {:else if visibleCycles.length === 0}
+      <p class="empty">No cycles in this planning interval.</p>
     {:else if !cycleMetrics}
       <p class="empty">Select a cycle to see its burndown.</p>
     {:else}

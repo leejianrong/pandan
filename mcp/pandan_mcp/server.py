@@ -16,7 +16,7 @@ boards, create = your earliest board). Card-id-addressed tools
 (``get_card``/``update_card``/``move_card``/``delete_card``) need no ``board_id``:
 the server authorizes via the card's own board.
 
-**The surface is frozen (V49, ADR 0019) — currently at 54 tools.** It was measured
+**The surface is frozen (V49, ADR 0019) — currently at 56 tools.** It was measured
 against a consolidated verb set and a single exec-``pandan`` tool and deliberately
 kept, as the documented fallback for a consumer that cannot run the CLI — but it
 does not grow silently. New board capability lands in the **CLI** first; adding a
@@ -978,6 +978,52 @@ def cycle_metrics(
     """
     return shape(
         _client_instance().cycle_metrics(_require_board(board_id), cycle_id),
+        fields=fields,
+    )
+
+
+# --- planning intervals (M8 V57, KAN-978) -----------------------------------
+# Exactly two tools: reading is what an agent plausibly wants. Creating/renaming/
+# deleting a planning interval is a human planning-setup action (the same
+# disposition `update_cycle` already has — see the `("cycle", "update")` entry in
+# `pandan-cli/tests/test_parity.py`'s CLI_ONLY dict), so it stays CLI-only
+# (`pandan pi create/update/delete`). This is a tool-COUNT addition against the
+# ADR 0019 freeze (54 → 56) — see the amendment note in
+# docs/adr/0019-mcp-surface-right-sizing.md.
+
+
+@mcp.tool()
+def list_planning_intervals(board_id: int | None = None) -> dict[str, Any]:
+    """List a board's planning intervals — a grouping one level above the cycle,
+    e.g. a quarter containing several sprints (id, name, starts_on, ends_on).
+    ``board_id`` targets one board (defaults to PANDAN_BOARD_ID). Use a planning
+    interval's id as the ``planning_interval_id`` filter on ``list_cycles``, or
+    to (re)assign a cycle via the CLI's ``cycle update --pi``. Returns
+    ``{"planning_intervals": [...]}``, matching ``list_cycles``'s own shape (no
+    ``fields`` narrowing — this list is small and unshaped like that one)."""
+    return _client_instance().list_planning_intervals(_require_board(board_id))
+
+
+@mcp.tool()
+def planning_interval_metrics(
+    planning_interval_id: int,
+    board_id: int | None = None,
+    fields: list[str] | None = None,
+) -> dict[str, Any]:
+    """Report the rolled-up committed/completed/velocity metrics across a
+    planning interval's member cycles (M8 V57, KAN-978) — a **sum**, not a
+    series: unlike ``cycle_metrics`` there is no ``burndown`` field, because a
+    per-cycle day-by-day series doesn't compose across member cycles into
+    anything meaningful. All computed from each member cycle's own metrics;
+    nothing is written. ``board_id`` targets one board (defaults to
+    PANDAN_BOARD_ID). 404 if no such planning interval is on that board;
+    authorized via the board (you must be able to read it). A planning interval
+    with no member cycles reports all zeros.
+    """
+    return shape(
+        _client_instance().planning_interval_metrics(
+            _require_board(board_id), planning_interval_id
+        ),
         fields=fields,
     )
 
