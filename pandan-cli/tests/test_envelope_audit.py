@@ -219,6 +219,12 @@ NON_ENVELOPE_KEYS = {
         "beside `cards`; rendered by `_humanize`'s `_CARD_ENVELOPES` branch as an "
         "`(unresolved: …)` line, never rows itself"
     ),
+    "cycle_id": (
+        "close_cycle's receipt (M8 V59, KAN-980) — the adapter's own id merged "
+        "beside the API's `closed_at`/`rolled_over_count`/`rollover_to` (those "
+        "three arrive via `**body`, so the static scan can't see them); rendered "
+        "by `_humanize`'s `rolled_over_count` branch as `_cycle_close_line`"
+    ),
 }
 
 

@@ -12,6 +12,7 @@ mirroring the flat structure of the saved-views / card-templates routers
 - GET    /boards/{board_id}/cycles/{cycle_id}/metrics — burndown/velocity (viewer+, V34)
 - PATCH  /boards/{board_id}/cycles/{cycle_id}         — edit a cycle (editor+, V55)
 - DELETE /boards/{board_id}/cycles/{cycle_id}         — delete a cycle (editor+)
+- POST   /boards/{board_id}/cycles/{cycle_id}/close   — close + rollover (editor+, M8 V59)
 
 Every cycle is addressed under its board (``/boards/{id}/cycles``); the board
 gates access via ``authorize_board`` (READ to list/get, WRITE to create/delete). A
@@ -45,6 +46,25 @@ semantics) — any generated window overlapping an existing dated cycle on the
 board rejects the whole batch with a ``422`` naming the collision. **CLI-only,
 declined for MCP**: an agent that wants N cycles can already call ``create_cycle``
 N times, so this doesn't spend against the frozen ADR 0019 surface.
+
+**``close_cycle`` (M8 V59, KAN-980, SHAPING D9)** is the opposite of V58's
+convenience-and-cheap: rollover is a deliberate verb, never something that fires
+on the cycle's own ``ends_on`` date, because auto-rollover would silently rewrite
+history ``cycle_metrics`` has already reported. Closing stamps ``closed_at`` and
+**freezes** the committed/completed snapshot into ``frozen_committed`` /
+``frozen_completed`` — captured from exactly the live query
+``cycle_metrics_dict`` runs for an open cycle — so a card leaving the cycle on
+rollover afterward cannot change numbers already reported (``cycle_metrics_dict``
+branches on ``closed_at`` to serve them back with an empty ``burndown``, see
+below). Every card still in the cycle and not ``done`` then moves to
+``payload.rollover_to`` (another open cycle on the same board) or the backlog
+(``null``) via the same ``_apply_card_update`` a `PATCH /cards/{id}` uses, so each
+move is recorded as an ordinary ``updated`` activity row. Closing an
+already-closed cycle is ``409``, not a silent no-op. **This is the one write op
+added to the frozen MCP surface in this batch** (an ADR 0019 amendment,
+56 → 57) — unlike ``update_cycle`` or planning-interval setup, ending a cycle and
+rolling over unfinished work is exactly the loop a short, agent-paced cycle needs
+to run on its own.
 """
 from __future__ import annotations
 
@@ -61,12 +81,15 @@ from ..db import get_db
 from ..metrics import compute_cycle_metrics, move_target
 from ..models import Activity, Card, Cycle, PlanningInterval
 from ..schemas import (
+    CycleClose,
+    CycleCloseRead,
     CycleCreate,
     CycleGenerate,
     CycleMetricsRead,
     CycleRead,
     CycleUpdate,
 )
+from .cards import _apply_card_update
 
 router = APIRouter(tags=["cycles"])
 
@@ -257,7 +280,28 @@ def cycle_metrics_dict(
     the fly from the cycle's current card state (story points + column) plus the
     ``done`` transition times in the activity feed — no stored metric, no
     migration. Callers are responsible for authz + loading ``cycle``.
+
+    **Closed cycles are the one exception (M8 V59, KAN-980)**: once
+    ``cycle.closed_at`` is set, ``committed``/``completed``/``velocity`` come
+    straight from the ``frozen_committed``/``frozen_completed`` snapshot captured
+    at close time — no query — so a card rolling out of the cycle afterward can't
+    change the numbers already reported. ``burndown`` is empty for a closed cycle:
+    the day-by-day series is derived from the committed roster's done-times, and
+    that roster no longer matches reality once rollover moves cards out; freezing
+    an accurate historical burndown too is real scope (a full timeseries snapshot,
+    not two numbers) and isn't asked for here, so it's declined rather than
+    silently attempted (SLICES.md's V59 entry).
     """
+    if cycle.closed_at is not None:
+        committed = cycle.frozen_committed or {"count": 0, "points": 0}
+        completed = cycle.frozen_completed or {"count": 0, "points": 0}
+        return {
+            "committed": committed,
+            "completed": completed,
+            "velocity": completed.get("points", 0),
+            "unit": "points" if committed.get("points", 0) > 0 else "count",
+            "burndown": [],
+        }
     # The cycle's live stories (exclude soft-deleted — they're not committed work).
     card_rows = db.execute(
         select(Card.id, Card.story_points, Card.column).where(
@@ -392,3 +436,79 @@ def delete_cycle(
     db.delete(cycle)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/boards/{board_id}/cycles/{cycle_id}/close", response_model=CycleCloseRead
+)
+def close_cycle(
+    board_id: int,
+    cycle_id: int,
+    payload: CycleClose,
+    db: Session = Depends(get_db),
+    principal: User = Depends(get_principal),
+) -> CycleCloseRead:
+    """Close a cycle explicitly (editor or above, M8 V59, KAN-980, SHAPING D9) —
+    rollover is a verb, never a date; nothing moves on the cycle's own ``ends_on``.
+
+    Freezes the committed/completed snapshot ``cycle_metrics`` reports from now on
+    (so a card leaving on rollover can't change numbers already reported), then
+    moves every card still assigned to this cycle and **not** ``done`` to
+    ``payload.rollover_to`` — another **open** cycle on the same board (``422`` if
+    it's closed, cross-board, or doesn't exist; ``422`` if it names this same
+    cycle) — or the backlog when ``rollover_to`` is ``null`` (``card.cycle_id =
+    NULL``, M8 V56).
+
+    **404** if the cycle doesn't exist or isn't on this board; **403** if the
+    board isn't yours; **409** if the cycle is already closed (a second close with
+    a different rollover target would otherwise be a silent-looking footgun, so
+    it's a conflict rather than a no-op).
+    """
+    authorize_board(db, principal, board_id, Access.WRITE)
+    cycle = _get_cycle_or_404(db, board_id, cycle_id)
+    if cycle.closed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="cycle is already closed"
+        )
+
+    rollover_to = payload.rollover_to
+    if rollover_to is not None:
+        if rollover_to == cycle_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="rollover_to must be a different cycle",
+            )
+        target = db.get(Cycle, rollover_to)
+        if target is None or target.board_id != board_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="rollover_to must reference another open cycle on the same board",
+            )
+        if target.closed_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"rollover_to cycle {target.id} {target.name!r} is already closed",
+            )
+
+    now = datetime.now(timezone.utc)
+    metrics = cycle_metrics_dict(db, board_id, cycle, now=now)
+    cycle.frozen_committed = metrics["committed"]
+    cycle.frozen_completed = metrics["completed"]
+    cycle.closed_at = now
+
+    unfinished = list(
+        db.scalars(
+            select(Card).where(
+                Card.cycle_id == cycle_id,
+                Card.deleted_at.is_(None),
+                Card.column != "done",
+            )
+        ).all()
+    )
+    for card in unfinished:
+        _apply_card_update(db, principal, card, {"cycle_id": rollover_to})
+
+    db.commit()
+    return CycleCloseRead(
+        closed_at=now, rolled_over_count=len(unfinished), rollover_to=rollover_to
+    )

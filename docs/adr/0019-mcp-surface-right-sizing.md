@@ -11,7 +11,11 @@
   the measured delta and why team *membership* management stayed CLI-only. · **amended 2026-09-02
   (M8 V57, KAN-978)** — **+2 tools** (54 → 56), the planning-interval read pair. See
   [*Amendment: the M8 V57 planning-interval tools*](#amendment-the-m8-v57-planning-interval-tools-2026-09-02-kan-978)
-  for the measured delta and why create/update/delete stayed CLI-only.
+  for the measured delta and why create/update/delete stayed CLI-only. · **amended 2026-09-02 (M8 V59,
+  KAN-980)** — **+1 tool** (56 → 57), `close_cycle`: the one **write** op in this batch, unlike the two
+  preceding amendments' reads. See
+  [*Amendment: the M8 V59 close_cycle tool*](#amendment-the-m8-v59-close_cycle-tool-2026-09-02-kan-980)
+  for the measured delta and why it crosses the read/write line the M8 V57 amendment drew.
 - **Context source:** Milestone 7 ("Name & Sharpen the Tools"), slice **V49** / **KAN-432**, shaped
   requirement **R3.1** (measure the schema token cost of the tool surface and of each alternative) and
   Shape A part **A8**. Builds on ADR 0005 (API-first — the CLI and MCP server are both thin adapters,
@@ -624,3 +628,69 @@ names its own tools, measures its own delta, and updates both pins in the same P
 Neither amendment argues the freeze should be abandoned — both argue a *specific*, *bounded* capability
 belongs on the surface despite it, and say why. The next tool addition still needs its own amendment
 here, not a precedent-by-example from either of these two.
+
+## Amendment: the M8 V59 close_cycle tool (2026-09-02, KAN-980)
+
+**The freeze's third growth, and the first that is a write, not a read.** M8 V59 ("Explicit close")
+adds `POST /boards/{id}/cycles/{cycle_id}/close` — the deliberate rollover verb SHAPING D9 asked for:
+auto-rollover on a cycle's `ends_on` date is rejected because it would silently rewrite history
+`cycle_metrics` has already reported, so closing has to be a call an agent (or a human) makes on
+purpose. See [docs/milestone-8/SLICES.md](../milestone-8/SLICES.md)'s V59 entry for the full shape
+(the `closed_at`/`frozen_committed`/`frozen_completed` columns, the `cycle_metrics_dict` branch, the
+409-on-double-close).
+
+**Decision: add exactly 1 tool — `close_cycle` — a write, unlike every tool the two prior amendments
+added.**
+
+- **Why this one crosses the line the M8 V57 amendment drew.** That amendment's whole argument for
+  declining `create`/`update`/`delete` on planning intervals was that *defining planning structure is a
+  human setup action*, mirroring `("cycle", "update")`'s own disposition — a bug fix or a name/date
+  correction is not a loop an agent runs on its own, so it stays CLI-only by this ADR's default. Closing
+  a cycle is a different shape of action: it is the terminal step of the same iteration loop `create_cycle`
+  already starts, and an agent pacing its own work in short, self-managed cycles (SHAPING D10's whole
+  premise — agent time is *measured*, not declared, which only means something if cycles actually close
+  on a cadence) needs to end one and roll unfinished work forward **without shelling out to a CLI
+  subprocess** for the one step that isn't already covered. `create_cycle` is already on the frozen
+  surface for exactly this reason; leaving `close_cycle` off it would make the loop half-supported.
+- **Why not `update_cycle` too, by the same logic.** The agent workflow this argument is built on is
+  "start a cycle, work it, end it" — `create_cycle` → (cards move via `update_card(cycle_id=...)`, also
+  already on the surface) → `close_cycle`. Renaming a cycle or correcting a mistyped date is not a step
+  in that loop; it is the same human-typo-fixing shape V55 built `update_cycle` for in the first place,
+  and the `("cycle", "update")` CLI_ONLY entry's reasoning is untouched by this amendment.
+- **The output is a receipt, not the cycle.** `close_cycle` returns
+  `{cycle_id, closed_at, rolled_over_count, rollover_to}` — what moved — rather than a full `CycleRead`,
+  matching the API's own `CycleCloseRead` (SLICES.md: "Response reports what moved... which is what the
+  CLI's one-line summary reads from"). An agent that wants the frozen numbers afterward calls
+  `cycle_metrics`, already on the surface and now serving them from the frozen snapshot instead of a
+  live query.
+
+**Measurement**, via the same harness (`mcp/scripts/measure_tool_schema_tokens.py`), comparing
+immediately before and after this change on the same commit/interpreter (the same tight methodology the
+two prior amendments used):
+
+| surface | tools | compact | `indent=2` | `outputSchema` alone (compact) |
+|---|---:|---:|---:|---:|
+| before (main, pre-V59) | 56 | 9,832 | 13,472 | 960 |
+| **after (+1 `close_cycle` tool)** | **57** | **10,417** | **14,119** | **977** |
+| **delta** | **+1** | **+585 (+5.9%)** | **+647** | **+17** |
+
++585 compact tokens for one tool is the priciest single addition of the three amendments (the M9 team
+tools averaged ~111/tool, the M8 V57 planning-interval pair ~210/tool) — `close_cycle`'s docstring
+carries the same amount of "why" the API route and this ADR both carry (rollover is deliberate, closing
+freezes the snapshot, `409` on double-close, the 422 cases for a bad `rollover_to`), because an agent
+calling this tool cold needs to know what it is about to commit to without cross-referencing SLICES.md.
+The resident figure most recently recorded in `CLAUDE.md` (10,085, itself already flagged as drifted
+after the M8 V57 amendment) is now **10,417** — re-run the script rather than quoting either number
+forward, per that file's own standing advice.
+
+**Both freeze pins were updated in the same PR, per this ADR's own requirement**: `FROZEN_TOOLS` (+1
+name) and `FROZEN_TOOL_COUNT` (56 → 57) in [`mcp/tests/test_schema.py`](../../mcp/tests/test_schema.py),
+and `pandan-cli/tests/test_parity.py`'s `MCP_TO_CLI` (+1 mapping, `close_cycle` → `cycle close`) and its
+own restated frozen count. `mcp/README.md`'s tool table and *"why the surface is frozen"* section were
+updated to match.
+
+**Consequence for the freeze's own framing, restated again.** Three amendments in, and this is the first
+one that isn't a read — which is exactly the case the freeze's own default (new capability lands in the
+CLI unless there is a specific agent workflow that needs it on MCP) exists to let through when the
+argument is actually made, rather than assumed. The bar stays the same: name the tool, measure the
+delta, say why the CLI alone doesn't serve the specific workflow. It did here.

@@ -49,7 +49,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | **V56 · Backlog** ✅ | derived, groomable 🗄️ | B | KAN-977 | 3 | The backlog is a place you can open; parked ≠ never scheduled |
 | **V57 · Planning intervals** ✅ | 🗄️ | B | KAN-978 | 5 | Six cycles roll up into one PI with a single committed-vs-completed number |
 | **V58 · Cadence** ✅ | generate N cycles | B | KAN-979 | 2 | "Two weeks per sprint, six sprints" is one command |
-| **V59 · Explicit close** | + rollover 🗄️ | B | KAN-980 | 3 | Closing is deliberate and reported; past velocity numbers stop moving |
+| **V59 · Explicit close** ✅ | + rollover 🗄️ | B | KAN-980 | 3 | Closing is deliberate and reported; past velocity numbers stop moving |
 | **V60 · Observed throughput** | agent vs human | B | KAN-981 | 3 | `agent: 6.2 pts/day (n=143)` — a budget backed by evidence, not a multiplier |
 
 🗄️ = carries a migration, lands alone. ✅ = shipped.
@@ -464,7 +464,7 @@ Demo: `pandan cycle generate --start 2026-09-07 --length-days 14 --count 6 --nam
 creates six fortnightly sprints in one call; running it again with an overlapping start is a clean
 `422` naming which existing cycle collides.
 
-### V59 · Explicit close — KAN-980 🗄️
+### V59 · Explicit close — KAN-980 ✅ 🗄️
 
 `POST /cycles/{id}/close {rollover_to}` moves unfinished cards, stamps the cycle closed, and **freezes
 its committed set** so velocity stops being recomputed from live membership.

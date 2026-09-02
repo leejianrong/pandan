@@ -427,6 +427,21 @@ class Cycle(Base):
         nullable=True,
         index=True,
     )
+    # Explicit close (M8 V59, KAN-980, SHAPING D9): NULL = open (the existing
+    # behaviour, untouched); non-NULL = closed. Closing is a deliberate verb
+    # (``POST .../cycles/{id}/close``) — nothing rewrites this on ``ends_on``.
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # The committed/completed snapshot captured AT close time, from exactly the
+    # live query ``cycle_metrics`` runs today (``{"count": int, "points": int}``,
+    # the same shape as the metrics engine's ``WorkTotals``). Portable ``JSON``
+    # type, mirroring ``SavedView.query`` / ``CardTemplate.cards`` — a small
+    # structured payload doesn't need a spray of int columns. Once frozen, cards
+    # can leave the cycle on rollover without ``cycle_metrics`` recomputing a
+    # different answer for the same closed cycle.
+    frozen_committed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    frozen_completed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class PlanningInterval(Base):

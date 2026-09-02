@@ -1100,6 +1100,32 @@ class PandanClient:
         ).json()
         return {"cycles": created}
 
+    def close_cycle(
+        self, board_id: int, cycle_id: int, *, rollover_to: int | None
+    ) -> dict[str, Any]:
+        """Close a cycle explicitly on ``board_id`` (M8 V59, KAN-980): stamps
+        ``closed_at`` and freezes the committed/completed snapshot ``cycle_metrics``
+        reports afterward, then moves every card still in the cycle and not
+        ``done`` to ``rollover_to`` — another **open** cycle on the same board — or
+        the backlog when ``rollover_to`` is ``None`` (``422`` if the target is
+        closed, cross-board, itself, or doesn't exist).
+
+        Unlike every other ``update_*``/create method here, ``rollover_to`` is
+        **required, not optional** — the API distinguishes "moved to the backlog"
+        (``null``) from "omitted", so this method sends it unconditionally rather
+        than filtering it through ``_clean`` the way an optional field would be.
+
+        ``409`` if the cycle is already closed. Returns
+        ``{"cycle_id": <id>, "closed_at": ..., "rolled_over_count": ..., "rollover_to": ...}``
+        — ``cycle_id`` is added by this adapter (the API response only reports what
+        moved) so a caller/renderer doesn't have to thread the id through separately."""
+        body = self._request(
+            "POST",
+            f"/boards/{board_id}/cycles/{cycle_id}/close",
+            json={"rollover_to": rollover_to},
+        ).json()
+        return {"cycle_id": cycle_id, **body}
+
     # --- planning intervals (M8 V57 API / KAN-978 adapter) -------------------
     # Structurally identical to the cycle methods above, field for field.
 

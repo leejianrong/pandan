@@ -187,6 +187,8 @@ MCP_TO_CLI: dict[str, tuple[str, ...]] = {
     "list_cycles": ("cycle", "list"),
     "create_cycle": ("cycle", "create"),
     "delete_cycle": ("cycle", "delete"),
+    # M8 V59, KAN-980 — the one write op added to the frozen surface in that batch
+    "close_cycle": ("cycle", "close"),
     # planning intervals (M8 V57, KAN-978 — the 2-tool read pair ADR 0019 was
     # amended to admit)
     "list_planning_intervals": ("pi", "list"),
@@ -553,10 +555,10 @@ def test_the_four_gaps_kan_502_closed_are_reachable():
 
 
 def test_the_mcp_surface_is_still_the_frozen_count():
-    """ADR 0019 froze the surface (56 tools as of M8 V57, KAN-978 — up from 54 at
-    M9 V69, up from the original 49); ``mcp/tests/test_schema.py`` is the
-    authoritative pin. Restating the count here is what makes the ``cli`` job
-    notice a *removal* on the MCP side, which is the direction that would break
-    parity from the other end — and it keeps this file's own mapping honest
+    """ADR 0019 froze the surface (57 tools as of M8 V59, KAN-980 — up from 56 at
+    M8 V57, up from 54 at M9 V69, up from the original 49); ``mcp/tests/test_schema.py``
+    is the authoritative pin. Restating the count here is what makes the ``cli``
+    job notice a *removal* on the MCP side, which is the direction that would
+    break parity from the other end — and it keeps this file's own mapping honest
     about its scope."""
-    assert len(mcp_tool_names()) == 56
+    assert len(mcp_tool_names()) == 57

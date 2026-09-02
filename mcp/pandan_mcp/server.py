@@ -982,6 +982,29 @@ def cycle_metrics(
     )
 
 
+@mcp.tool()
+def close_cycle(
+    cycle_id: int, rollover_to: int | None = None, board_id: int | None = None
+) -> dict[str, Any]:
+    """Close a cycle/iteration explicitly (M8 V59, KAN-980) — rollover is a verb,
+    never something that happens on its own on the cycle's ``ends_on`` date.
+    Freezes the committed/completed snapshot ``cycle_metrics`` reports from now on
+    (a later ``cycle_metrics`` call for this cycle stops recomputing from live
+    membership, and its ``burndown`` goes empty), then moves every card still in
+    the cycle and not ``done`` to ``rollover_to`` — another **open** cycle on the
+    same board — or the backlog when ``rollover_to`` is omitted/``None`` (422 if
+    the target is closed, cross-board, this same cycle, or doesn't exist).
+    ``board_id`` targets one board (defaults to PANDAN_BOARD_ID). 404 if no such
+    cycle is on that board; 409 if it's already closed. Returns
+    ``{cycle_id, closed_at, rolled_over_count, rollover_to}`` — what moved, not
+    the cycle itself; call ``get`` on any of its cards or ``cycle_metrics`` for
+    the details.
+    """
+    return _client_instance().close_cycle(
+        _require_board(board_id), cycle_id, rollover_to=rollover_to
+    )
+
+
 # --- planning intervals (M8 V57, KAN-978) -----------------------------------
 # Exactly two tools: reading is what an agent plausibly wants. Creating/renaming/
 # deleting a planning interval is a human planning-setup action (the same
