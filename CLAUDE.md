@@ -33,7 +33,7 @@ the board assumed one user with one board, and all three problems are that assum
 **M8 is the first milestone since M6 to change the schema** — M7's no-API/no-schema/no-migration
 constraint expired with it — so seven slices carry an additive migration and each lands alone (two of
 the seven, V56 and V59, were missing their marker in `docs/milestone-8/SLICES.md` until V56's own
-shaping pass caught it — V59's is still open). **Nine slices have shipped**: V61 and V62 (label
+shaping pass caught it — V59's is still open). **Ten slices have shipped**: V61 and V62 (label
 management UI + the measured seven-token palette), V55
 (`PATCH /cycles/{id}`, the edit a sprint never had), **V56 — Backlog** (`card.parked` 🗄️, a dedicated
 Backlog view, and the `backlog`/`parked` filters across API/CLI/MCP), **V57 — Planning intervals**
@@ -43,7 +43,12 @@ Backlog view, and the `backlog`/`parked` filters across API/CLI/MCP), **V57 — 
 than filtering `cycle_metrics`, because a per-cycle burndown series doesn't compose across a PI
 (SHAPING Q4); MCP gets exactly the 2 reads, `list_planning_intervals`/`planning_interval_metrics`,
 another ADR 0019 amendment, 54 → 56 — create/update/delete stayed CLI-only as `pandan pi
-create/update/delete`, the same disposition `update_cycle` already has), **V51 — `board.key`, the head of the four-slice
+create/update/delete`, the same disposition `update_cycle` already has), **V58 — Cadence**
+(`POST /boards/{id}/cycles/generate`, pure convenience over `create_cycle` — no new state, no
+migration; `count` back-to-back `[starts_on, ends_on)` windows from `start` + `length_days`,
+`name_template` interpolating 1-indexed `{n}`, inserted all-or-nothing with a `422` naming the first
+existing cycle any generated window overlaps; **CLI-only**, declined for MCP since an agent can
+already call `create_cycle` N times — no ADR 0019 amendment), **V51 — `board.key`, the head of the four-slice
 identity chain** ([ADR 0020](docs/adr/0020-board-keys.md)), **V52 — `card.board_seq` /
 `epic.board_seq`, so every card and epic carries a gapless board-local `ref` in its payload**,
 **V53 — every resolver now accepts both forms** (the batch read, autosync's branch-name scan, and the
@@ -56,8 +61,8 @@ form), put the canonical ticket on every rendered ref's `title` attribute so it 
 copyable, moved sorting onto the *displayed* form, and made the CLI fall back to the canonical ticket
 when one key names two boards in a single result set. **Part A (identity) is
 now fully shipped** — the four-slice chain V51–V54 is complete, so a user never sees a reference
-something in the system can't parse. Remaining: Part B (V58–V60, cadence/explicit-close/observed-
-throughput — V56 and V57 have shipped) and V63–V64 (Part C's epic/label colour).
+something in the system can't parse. Remaining: Part B (V59–V60, explicit-close/observed-throughput —
+V56, V57 and V58 have shipped) and V63–V64 (Part C's epic/label colour).
 Two decisions are settled and load-bearing before anyone starts: **`card.ticket_number` is never
 touched** (the board-local `ENG-14` is added *beside* it, and the canonical `KAN-955` becomes the
 cross-board addressing mode), and **board keys are unique per owner**, which is exactly why a

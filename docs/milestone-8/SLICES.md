@@ -48,7 +48,7 @@ that some part of the system cannot parse. The dependency chain is recorded on t
 | **V64 · Label emoji** | 🗄️ | C | KAN-985 | 2 | Two labels sharing a colour are still distinguishable at a glance |
 | **V56 · Backlog** ✅ | derived, groomable 🗄️ | B | KAN-977 | 3 | The backlog is a place you can open; parked ≠ never scheduled |
 | **V57 · Planning intervals** ✅ | 🗄️ | B | KAN-978 | 5 | Six cycles roll up into one PI with a single committed-vs-completed number |
-| **V58 · Cadence** | generate N cycles | B | KAN-979 | 2 | "Two weeks per sprint, six sprints" is one command |
+| **V58 · Cadence** ✅ | generate N cycles | B | KAN-979 | 2 | "Two weeks per sprint, six sprints" is one command |
 | **V59 · Explicit close** | + rollover 🗄️ | B | KAN-980 | 3 | Closing is deliberate and reported; past velocity numbers stop moving |
 | **V60 · Observed throughput** | agent vs human | B | KAN-981 | 3 | `agent: 6.2 pts/day (n=143)` — a budget backed by evidence, not a multiplier |
 
@@ -441,7 +441,7 @@ CRUD-lite shape for cycles (no `get_cycle` either).
 Demo: `pandan pi create "Q4 Planning" && pandan cycle update 12 --pi 3 && pandan cycle update 13 --pi 3`
 then `pandan pi metrics 3` reports one committed-vs-completed number summed across cycles 12 and 13.
 
-### V58 · Cadence — KAN-979
+### V58 · Cadence — KAN-979 ✅
 
 `POST /boards/{id}/cycles/generate`. Pure convenience over existing create, no new state, which is why
 it is cheap and late. Guards against generating cycles that overlap existing ones.

@@ -1067,6 +1067,39 @@ class PandanClient:
             "GET", f"/boards/{board_id}/cycles/{cycle_id}/metrics"
         ).json()
 
+    def generate_cycles(
+        self,
+        board_id: int,
+        *,
+        start: str,
+        length_days: int,
+        count: int,
+        name_template: str,
+        planning_interval_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Generate ``count`` back-to-back cycles on ``board_id`` in one call
+        (M8 V58, KAN-979) — pure convenience over ``create_cycle``. ``start`` is an
+        ISO-8601 date; ``name_template`` interpolates 1-indexed ``{n}``
+        (``"Sprint {n}"`` → ``Sprint 1``, ``Sprint 2``, ...). All-or-nothing: a
+        generated window overlapping an existing dated cycle on the board is a
+        ``422`` naming the collision, and none are created. Returns
+        ``{"cycles": [<cycle>, ...]}`` in generation order — the same envelope key
+        ``list_cycles`` uses, since these ARE cycles (not the ``"created"`` card
+        envelope ``apply_template``/``create_cards`` use)."""
+        payload = _clean(
+            {
+                "start": start,
+                "length_days": length_days,
+                "count": count,
+                "name_template": name_template,
+                "planning_interval_id": planning_interval_id,
+            }
+        )
+        created = self._request(
+            "POST", f"/boards/{board_id}/cycles/generate", json=payload
+        ).json()
+        return {"cycles": created}
+
     # --- planning intervals (M8 V57 API / KAN-978 adapter) -------------------
     # Structurally identical to the cycle methods above, field for field.
 
