@@ -259,6 +259,8 @@ def list_cards(
     due_before: str | None = None,
     overdue: bool | None = None,
     needs_human: bool | None = None,
+    backlog: bool | None = None,
+    parked: bool | None = None,
     assignee: str | None = None,
     q: str | None = None,
     sort: str | None = None,
@@ -274,7 +276,9 @@ def list_cards(
     at/after it), priority, label (a label id), due_before (an ISO-8601 timestamp —
     stories due strictly before it), overdue (true → past-due and not done),
     needs_human (true → cards flagged for a human via needs_human; false → the rest),
-    and assignee (exact match). ``q`` is a free-text full-text search over
+    backlog (true → no cycle assigned — the backlog is derived, not stored; false →
+    assigned to a cycle), parked (true/false — the stored "deliberately parked" flag,
+    independent of backlog), and assignee (exact match). ``q`` is a free-text full-text search over
     title+description (websearch grammar: bare terms AND-ed, "quoted" = phrase,
     ``-term`` = exclude); with no explicit ``sort`` it ranks by relevance (best
     first, a title hit above a description-only hit). ``sort`` re-orders the result —
@@ -316,6 +320,8 @@ def list_cards(
         due_before=due_before,
         overdue=overdue,
         needs_human=needs_human,
+        backlog=backlog,
+        parked=parked,
         assignee=assignee,
         q=q,
         sort=sort,
@@ -376,6 +382,7 @@ def create_card(
     priority: Priority | None = None,
     due_date: str | None = None,
     label_ids: list[int] | None = None,
+    parked: bool | None = None,
 ) -> dict[str, Any]:
     """Create a story. Only ``title`` is required; it lands at the end of its
     column (default ``todo``). ``board_id`` targets one board (defaults to
@@ -384,7 +391,8 @@ def create_card(
     board; ``cycle_id`` assigns it to a cycle/iteration on the same board.
     ``priority`` is one of none/low/medium/high/urgent (default none);
     ``due_date`` is an ISO-8601 timestamp; ``label_ids`` attaches board labels
-    (each must belong to the card's board — see create_label/list_labels).
+    (each must belong to the card's board — see create_label/list_labels);
+    ``parked`` creates it already marked deliberately parked (default false).
     """
     return _client_instance().create_card(
         title,
@@ -398,6 +406,7 @@ def create_card(
         priority=priority,
         due_date=due_date,
         label_ids=label_ids,
+        parked=parked,
     )
 
 
@@ -457,6 +466,7 @@ def update_card(
     priority: Priority | None = None,
     due_date: str | None = None,
     label_ids: list[int] | None = None,
+    parked: bool | None = None,
 ) -> dict[str, Any]:
     """Edit a story's fields (only the arguments you pass are changed). Use
     move_card to change column/position, not this. ``priority`` re-ranks;
@@ -464,7 +474,9 @@ def update_card(
     ``cycle_id`` (re)assigns the cycle/iteration (both on the card's board; pass
     them to move the card, or clear with a separate call); ``label_ids``
     **replaces** the card's label set (``[]`` clears it — each id must belong to the
-    card's board). Authorized via the card's own board — no ``board_id`` needed.
+    card's board); ``parked`` marks/unmarks it deliberately parked (distinct from
+    the backlog itself, which is derived from having no cycle). Authorized via the
+    card's own board — no ``board_id`` needed.
     """
     return _client_instance().update_card(
         card_id,
@@ -477,6 +489,7 @@ def update_card(
         priority=priority,
         due_date=due_date,
         label_ids=label_ids,
+        parked=parked,
     )
 
 

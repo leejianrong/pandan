@@ -41,6 +41,9 @@ export interface Card {
   // flagged the card for a human; `attention_note` is the optional ask it left.
   needs_human: boolean;
   attention_note: string | null;
+  // Deliberately-parked flag (M8 V56, KAN-977) — distinct from the backlog itself,
+  // which is derived (no cycle assigned) rather than stored.
+  parked: boolean;
   // Card-to-card dependencies (KAN-28/KAN-30): ids of cards that block this one
   // (blocked_by) and ids of cards this one blocks (blocks). `blocked` is the
   // derived signal — true when >=1 blocker is not yet done (KAN-29).
@@ -144,6 +147,8 @@ export interface CardCreate {
   priority?: Priority;
   due_date?: string | null;
   label_ids?: number[];
+  // Deliberately-parked flag (M8 V56, KAN-977); defaults false server-side.
+  parked?: boolean;
 }
 
 // Field edits only — no column (moving is done via /move, not PATCH).
@@ -158,6 +163,8 @@ export interface CardUpdate {
   priority?: Priority;
   due_date?: string | null;
   label_ids?: number[];
+  // No "clear to null" meaning for a NOT NULL boolean — omit to leave unchanged.
+  parked?: boolean;
 }
 
 // Derived per-epic health signal (V32, KAN-296) — computed server-side from the
@@ -279,6 +286,10 @@ export interface CardQuery {
   due_before?: string;
   overdue?: boolean;
   needs_human?: boolean;
+  // The backlog (M8 V56, KAN-977) is derived (backlog=true → no cycle assigned);
+  // parked is the independent, stored "deliberately parked" flag. Both combine.
+  backlog?: boolean;
+  parked?: boolean;
   assignee?: string;
   // Free-text full-text search over title+description (M5 V15, KAN-248). Empty is a
   // no-op server-side; `cardQueryParams` already drops empty strings.

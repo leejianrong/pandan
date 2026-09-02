@@ -424,6 +424,8 @@ class PandanClient:
         due_before: str | None = None,
         overdue: bool | None = None,
         needs_human: bool | None = None,
+        backlog: bool | None = None,
+        parked: bool | None = None,
         assignee: str | None = None,
         q: str | None = None,
         sort: str | None = None,
@@ -445,6 +447,10 @@ class PandanClient:
                 "due_before": due_before,
                 "overdue": overdue,
                 "needs_human": needs_human,
+                # The backlog (M8 V56, KAN-977): derived (backlog=true → no cycle)
+                # + the stored, independent "deliberately parked" flag.
+                "backlog": backlog,
+                "parked": parked,
                 "assignee": assignee,
                 # Free-text full-text search over title+description (M5 V15).
                 "q": q,
@@ -493,6 +499,7 @@ class PandanClient:
         priority: str | None = None,
         due_date: str | None = None,
         label_ids: list[int] | None = None,
+        parked: bool | None = None,
     ) -> dict[str, Any]:
         payload = _clean(
             {
@@ -507,6 +514,8 @@ class PandanClient:
                 "priority": priority,
                 "due_date": due_date,
                 "label_ids": label_ids,
+                # Deliberately-parked flag (M8 V56, KAN-977); omitted → server default false.
+                "parked": parked,
             }
         )
         return self._request("POST", "/cards", json=payload).json()
@@ -584,6 +593,7 @@ class PandanClient:
         priority: str | None = None,
         due_date: str | None = None,
         label_ids: list[int] | None = None,
+        parked: bool | None = None,
     ) -> dict[str, Any]:
         payload = _clean(
             {
@@ -596,6 +606,10 @@ class PandanClient:
                 "priority": priority,
                 "due_date": due_date,
                 "label_ids": label_ids,
+                # Mark/unmark deliberately parked (M8 V56, KAN-977); unlike the
+                # other nullable fields here, `parked` has no "clear to null"
+                # meaning, so `_clean` dropping None is exactly "omit = unchanged".
+                "parked": parked,
             }
         )
         return self._request("PATCH", f"/cards/{card_id}", json=payload).json()

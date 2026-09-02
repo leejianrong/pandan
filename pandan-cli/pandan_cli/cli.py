@@ -2230,6 +2230,8 @@ def _cmd_list(client: PandanClient, config: Config, args: argparse.Namespace) ->
         due_before=args.due_before,
         overdue=args.overdue or None,
         needs_human=args.needs_human or None,
+        backlog=args.backlog or None,
+        parked=args.parked or None,
         assignee=args.assignee,
         q=args.q,
         sort=args.sort,
@@ -2255,6 +2257,7 @@ def _cmd_create(client: PandanClient, config: Config, args: argparse.Namespace) 
         priority=args.priority,
         due_date=args.due,
         label_ids=args.label or None,
+        parked=args.parked or None,
     )
 
 
@@ -2270,6 +2273,11 @@ def _cmd_update(client: PandanClient, config: Config, args: argparse.Namespace) 
         priority=args.priority,
         due_date=args.due,
         label_ids=args.label if args.label is not None else None,
+        # --parked/--no-parked is a store_const True/False/None trio (like
+        # --autosync-enabled/--autosync-disabled) — pass through as-is, unlike the
+        # `x or None` flags above, since collapsing False to None would make
+        # --no-parked inoperable.
+        parked=args.parked,
     )
 
 
@@ -3388,6 +3396,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--needs-human", dest="needs_human", action="store_true",
         help="only cards flagged for a human (needs-human)",
     )
+    p_list.add_argument(
+        "--backlog", action="store_true",
+        help="only cards with no cycle assigned (M8 V56)",
+    )
+    p_list.add_argument(
+        "--parked", action="store_true",
+        help="only cards deliberately marked parked (M8 V56)",
+    )
     p_list.add_argument("--assignee", help="filter by assignee (exact match)")
     p_list.add_argument(
         "--q", metavar="TEXT",
@@ -3454,6 +3470,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--label", type=int, action="append", metavar="LABEL_ID",
         help="attach a label by id (repeatable)",
     )
+    p_create.add_argument(
+        "--parked", action="store_true",
+        help="create it already marked deliberately parked (M8 V56)",
+    )
     p_create.set_defaults(func=_cmd_create, hints=_HINTS["create"])
 
     p_update = sub.add_parser("update", parents=[common], help="edit a card's fields")
@@ -3480,6 +3500,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_update.add_argument(
         "--label", type=int, action="append", metavar="LABEL_ID",
         help="replace the card's labels with these ids (repeatable; omit to leave unchanged)",
+    )
+    parked_group = p_update.add_mutually_exclusive_group()
+    parked_group.add_argument(
+        "--parked", dest="parked", action="store_const", const=True, default=None,
+        help="mark deliberately parked (M8 V56)",
+    )
+    parked_group.add_argument(
+        "--no-parked", dest="parked", action="store_const", const=False,
+        help="unmark deliberately parked",
     )
     p_update.set_defaults(func=_cmd_update, hints=_HINTS["update"])
 

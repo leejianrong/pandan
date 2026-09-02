@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { Keyboard, LogOut, Menu, Moon, Search, Settings, Sun } from "lucide-svelte";
   import Activity from "./lib/components/Activity.svelte";
+  import Backlog from "./lib/components/Backlog.svelte";
   import Board from "./lib/components/Board.svelte";
   import Dashboard from "./lib/components/Dashboard.svelte";
   import Brand from "./lib/components/Brand.svelte";
@@ -20,7 +21,7 @@
   import ShortcutsHelp from "./lib/components/ShortcutsHelp.svelte";
   import { DropdownMenu } from "./lib/components/ui";
   import type { MenuItem } from "./lib/components/ui";
-  import { refetch, refetchBoards, refetchEpics, refetchLabels, refetchViews, setQuery } from "./lib/board.svelte";
+  import { refetch, refetchBacklog, refetchBoards, refetchEpics, refetchLabels, refetchViews, setQuery } from "./lib/board.svelte";
   import { refetchTokens } from "./lib/tokens.svelte";
   import { refetchTeams } from "./lib/teams.svelte";
   import {
@@ -41,6 +42,7 @@
     | "dashboard"
     | "epics"
     | "labels"
+    | "backlog"
     | "activity"
     | "tokens"
     | "members"
@@ -111,6 +113,7 @@
       refetchEpics();
       refetchLabels();
       refetchViews();
+      refetchBacklog();
       // Teams are user-scoped, not board-scoped (M9 V70) — load once here, not
       // per-board-switch, and eagerly (not lazily like Tokens) because the
       // BoardSwitcher's Team picker needs the list too.
@@ -252,6 +255,8 @@
       <Epics />
     {:else if view === "labels"}
       <Labels />
+    {:else if view === "backlog"}
+      <Backlog />
     {:else if view === "activity"}
       <Activity />
     {:else if view === "tokens"}

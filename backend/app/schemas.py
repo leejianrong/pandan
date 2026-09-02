@@ -127,6 +127,10 @@ class CardCreate(BaseModel):
     priority: PriorityEnum = PriorityEnum.none
     due_date: datetime | None = None
     label_ids: Annotated[list[int] | None, Field(max_length=MAX_LABEL_IDS)] = None
+    # Deliberately-parked flag (M8 V56, KAN-977) — distinguishes a card someone
+    # chose to park from one simply not yet scheduled. Independent of the backlog
+    # itself (derived from cycle_id IS NULL, SHAPING D8); defaults false.
+    parked: bool = False
 
     @field_validator("title")
     @classmethod
@@ -168,12 +172,26 @@ class CardUpdate(BaseModel):
     priority: PriorityEnum | None = None
     due_date: datetime | None = None
     label_ids: Annotated[list[int] | None, Field(max_length=MAX_LABEL_IDS)] = None
+    # Mark/unmark deliberately parked (M8 V56, KAN-977). Unlike epic_id/cycle_id,
+    # null is not a distinguished value here — a NOT NULL boolean has no meaningful
+    # "clear to null" — so an explicit null is a 422, same trick CycleUpdate.name
+    # and LabelUpdate use: the validator only runs when the key is actually sent
+    # (Pydantic doesn't validate an unset default), so omitting `parked` entirely
+    # still leaves it untouched via `exclude_unset`.
+    parked: bool | None = None
 
     @field_validator("title")
     @classmethod
     def title_non_empty(cls, v: str | None) -> str | None:
         if v is not None and not v.strip():
             raise ValueError("title must not be empty")
+        return v
+
+    @field_validator("parked")
+    @classmethod
+    def parked_not_null(cls, v: bool | None) -> bool:
+        if v is None:
+            raise ValueError("must not be null; omit the field to leave it unchanged")
         return v
 
     @field_validator("story_points")
@@ -404,6 +422,8 @@ class CardRead(BaseModel):
     # directly. A resolved card reads ``needs_human=false`` + ``attention_note=null``.
     needs_human: bool
     attention_note: str | None
+    # Deliberately-parked flag (M8 V56, KAN-977) — a real column, plain passthrough.
+    parked: bool
     labels: list[LabelRead] = []
     # Card-to-card dependencies (KAN-28), populated by the router from the
     # card_dependency table (not ORM-mapped columns): ids of cards that block this
@@ -1071,6 +1091,12 @@ class CardQuery(BaseModel):
     due_before: datetime | None = None
     overdue: bool | None = None
     needs_human: bool | None = None
+    # The backlog (M8 V56, KAN-977) is *derived*, not stored — ``backlog=true`` is
+    # ``cycle_id IS NULL``, ``backlog=false`` its negation (SHAPING D8). ``parked``
+    # is the independent, stored axis (a real column) marking one deliberately so;
+    # the two combine freely (``backlog=true&parked=true`` narrows to just those).
+    backlog: bool | None = None
+    parked: bool | None = None
     assignee: Annotated[str | None, Field(max_length=MAX_ASSIGNEE_LEN)] = None
     # Free-text search over title+description (M5 V15, KAN-248). A plain string —
     # ``GET /cards`` treats empty/whitespace as absent, so a saved view can carry a

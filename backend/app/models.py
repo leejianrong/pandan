@@ -630,6 +630,14 @@ class Card(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     attention_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Deliberately-parked flag (M8 V56, KAN-977). The backlog itself is *derived*
+    # (``cycle_id IS NULL``, SHAPING D8) — this is the one bit that distinguishes a
+    # card someone chose to park from one simply not yet scheduled (R2.2). NOT NULL
+    # with a ``false`` server default, mirroring ``needs_human`` exactly, so every
+    # existing row stays valid after the additive migration.
+    parked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     # Full-text search vector over title + description (M5 V15, KAN-248). A Postgres
     # ``GENERATED ALWAYS AS (...) STORED`` column (the migration owns the DDL) with a
     # GIN index, so it is maintained by the DB on every INSERT/UPDATE — no trigger,

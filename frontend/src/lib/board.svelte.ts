@@ -103,7 +103,13 @@ export async function setActiveBoard(id: number): Promise<void> {
   boardStore.activeBoardId = id;
   persistActiveBoard(id);
   clearActiveView();
-  await Promise.all([refetch(), refetchEpics(), refetchLabels(), refetchViews()]);
+  await Promise.all([
+    refetch(),
+    refetchEpics(),
+    refetchLabels(),
+    refetchViews(),
+    refetchBacklog(),
+  ]);
 }
 
 export async function addBoard(name: string, teamId?: number | null): Promise<void> {
@@ -151,7 +157,16 @@ export function cardsFor(column: Column): Card[] {
 // their ticket number + title (KAN-30). Null if it isn't in the loaded board —
 // callers fall back to a bare id.
 export function cardById(id: number): Card | null {
-  return board.cards.find((c) => c.id === id) ?? null;
+  // Falls back to the backlog store (M8 V56, KAN-977): the backlog view opens
+  // CardModal by id too, and its cards are fetched independently of whatever
+  // filter the main board view currently has active — a card the backlog holds
+  // is not guaranteed to also be in `board.cards` (e.g. a saved view narrowing
+  // the board to `column=done`).
+  return (
+    board.cards.find((c) => c.id === id) ??
+    backlogStore.cards.find((c) => c.id === id) ??
+    null
+  );
 }
 
 // Epics live in their own store (they are not board cards — ADR 0009). Loaded
@@ -201,17 +216,17 @@ export async function refetch(): Promise<void> {
 // server-authoritative progress + health (V32, KAN-296) must not go stale.
 export async function addCard(payload: CardCreate): Promise<void> {
   await createCard({ ...payload, board_id: boardStore.activeBoardId ?? undefined });
-  await Promise.all([refetch(), refetchEpics()]);
+  await Promise.all([refetch(), refetchEpics(), refetchBacklog()]);
 }
 
 export async function editCard(id: number, payload: CardUpdate): Promise<void> {
   await updateCard(id, payload);
-  await Promise.all([refetch(), refetchEpics()]);
+  await Promise.all([refetch(), refetchEpics(), refetchBacklog()]);
 }
 
 export async function removeCard(id: number): Promise<void> {
   await deleteCard(id);
-  await Promise.all([refetch(), refetchEpics()]);
+  await Promise.all([refetch(), refetchEpics(), refetchBacklog()]);
 }
 
 // Dependency edits (KAN-30). Like every other mutation these are
@@ -288,6 +303,34 @@ export async function removeEpic(id: number): Promise<void> {
   // Deleting an epic detaches its stories server-side (epic_id → null), so
   // refetch cards too to drop their now-stale epic tags.
   await Promise.all([refetchEpics(), refetch()]);
+}
+
+// The backlog (M8 V56, KAN-977) lives in its own store, like epics — it's a
+// different filtered slice of cards (cycle_id IS NULL) than whatever query the
+// main board view currently has active, so it can't share `board.cards`.
+export const backlogStore = $state<{
+  cards: Card[];
+  loading: boolean;
+  error: string | null;
+}>({
+  cards: [],
+  loading: false,
+  error: null,
+});
+
+export async function refetchBacklog(): Promise<void> {
+  backlogStore.loading = true;
+  backlogStore.error = null;
+  try {
+    backlogStore.cards =
+      boardStore.activeBoardId == null
+        ? []
+        : await listCards(boardStore.activeBoardId, { backlog: true });
+  } catch (e) {
+    backlogStore.error = e instanceof Error ? e.message : "Failed to load the backlog";
+  } finally {
+    backlogStore.loading = false;
+  }
 }
 
 // Labels live in their own store (M5 V11, KAN-244) — board-scoped, colored tags

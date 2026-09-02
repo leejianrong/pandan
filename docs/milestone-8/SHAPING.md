@@ -303,8 +303,13 @@ tab-alignment in the CLI's human rows, so it is opt-in via `--fields`.
 - **Q3** ~~A per-user toggle between canonical and board-local display?~~ **Settled: no toggle.**
   Board-local is simply what a board shows, and the collision case is handled by qualification
   rather than by a mode — see *Detail — when two accessible boards share a key* below.
-- **Q4** Does `planning_interval` need its own metrics endpoint, or does `cycle metrics` grow a
-  `planning_interval_id` filter? Lean the filter.
+- **Q4** ~~Does `planning_interval` need its own metrics endpoint, or does `cycle metrics` grow a
+  `planning_interval_id` filter?~~ **Settled 2026-09-02 (V57 shaping): a dedicated endpoint.**
+  `cycle_metrics` computes a per-cycle day-by-day burndown series, which doesn't compose across a PI's
+  member cycles into anything meaningful — the PI rollup is a **sum** (committed/completed/velocity,
+  no burndown), a different aggregate shape entirely. `list_cycles` separately gets a plain
+  `planning_interval_id` filter for browsing membership — that part genuinely is just a filter. See
+  `docs/milestone-8/SLICES.md` V57.
 - **Q5** ~~Do the existing semantic tokens participate?~~ **Settled 2026-08-23: the label palette is
   DISJOINT from the semantic tokens** (`--accent`, `--agent`, `--danger`, `--success`, `--warning`), so a
   label can never accidentally read as a status. ~~Which twelve hues is still a V62 call.~~

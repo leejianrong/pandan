@@ -492,6 +492,8 @@ def list_cards(
     due_before: datetime | None = None,
     overdue: bool | None = None,
     needs_human: bool | None = None,
+    backlog: bool | None = None,
+    parked: bool | None = None,
     assignee: str | None = None,
     q: str | None = None,
     sort: str | None = None,
@@ -548,6 +550,12 @@ def list_cards(
 
     Handoff filter (M5 V13, KAN-246): ``needs_human`` (``true`` → cards an agent
     flagged for a human via ``POST /cards/{id}/needs-human``; ``false`` → the rest).
+
+    Backlog filters (M8 V56, KAN-977): ``backlog`` (``true`` → cards with no
+    ``cycle_id`` — the backlog is *derived*, not stored, SHAPING D8; ``false`` →
+    cards assigned to a cycle) and ``parked`` (``true``/``false`` — the stored,
+    independent flag marking a card *deliberately* parked, distinct from simply not
+    yet scheduled). The two combine freely, e.g. ``backlog=true&parked=true``.
 
     Query grammar (M5 V14, KAN-247): ``assignee`` (exact match) joins the filter
     set above, and ``sort`` re-orders the result — a comma-separated list of keys
@@ -694,6 +702,15 @@ def list_cards(
         # The human↔agent handoff filter (M5 V13): needs_human=true surfaces the
         # cards an agent flagged for a human; false is their complement.
         query = query.where(Card.needs_human.is_(needs_human))
+    if backlog is not None:
+        # The backlog is derived (M8 V56, SHAPING D8): no cycle assigned. IS NULL /
+        # IS NOT NULL are exact complements, so no null-safe negation branch is
+        # needed (unlike overdue, which negates a compound predicate).
+        query = query.where(
+            Card.cycle_id.is_(None) if backlog else Card.cycle_id.is_not(None)
+        )
+    if parked is not None:
+        query = query.where(Card.parked.is_(parked))
     if assignee is not None:
         # Exact-match assignee filter (M5 V14): the "cards assigned to X" slice.
         query = query.where(Card.assignee == assignee)
@@ -838,6 +855,7 @@ def _create_card_row(
         cycle_id=payload.cycle_id,
         priority=payload.priority.value,
         due_date=payload.due_date,
+        parked=payload.parked,
     )
     db.add(card)
     db.flush()
