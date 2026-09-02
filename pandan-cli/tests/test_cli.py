@@ -256,6 +256,9 @@ class FakeClient:
     def cycle_metrics(self, board_id, cycle_id):
         return self._call("cycle_metrics", board_id=board_id, cycle_id=cycle_id)
 
+    def generate_cycles(self, board_id, **kw):
+        return self._call("generate_cycles", board_id=board_id, **kw)
+
     def list_planning_intervals(self, board_id):
         return self._call("list_planning_intervals", board_id=board_id)
 
@@ -879,6 +882,76 @@ def test_cycle_update_passes_pi_alone(monkeypatch, env):
             },
         )
     ]
+
+
+def test_cycle_generate_passes_all_fields(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"cycles": []}))
+    assert cli.run(
+        [
+            "cycle", "generate", "--board", "3",
+            "--start", "2026-09-07", "--length-days", "14", "--count", "6",
+            "--name-template", "Sprint {n}",
+        ]
+    ) == 0
+    assert fake.calls == [
+        (
+            "generate_cycles",
+            {
+                "board_id": 3,
+                "start": "2026-09-07",
+                "length_days": 14,
+                "count": 6,
+                "name_template": "Sprint {n}",
+                "planning_interval_id": None,
+            },
+        )
+    ]
+
+
+def test_cycle_generate_passes_pi(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"cycles": []}))
+    assert cli.run(
+        [
+            "cycle", "generate", "--board", "3",
+            "--start", "2026-09-07", "--length-days", "14", "--count", "6",
+            "--name-template", "Sprint {n}", "--pi", "9",
+        ]
+    ) == 0
+    assert fake.calls[0][1]["planning_interval_id"] == 9
+
+
+def test_cycle_generate_renders_the_created_cycles(monkeypatch, env, capsys):
+    patch_client(
+        monkeypatch,
+        FakeClient(
+            result={
+                "cycles": [
+                    {"id": 10, "name": "Sprint 1", "starts_on": "2026-09-07T00:00:00Z",
+                     "ends_on": "2026-09-21T00:00:00Z", "planning_interval_id": None},
+                    {"id": 11, "name": "Sprint 2", "starts_on": "2026-09-21T00:00:00Z",
+                     "ends_on": "2026-10-05T00:00:00Z", "planning_interval_id": None},
+                ]
+            }
+        ),
+    )
+    assert cli.run(
+        [
+            "cycle", "generate", "--board", "3",
+            "--start", "2026-09-07", "--length-days", "14", "--count", "2",
+            "--name-template", "Sprint {n}",
+        ]
+    ) == 0
+    out = capsys.readouterr().out
+    assert "Sprint 1" in out
+    assert "Sprint 2" in out
+
+
+def test_cycle_generate_requires_the_flags(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result={"cycles": []}))
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["cycle", "generate", "--board", "3"])
+    assert exc.value.code == cli.EXIT_USAGE
+    assert "required" in capsys.readouterr().out
 
 
 # --- pi subcommands (M8 V57 / KAN-978) --------------------------------------

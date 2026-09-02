@@ -7,6 +7,7 @@ mirroring the flat structure of the saved-views / card-templates routers
 
 - GET    /boards/{board_id}/cycles                    — list a board's cycles (viewer+)
 - POST   /boards/{board_id}/cycles                    — create a cycle (editor+)
+- POST   /boards/{board_id}/cycles/generate           — generate a run of cycles (editor+, M8 V58)
 - GET    /boards/{board_id}/cycles/{cycle_id}         — read one cycle (viewer+)
 - GET    /boards/{board_id}/cycles/{cycle_id}/metrics — burndown/velocity (viewer+, V34)
 - PATCH  /boards/{board_id}/cycles/{cycle_id}         — edit a cycle (editor+, V55)
@@ -34,10 +35,20 @@ rollup itself lives on the planning interval, at
 (``routers/planning_intervals.py``), which reuses this module's
 ``cycle_metrics_dict`` per member cycle rather than duplicating the burndown
 computation.
+
+**``generate_cycles`` (M8 V58, KAN-979)** is pure convenience over
+``create_cycle`` — "two weeks per sprint, six sprints" as one call instead of
+six. It adds no new state and needs no migration: it builds ``count`` back-to-back
+``[starts_on, ends_on)`` windows from ``start`` + ``length_days`` and inserts them
+in one transaction, all-or-nothing (mirroring ``apply_template``'s batch
+semantics) — any generated window overlapping an existing dated cycle on the
+board rejects the whole batch with a ``422`` naming the collision. **CLI-only,
+declined for MCP**: an agent that wants N cycles can already call ``create_cycle``
+N times, so this doesn't spend against the frozen ADR 0019 surface.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -49,7 +60,13 @@ from ..authz import Access, authorize_board, get_principal
 from ..db import get_db
 from ..metrics import compute_cycle_metrics, move_target
 from ..models import Activity, Card, Cycle, PlanningInterval
-from ..schemas import CycleCreate, CycleMetricsRead, CycleRead, CycleUpdate
+from ..schemas import (
+    CycleCreate,
+    CycleGenerate,
+    CycleMetricsRead,
+    CycleRead,
+    CycleUpdate,
+)
 
 router = APIRouter(tags=["cycles"])
 
@@ -133,6 +150,86 @@ def create_cycle(
     db.commit()
     db.refresh(cycle)
     return cycle
+
+
+@router.post(
+    "/boards/{board_id}/cycles/generate",
+    response_model=list[CycleRead],
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_cycles(
+    board_id: int,
+    payload: CycleGenerate,
+    db: Session = Depends(get_db),
+    principal: User = Depends(get_principal),
+) -> list[Cycle]:
+    """Generate ``count`` back-to-back cycles in one call (editor or above,
+    M8 V58, KAN-979) — pure convenience over :func:`create_cycle`, no new state.
+
+    Each cycle's ``[starts_on, ends_on)`` window is ``payload.start`` (midnight
+    UTC) plus ``n * length_days`` for ``n`` in ``0..count-1``; ``name_template``
+    interpolates 1-indexed ``{n}`` (``"Sprint {n}"`` → ``Sprint 1``, ``Sprint
+    2``, ...). Generated windows are contiguous by construction and never overlap
+    each other, but **every** window is checked against every existing (dated)
+    cycle on the board; the first collision is a ``422`` naming the colliding
+    cycle, and **the whole batch is rejected** — mirroring ``apply_template``'s
+    all-or-nothing semantics — rather than partially created.
+    """
+    authorize_board(db, principal, board_id, Access.WRITE)
+    _validate_planning_interval(db, payload.planning_interval_id, board_id)
+
+    length = timedelta(days=payload.length_days)
+    batch_start = datetime.combine(payload.start, time.min, tzinfo=timezone.utc)
+    windows: list[tuple[datetime, datetime, str]] = []
+    for n in range(1, payload.count + 1):
+        try:
+            name = payload.name_template.format(n=n)
+        except (KeyError, IndexError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"invalid name_template: {exc}",
+            ) from exc
+        starts_on = batch_start + length * (n - 1)
+        ends_on = starts_on + length
+        windows.append((starts_on, ends_on, name))
+
+    existing = list(
+        db.scalars(
+            select(Cycle).where(
+                Cycle.board_id == board_id,
+                Cycle.starts_on.is_not(None),
+                Cycle.ends_on.is_not(None),
+            )
+        ).all()
+    )
+    for starts_on, ends_on, name in windows:
+        for cycle in existing:
+            if starts_on < cycle.ends_on and cycle.starts_on < ends_on:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=(
+                        f"generated cycle {name!r} ({starts_on.date()}"
+                        f"–{ends_on.date()}) overlaps existing cycle "
+                        f"{cycle.id} {cycle.name!r} ({cycle.starts_on.date()}"
+                        f"–{cycle.ends_on.date()})"
+                    ),
+                )
+
+    created = [
+        Cycle(
+            board_id=board_id,
+            name=name,
+            starts_on=starts_on,
+            ends_on=ends_on,
+            planning_interval_id=payload.planning_interval_id,
+        )
+        for starts_on, ends_on, name in windows
+    ]
+    db.add_all(created)
+    db.commit()
+    for cycle in created:
+        db.refresh(cycle)
+    return created
 
 
 @router.get("/boards/{board_id}/cycles/{cycle_id}", response_model=CycleRead)

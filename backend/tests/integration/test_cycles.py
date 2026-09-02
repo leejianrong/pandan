@@ -261,3 +261,222 @@ def test_non_member_cannot_update_a_cycle(client, login_as):
     r = stranger.patch(f"{_cycles(1)}/{cycle['id']}", json={"name": "mine now"})
     assert r.status_code == 403
     assert client.get(f"{_cycles(1)}/{cycle['id']}").json()["name"] == "private"
+
+
+# --- generate: a run of cycles in one call (M8 V58, KAN-979) ----------------
+
+
+def _generate(client, board_id, **fields):
+    return client.post(f"{_cycles(board_id)}/generate", json=fields)
+
+
+def test_generate_creates_a_run_of_back_to_back_cycles(client):
+    r = _generate(
+        client,
+        1,
+        start="2026-09-07",
+        length_days=14,
+        count=6,
+        name_template="Sprint {n}",
+    )
+    assert r.status_code == 201
+    cycles = r.json()
+    assert [c["name"] for c in cycles] == [f"Sprint {n}" for n in range(1, 7)]
+    assert cycles[0]["starts_on"].startswith("2026-09-07")
+    assert cycles[0]["ends_on"].startswith("2026-09-21")
+    # Contiguous: each window's end is the next window's start.
+    for prev, nxt in zip(cycles, cycles[1:]):
+        assert prev["ends_on"] == nxt["starts_on"]
+
+    listed = client.get(_cycles(1)).json()
+    assert len(listed) == 6
+
+
+def test_generate_rejects_overlap_with_existing_cycle_and_creates_none(client):
+    existing = client.post(
+        _cycles(1),
+        json={
+            "name": "Sprint 3",
+            "starts_on": "2026-10-05T00:00:00Z",
+            "ends_on": "2026-10-19T00:00:00Z",
+        },
+    ).json()
+
+    r = _generate(
+        client,
+        1,
+        start="2026-09-07",
+        length_days=14,
+        count=6,
+        name_template="Sprint {n}",
+    )
+    assert r.status_code == 422
+    assert str(existing["id"]) in r.json()["detail"]
+    assert "Sprint 3" in r.json()["detail"]
+
+    # All-or-nothing: the batch was rejected, so nothing besides the pre-existing
+    # cycle exists.
+    listed = client.get(_cycles(1)).json()
+    assert [c["name"] for c in listed] == ["Sprint 3"]
+
+
+def test_generate_is_all_or_nothing_when_only_a_later_cycle_collides(client):
+    # The 4th generated window (2026-10-19..2026-11-02) collides; the first
+    # three would not have, but nothing should be created regardless.
+    client.post(
+        _cycles(1),
+        json={
+            "name": "existing",
+            "starts_on": "2026-10-25T00:00:00Z",
+            "ends_on": "2026-11-01T00:00:00Z",
+        },
+    )
+    r = _generate(
+        client,
+        1,
+        start="2026-09-07",
+        length_days=14,
+        count=6,
+        name_template="Sprint {n}",
+    )
+    assert r.status_code == 422
+    listed = client.get(_cycles(1)).json()
+    assert [c["name"] for c in listed] == ["existing"]
+
+
+def test_generate_ignores_undated_existing_cycles(client):
+    client.post(_cycles(1), json={"name": "undated"})
+    r = _generate(
+        client,
+        1,
+        start="2026-09-07",
+        length_days=14,
+        count=2,
+        name_template="Sprint {n}",
+    )
+    assert r.status_code == 201
+    listed = client.get(_cycles(1)).json()
+    assert len(listed) == 3
+
+
+def test_generate_with_planning_interval(client):
+    pi = client.post(
+        "/api/v1/boards/1/planning-intervals", json={"name": "PI-1"}
+    ).json()
+    r = _generate(
+        client,
+        1,
+        start="2026-09-07",
+        length_days=14,
+        count=2,
+        name_template="Sprint {n}",
+        planning_interval_id=pi["id"],
+    )
+    assert r.status_code == 201
+    assert all(c["planning_interval_id"] == pi["id"] for c in r.json())
+
+
+def test_generate_rejects_nonexistent_planning_interval(client):
+    r = _generate(
+        client,
+        1,
+        start="2026-09-07",
+        length_days=14,
+        count=2,
+        name_template="Sprint {n}",
+        planning_interval_id=9999,
+    )
+    assert r.status_code == 422
+    assert client.get(_cycles(1)).json() == []
+
+
+def test_generate_rejects_bad_count(client):
+    assert (
+        _generate(
+            client,
+            1,
+            start="2026-09-07",
+            length_days=14,
+            count=0,
+            name_template="Sprint {n}",
+        ).status_code
+        == 422
+    )
+    assert (
+        _generate(
+            client,
+            1,
+            start="2026-09-07",
+            length_days=14,
+            count=53,
+            name_template="Sprint {n}",
+        ).status_code
+        == 422
+    )
+
+
+def test_generate_rejects_nonpositive_length_days(client):
+    assert (
+        _generate(
+            client,
+            1,
+            start="2026-09-07",
+            length_days=0,
+            count=2,
+            name_template="Sprint {n}",
+        ).status_code
+        == 422
+    )
+
+
+def test_generate_rejects_blank_name_template(client):
+    assert (
+        _generate(
+            client,
+            1,
+            start="2026-09-07",
+            length_days=14,
+            count=2,
+            name_template="   ",
+        ).status_code
+        == 422
+    )
+
+
+def test_generate_rejects_invalid_name_template_placeholder(client):
+    r = _generate(
+        client,
+        1,
+        start="2026-09-07",
+        length_days=14,
+        count=2,
+        name_template="Sprint {oops}",
+    )
+    assert r.status_code == 422
+    assert client.get(_cycles(1)).json() == []
+
+
+def test_generate_on_unknown_board_is_404(client):
+    r = _generate(
+        client,
+        9999,
+        start="2026-09-07",
+        length_days=14,
+        count=2,
+        name_template="Sprint {n}",
+    )
+    assert r.status_code == 404
+
+
+def test_non_member_cannot_generate_cycles(client, login_as):
+    stranger = login_as("stranger3@example.com", "gh-stranger3")
+    r = _generate(
+        stranger,
+        1,
+        start="2026-09-07",
+        length_days=14,
+        count=2,
+        name_template="Sprint {n}",
+    )
+    assert r.status_code == 403
+    assert client.get(_cycles(1)).json() == []

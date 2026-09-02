@@ -255,6 +255,18 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
         "`update_cycle` is wanted on MCP, that is an ADR 0019 amendment naming it, not "
         "an edit here."
     ),
+    ("cycle", "generate"): (
+        "reason 2 (M8 V58, KAN-979): `POST /boards/{b}/cycles/generate` IS a "
+        "board API call, so this is a declined tool and not a missing one. It is "
+        "pure convenience over `create_cycle` — an agent that wants N cycles can "
+        "already call `create_cycle` N times, so `generate` is a human-typing "
+        "shortcut (\"one command instead of six\"), not a new agent capability, "
+        "and doesn't spend against the ADR-0019-frozen surface. Mirrors "
+        "(\"cycle\", \"update\")'s own reasoning: the mutation an agent actually "
+        "needs (assigning a card, or `create_cycle` itself) is already on MCP "
+        "and untouched. Re-opening this is an ADR 0019 amendment, not an edit "
+        "here."
+    ),
     ("team", "member", "add"): (
         "reason 2 (M9 V69, KAN-1058): `POST /teams/{id}/members` IS a board API "
         "call, so this is a declined tool and not a missing one. ADR 0019 freezes "

@@ -2857,6 +2857,19 @@ def _cmd_cycle_metrics(client: PandanClient, config: Config, args: argparse.Name
     return client.cycle_metrics(_require_view_board(args, config), args.cycle_id)
 
 
+def _cmd_cycle_generate(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """Generate a run of back-to-back cycles in one call (M8 V58, KAN-979) — "two
+    weeks per sprint, six sprints" as one command instead of six ``cycle create``s."""
+    return client.generate_cycles(
+        _require_view_board(args, config),
+        start=args.start,
+        length_days=args.length_days,
+        count=args.count,
+        name_template=args.name_template,
+        planning_interval_id=args.planning_interval_id,
+    )
+
+
 # --- planning interval handlers (M8 V57 / KAN-978) --------------------------
 # Planning intervals are board-scoped, mirroring `pandan cycle`'s shape exactly.
 # Assigning a cycle to a planning interval is a field edit —
@@ -4169,7 +4182,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Board-scoped, named iterations. Assign a card to one with
     # `pandan update <card> --cycle <id>`; filter with `pandan list --cycle <id>`.
     p_cycle = sub.add_parser(
-        "cycle", help="manage cycles / iterations (list / create / update / delete)"
+        "cycle", help="manage cycles / iterations (list / create / update / delete / generate)"
     )
     cycle_sub = p_cycle.add_subparsers(
         dest="cycle_command", metavar="<subcommand>", required=True
@@ -4231,6 +4244,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_cycle_metrics.add_argument("cycle_id", type=int)
     p_cycle_metrics.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_cycle_metrics.set_defaults(func=_cmd_cycle_metrics, noun="cycle")
+
+    p_cycle_generate = cycle_sub.add_parser(
+        "generate",
+        parents=[common],
+        help="generate a run of back-to-back cycles in one call (M8 V58)",
+    )
+    p_cycle_generate.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_cycle_generate.add_argument(
+        "--start", required=True, metavar="ISO", help="first cycle's start date (ISO-8601 date)"
+    )
+    p_cycle_generate.add_argument(
+        "--length-days", dest="length_days", type=int, required=True, metavar="N",
+        help="length of each cycle in days",
+    )
+    p_cycle_generate.add_argument(
+        "--count", type=int, required=True, metavar="N", help="how many cycles to generate (max 52)"
+    )
+    p_cycle_generate.add_argument(
+        "--name-template", dest="name_template", required=True, metavar="STR",
+        help="name template interpolating 1-indexed {n}, e.g. \"Sprint {n}\"",
+    )
+    p_cycle_generate.add_argument(
+        "--pi", dest="planning_interval_id", type=int, metavar="PLANNING_INTERVAL_ID",
+        help="assign every generated cycle to a planning interval by id (M8 V57)",
+    )
+    _add_fields_arg(p_cycle_generate, "id,name,starts_on,ends_on")
+    p_cycle_generate.set_defaults(func=_cmd_cycle_generate, noun="cycle")
 
     # --- pi subcommands (M8 V57 / KAN-978): planning intervals ---------------
     # A grouping one level above the cycle. Assign a cycle to one with

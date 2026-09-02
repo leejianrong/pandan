@@ -867,6 +867,36 @@ def test_update_cycle_sends_planning_interval_id():
     assert req["body"] == {"planning_interval_id": 7}
 
 
+def test_generate_cycles_posts_to_generate_and_returns_cycles_envelope():
+    """(M8 V58, KAN-979) — the envelope key is ``cycles``, not ``created``: these
+    ARE cycles, not the card envelope ``apply_template``/``create_cards`` use."""
+    handler, seen = record_requests(
+        httpx.Response(201, json=[{"id": 10, "name": "Sprint 1"}, {"id": 11, "name": "Sprint 2"}])
+    )
+    out = make_client(handler).generate_cycles(
+        3, start="2026-09-07", length_days=14, count=2, name_template="Sprint {n}"
+    )
+    req = seen["requests"][0]
+    assert req["method"] == "POST"
+    assert req["path"] == "/api/v1/boards/3/cycles/generate"
+    assert req["body"] == {
+        "start": "2026-09-07",
+        "length_days": 14,
+        "count": 2,
+        "name_template": "Sprint {n}",
+    }
+    assert out == {"cycles": [{"id": 10, "name": "Sprint 1"}, {"id": 11, "name": "Sprint 2"}]}
+
+
+def test_generate_cycles_sends_planning_interval_id():
+    handler, seen = record_requests(httpx.Response(201, json=[]))
+    make_client(handler).generate_cycles(
+        3, start="2026-09-07", length_days=14, count=2, name_template="Sprint {n}",
+        planning_interval_id=9,
+    )
+    assert seen["requests"][0]["body"]["planning_interval_id"] == 9
+
+
 # --- planning intervals (M8 V57, KAN-978) -----------------------------------
 
 

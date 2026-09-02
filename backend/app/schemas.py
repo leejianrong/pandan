@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Annotated, Any
 
@@ -1266,6 +1266,35 @@ class CycleUpdate(BaseModel):
             raise ValueError("must not be null; omit the field to leave it unchanged")
         if not v.strip():
             raise ValueError("name must not be empty")
+        return v
+
+
+class CycleGenerate(BaseModel):
+    """Generate a run of back-to-back cycles in one call (M8 V58, KAN-979):
+    ``POST /boards/{id}/cycles/generate``. Pure convenience over
+    :class:`CycleCreate` — no new state, no migration.
+
+    ``name_template`` interpolates ``{n}`` (1-indexed): ``"Sprint {n}"`` →
+    ``Sprint 1``, ``Sprint 2``, ... ``count`` is a plain UX range guard
+    (``le=52``, roughly two years of weekly cycles), **not** a payload-size
+    hardening knob like ``MAX_BATCH_ITEMS`` — no env var. ``length_days`` and
+    ``count`` must be positive; the router derives each cycle's
+    ``[starts_on, ends_on)`` window from ``start`` + ``length_days`` and rejects
+    the whole batch (``422``) if any generated window overlaps an existing cycle
+    on the board.
+    """
+
+    start: date
+    length_days: Annotated[int, Field(gt=0)]
+    count: Annotated[int, Field(gt=0, le=52)]
+    name_template: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
+    planning_interval_id: int | None = None
+
+    @field_validator("name_template")
+    @classmethod
+    def name_template_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name_template must not be empty")
         return v
 
 
