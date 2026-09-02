@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from app.metrics import compute_metrics, move_target, parse_move_target
+from app.metrics import _assignee_class, compute_metrics, move_target, parse_move_target
 
 NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -73,12 +73,16 @@ def test_move_target_falls_back_to_summary_when_structured_is_null():
 # --- compute_metrics --------------------------------------------------------
 
 
-def _card(cid, column, *, ticket=None, assignee=None, created_at=None, deleted=False):
+def _card(
+    cid, column, *, ticket=None, assignee=None, story_points=None,
+    created_at=None, deleted=False,
+):
     return {
         "id": cid,
         "ticket_number": ticket or f"KAN-{cid}",
         "column": column,
         "assignee": assignee,
+        "story_points": story_points,
         "created_at": created_at or _ago(hours=1),
         "deleted": deleted,
     }
@@ -98,6 +102,7 @@ def test_empty_board_is_all_zeros_and_nulls():
     assert m["aging_wip"]["max_seconds"] is None
     assert m["aging_wip"]["items"] == []
     assert m["by_assignee"] == []
+    assert m["by_assignee_class"] == []
 
 
 def test_throughput_counts_distinct_cards_done_in_period():
@@ -189,3 +194,80 @@ def test_by_assignee_breakdown():
     assert by[None] == {"assignee": None, "throughput": 0, "wip": 1}
     # Unassigned sorts last.
     assert m["by_assignee"][-1]["assignee"] is None
+
+
+# --- by_assignee_class: observed throughput (M8 V60, KAN-981) ---------------
+
+
+def test_assignee_class_classifies_agent_human_and_unassigned():
+    assert _assignee_class("agent:claude") == "agent"
+    assert _assignee_class("agent:") == "agent"
+    assert _assignee_class("someone@example.com") == "human"
+    # No colon: not the agent: prefix, so it's just an (unusual) human name.
+    assert _assignee_class("agent-a") == "human"
+    assert _assignee_class(None) == "unassigned"
+
+
+def test_by_assignee_class_is_a_ratio_of_sums_not_an_average_of_ratios():
+    # One big/slow card (12pts/6days = 2 pts/day) and one small/fast card
+    # (1pt/1day = 1 pt/day). An average of per-card ratios would read 1.5 pts/day;
+    # the ratio-of-sums this function actually computes reads 13pts/7days ≈ 1.857 —
+    # the big card isn't outvoted by the fast one.
+    transitions = [
+        (1, "in_progress", _ago(days=6)),
+        (1, "done", NOW),
+        (2, "in_progress", _ago(days=1)),
+        (2, "done", NOW),
+    ]
+    cards = [
+        _card(1, "done", assignee="agent:claude", story_points=12),
+        _card(2, "done", assignee="agent:claude", story_points=1),
+    ]
+    m = compute_metrics(transitions, cards, now=NOW, since=None)
+    agent = next(r for r in m["by_assignee_class"] if r["assignee_class"] == "agent")
+    assert agent["n"] == 2
+    assert agent["points_per_day"] == 13 / 7
+
+
+def test_by_assignee_class_splits_agent_human_unassigned_and_omits_the_rest():
+    transitions = [
+        (1, "in_progress", _ago(days=1)),
+        (1, "done", NOW),
+        (2, "in_progress", _ago(days=2)),
+        (2, "done", NOW),
+        (3, "in_progress", _ago(days=1)),
+        (3, "done", NOW),
+    ]
+    cards = [
+        _card(1, "done", assignee="agent:claude", story_points=6),
+        _card(2, "done", assignee="alice@example.com", story_points=4),
+        # No story_points at all: excluded from the rate but not throughput.
+        _card(3, "done", assignee="agent:claude", story_points=None),
+    ]
+    m = compute_metrics(transitions, cards, now=NOW, since=None)
+    by_class = {row["assignee_class"]: row for row in m["by_assignee_class"]}
+    assert by_class["agent"] == {"assignee_class": "agent", "points_per_day": 6.0, "n": 1}
+    assert by_class["human"] == {"assignee_class": "human", "points_per_day": 2.0, "n": 1}
+    # No unassigned/eligible card in this fixture — the class is omitted, not zeroed.
+    assert "unassigned" not in by_class
+    # Sample size still one card, even though card 3 contributed no points.
+    assert m["throughput"] == 3
+
+
+def test_by_assignee_class_excludes_cards_without_a_recorded_cycle_time():
+    # Straight todo → done (no in_progress): eligible for throughput, not the rate,
+    # mirroring cycle_time's own exclusion rule exactly.
+    transitions = [(1, "done", _ago(hours=1))]
+    cards = [_card(1, "done", assignee="agent:claude", story_points=5)]
+    m = compute_metrics(transitions, cards, now=NOW, since=None)
+    assert m["throughput"] == 1
+    assert m["by_assignee_class"] == []
+
+
+def test_by_assignee_class_unassigned_bucket():
+    transitions = [(1, "in_progress", _ago(days=1)), (1, "done", NOW)]
+    cards = [_card(1, "done", assignee=None, story_points=3)]
+    m = compute_metrics(transitions, cards, now=NOW, since=None)
+    assert m["by_assignee_class"] == [
+        {"assignee_class": "unassigned", "points_per_day": 3.0, "n": 1}
+    ]

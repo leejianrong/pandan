@@ -620,6 +620,7 @@ def board_metrics(
             Card.board_seq,
             Card.column,
             Card.assignee,
+            Card.story_points,
             Card.created_at,
             Card.deleted_at,
         ).where(Card.board_id == board_id)
@@ -637,6 +638,9 @@ def board_metrics(
             "ref": card_ref(board_key, row.board_seq) if board_key else None,
             "column": row.column,
             "assignee": row.assignee,
+            # Observed throughput by assignee class (M8 V60, KAN-981) needs the
+            # story points of each done-in-period card.
+            "story_points": row.story_points,
             "created_at": row.created_at,
             "deleted": row.deleted_at is not None,
         }

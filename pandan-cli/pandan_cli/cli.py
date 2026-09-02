@@ -1187,6 +1187,17 @@ def _metrics_block(result: dict[str, Any]) -> str:
         for row in by_assignee:
             who = _flatten(str(row.get("assignee") or "(unassigned)"))
             lines.append(f"  {who}\tdone {row.get('throughput', 0)}\twip {row.get('wip', 0)}")
+    # Observed throughput by assignee class (M8 V60, KAN-981) — the measured
+    # agent-time answer SHAPING D10 asked for in place of a declared point scale.
+    by_assignee_class = result.get("by_assignee_class", [])
+    if by_assignee_class:
+        lines.append("by assignee class:")
+        for row in by_assignee_class:
+            rate = row.get("points_per_day")
+            rate_str = f"{rate:.1f} pts/day" if rate is not None else "n/a"
+            lines.append(
+                f"  {row.get('assignee_class', '?')}\t{rate_str}\t(n={row.get('n', 0)})"
+            )
     return "\n".join(lines)
 
 

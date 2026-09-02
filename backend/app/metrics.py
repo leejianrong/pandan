@@ -113,6 +113,20 @@ def _summarize_durations(values: list[float]) -> dict[str, Any]:
     }
 
 
+def _assignee_class(assignee: str | None) -> str:
+    """Classify an assignee for the observed-throughput split (M8 V60, KAN-981):
+    ``"agent"`` if it starts with the ``agent:`` prefix already established in
+    ``notifications.py``, ``"human"`` for any other non-null string, else
+    ``"unassigned"``."""
+    if assignee is None:
+        return "unassigned"
+    return "agent" if assignee.startswith("agent:") else "human"
+
+
+#: Fixed report order (agent first — the class the whole slice exists to answer for).
+_ASSIGNEE_CLASSES = ("agent", "human", "unassigned")
+
+
 def compute_metrics(
     transitions: list[tuple[int, str, datetime]],
     cards: list[dict[str, Any]],
@@ -125,12 +139,13 @@ def compute_metrics(
     ``transitions`` is the parsed list of cross-column card moves as
     ``(card_id, target_column, ts)`` (see :func:`move_target`). ``cards`` is
     the board's current card state — dicts with ``id``, ``ticket_number``,
-    ``column``, ``assignee``, ``created_at`` and ``deleted`` (a bool). ``now`` is the
-    reference time (period end + aging clock); ``since`` bounds the period
-    (``None`` → all time).
+    ``column``, ``assignee``, ``story_points``, ``created_at`` and ``deleted``
+    (a bool). ``now`` is the reference time (period end + aging clock); ``since``
+    bounds the period (``None`` → all time).
 
-    Returns the ``throughput`` / ``cycle_time`` / ``aging_wip`` / ``by_assignee``
-    payload the ``BoardMetricsRead`` schema wraps. Metrics are derived so:
+    Returns the ``throughput`` / ``cycle_time`` / ``aging_wip`` / ``by_assignee`` /
+    ``by_assignee_class`` payload the ``BoardMetricsRead`` schema wraps. Metrics
+    are derived so:
 
     - **throughput** — count of distinct cards that first reached ``done`` within
       ``[since, now]`` (from ``done`` transitions).
@@ -142,6 +157,18 @@ def compute_metrics(
       entered progress without a recorded move).
     - **by_assignee** — per current-assignee throughput (done in period) and open
       WIP (currently in progress), the "which agent did what" view.
+    - **by_assignee_class** (M8 V60, KAN-981) — observed ``points_per_day`` split by
+      assignee *class* (``agent``/``human``/``unassigned``, via
+      :func:`_assignee_class`), the measured answer to "how many points/day should
+      I budget" — SHAPING D10 deliberately declines a second, declared point
+      scale. A done-in-period card is *eligible* for its class's rate only when it
+      has both a recorded ``story_points`` **and** a recorded cycle time (the same
+      two conditions ``cycle_time`` itself requires — reusing the same loop, not a
+      second pass over the activity feed). The rate is a **ratio of sums**
+      (Σ points ÷ Σ cycle days), not an average of per-card ratios, so a handful
+      of large/slow cards can't be outvoted by many small/fast ones. A class with
+      no eligible cards is omitted entirely (matching ``by_assignee``'s own
+      "only assignees that appear" convention), not reported as a zero.
     """
     first_in_progress: dict[int, datetime] = {}
     last_in_progress: dict[int, datetime] = {}
@@ -162,18 +189,43 @@ def compute_metrics(
     # Throughput: distinct cards that first reached done within the period.
     done_in_period = {cid for cid, ts in first_done.items() if in_period(ts)}
 
+    card_by_id = {c["id"]: c for c in cards}
+
     # Cycle time: first in_progress → done, for done-in-period cards that were ever
-    # in progress at/before completion.
+    # in progress at/before completion. The same loop feeds by_assignee_class's
+    # per-class Σ points / Σ days (M8 V60, KAN-981), since eligibility is identical.
     cycle_seconds: list[float] = []
+    class_points: dict[str, float] = defaultdict(float)
+    class_days: dict[str, float] = defaultdict(float)
+    class_n: dict[str, int] = defaultdict(int)
     for cid in done_in_period:
         started = first_in_progress.get(cid)
         done_ts = first_done[cid]
         if started is not None and started <= done_ts:
-            cycle_seconds.append((done_ts - started).total_seconds())
+            seconds = (done_ts - started).total_seconds()
+            cycle_seconds.append(seconds)
+            card = card_by_id.get(cid)
+            story_points = card.get("story_points") if card else None
+            if story_points is not None:
+                cls = _assignee_class(card["assignee"])
+                class_points[cls] += story_points
+                class_days[cls] += seconds / 86400
+                class_n[cls] += 1
+
+    by_assignee_class = [
+        {
+            "assignee_class": cls,
+            "points_per_day": (
+                class_points[cls] / class_days[cls] if class_days[cls] > 0 else None
+            ),
+            "n": class_n[cls],
+        }
+        for cls in _ASSIGNEE_CLASSES
+        if class_n[cls] > 0
+    ]
 
     # Aging WIP: cards currently in_progress (live only), aged from their last entry
     # into in_progress (or created_at when there's no recorded move).
-    card_by_id = {c["id"]: c for c in cards}
     wip_cards = [
         c for c in cards if c["column"] == "in_progress" and not c["deleted"]
     ]
@@ -230,6 +282,7 @@ def compute_metrics(
         "cycle_time": _summarize_durations(cycle_seconds),
         "aging_wip": aging_wip,
         "by_assignee": by_assignee,
+        "by_assignee_class": by_assignee_class,
     }
 
 

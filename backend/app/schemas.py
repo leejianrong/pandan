@@ -9,7 +9,7 @@ import os
 import uuid
 from datetime import date, datetime
 from enum import Enum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -1006,6 +1006,28 @@ class AssigneeMetrics(BaseModel):
     wip: int
 
 
+class AssigneeClassMetrics(BaseModel):
+    """Observed throughput split by assignee **class** (M8 V60, KAN-981) — the
+    agent-time answer to "how many points/day should I budget", measured rather
+    than declared (SHAPING D10: no second point scale). ``assignee_class`` is
+    ``"agent"`` when the card's assignee starts with ``agent:``, ``"human"`` for
+    any other non-null assignee, ``"unassigned"`` for none.
+
+    ``points_per_day`` is a **ratio of sums** (Σ story points ÷ Σ cycle days) over
+    the class's *eligible* done-in-period cards — a handful of large/slow cards
+    can't get outvoted by many small/fast ones the way an average of per-card
+    ratios would let them. ``null`` when the class has no eligible cards. ``n`` is
+    the **count** of eligible cards (not points), so ``agent: 6.2 pts/day (n=143)``
+    reads as "143 cards backed this number" — the same two eligibility conditions
+    the board's own ``cycle_time`` already requires (a recorded story point count
+    and a recorded ``in_progress`` → ``done`` cycle time), so a card silently
+    excluded from the board's overall cycle time is silently excluded here too."""
+
+    assignee_class: Literal["agent", "human", "unassigned"]
+    points_per_day: float | None = None
+    n: int
+
+
 class BoardMetricsRead(BaseModel):
     """Derived fleet-reporting metrics for a board over a period (M5 V17, KAN-250).
 
@@ -1023,6 +1045,7 @@ class BoardMetricsRead(BaseModel):
     cycle_time: CycleTimeMetrics
     aging_wip: AgingWipMetrics
     by_assignee: list[AssigneeMetrics] = []
+    by_assignee_class: list[AssigneeClassMetrics] = []
 
 
 # --- query grammar + saved views (M5 V14, KAN-247) --------------------------
