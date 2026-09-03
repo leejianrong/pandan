@@ -208,10 +208,19 @@
   .theme-toggle:hover {
     color: var(--ink);
     border-color: var(--muted);
+    /* --state-hover is defined in app.css in terms of --text, which this
+       page's own --ink mirrors exactly in both themes (see the --ink
+       assignments above) — safe to reuse rather than a third copy of the
+       same wash under a Landing-local name. */
+    background: linear-gradient(var(--state-hover), var(--state-hover)), var(--surface);
   }
   .theme-toggle:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+    background: linear-gradient(var(--state-focus), var(--state-focus)), var(--surface);
+  }
+  .theme-toggle:active {
+    background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--surface);
   }
   .demo-link {
     font-size: var(--type-label-large-size);
@@ -222,6 +231,14 @@
     font-weight: 500;
   }
   .demo-link:hover {
+    color: var(--ink);
+  }
+  /* No focus-visible existed at all before this slice — a real a11y gap on
+     a keyboard-reachable link. Zero padding (like button.link in app.css),
+     so an outline rather than a background wash. */
+  .demo-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
     color: var(--ink);
   }
 
@@ -313,8 +330,14 @@
       filter 0.12s ease;
   }
   .btn-github:hover {
+    /* Keeps the existing lift + brighten (this page's own established
+       hover language for its hero CTA) and layers the M3 hover wash on
+       top, same as every other filled button in this slice. Pairs with
+       --btn-on (this button's OWN content colour on its OWN --btn-ink
+       fill — not the app-shell --accent/--on-accent pair). */
     transform: translateY(-1px);
     filter: brightness(1.08);
+    background: linear-gradient(color-mix(in srgb, var(--btn-on) 8%, transparent), color-mix(in srgb, var(--btn-on) 8%, transparent)), var(--btn-ink);
   }
   .btn-github:disabled {
     opacity: 0.7;
@@ -323,6 +346,10 @@
   .btn-github:focus-visible {
     outline: 3px solid var(--accent);
     outline-offset: 2px;
+    background: linear-gradient(color-mix(in srgb, var(--btn-on) 12%, transparent), color-mix(in srgb, var(--btn-on) 12%, transparent)), var(--btn-ink);
+  }
+  .btn-github:active {
+    background: linear-gradient(color-mix(in srgb, var(--btn-on) 12%, transparent), color-mix(in srgb, var(--btn-on) 12%, transparent)), var(--btn-ink);
   }
   .btn-github svg {
     fill: currentColor;
@@ -338,6 +365,12 @@
   }
   .text-link:hover {
     text-decoration: underline;
+  }
+  /* No focus-visible existed at all before this slice. Zero padding, so
+     an outline rather than a wash (same reasoning as .demo-link above). */
+  .text-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .error {
@@ -419,6 +452,11 @@
   footer a:hover {
     color: var(--ink);
     text-decoration: underline;
+  }
+  footer a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    color: var(--ink);
   }
 
   @media (prefers-reduced-motion: no-preference) {

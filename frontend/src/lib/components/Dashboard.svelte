@@ -942,7 +942,17 @@
     padding: 0.08rem 0.35rem;
   }
   .mini-link:hover {
+    background: linear-gradient(var(--state-hover), var(--state-hover)), var(--accent-soft);
     text-decoration: underline;
+  }
+  .mini-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    background: linear-gradient(var(--state-focus), var(--state-focus)), var(--accent-soft);
+    text-decoration: underline;
+  }
+  .mini-link:active {
+    background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--accent-soft);
   }
 
   /* --- needs attention --- */
@@ -976,7 +986,19 @@
     padding: 0.1rem 0.2rem;
   }
   .row-link:hover {
+    background: var(--state-hover);
+    border-radius: var(--shape-extra-small);
     text-decoration: underline;
+  }
+  .row-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    background: var(--state-focus);
+    border-radius: var(--shape-extra-small);
+  }
+  .row-link:active {
+    background: var(--state-pressed);
+    border-radius: var(--shape-extra-small);
   }
   .attn-note {
     margin: 0;

@@ -308,4 +308,11 @@
   .settings-stub .link:hover {
     text-decoration: underline;
   }
+  /* Zero padding (same shape as app.css's button.link) — flagged there
+     too: a background wash would clip tight with no room, so only a
+     focus outline is added rather than a full state layer. */
+  .settings-stub .link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
 </style>

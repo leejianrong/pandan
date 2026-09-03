@@ -200,13 +200,30 @@
     flex: none;
   }
   .drawer-item:hover {
-    background: var(--hover);
+    background: var(--state-hover);
+  }
+  .drawer-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    background: var(--state-focus);
+  }
+  .drawer-item:active {
+    background: var(--state-pressed);
   }
   .drawer-item.active {
     background: var(--accent-soft);
     border-color: var(--border);
     color: var(--accent);
     font-weight: 600;
+  }
+  .drawer-item.active:hover {
+    background: linear-gradient(var(--state-hover), var(--state-hover)), var(--accent-soft);
+  }
+  .drawer-item.active:focus-visible {
+    background: linear-gradient(var(--state-focus), var(--state-focus)), var(--accent-soft);
+  }
+  .drawer-item.active:active {
+    background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--accent-soft);
   }
   .drawer-item.active :global(svg) {
     color: var(--accent);
@@ -245,7 +262,17 @@
     cursor: pointer;
   }
   .icon-btn:hover {
-    background: var(--hover);
+    background: var(--state-hover);
+    color: var(--text);
+  }
+  .icon-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    background: var(--state-focus);
+    color: var(--text);
+  }
+  .icon-btn:active {
+    background: var(--state-pressed);
     color: var(--text);
   }
 </style>

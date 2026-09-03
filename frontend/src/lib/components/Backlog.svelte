@@ -182,6 +182,16 @@
   }
   .th-btn:hover {
     color: var(--text);
+    background: var(--state-hover);
+  }
+  .th-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    color: var(--text);
+    background: var(--state-focus);
+  }
+  .th-btn:active {
+    background: var(--state-pressed);
   }
   tbody td {
     padding: 0.5rem 0.7rem;
@@ -194,8 +204,17 @@
   tbody tr {
     cursor: pointer;
   }
+  /* This row IS click-interactive (onclick opens the card — see the
+     markup), unlike BoardTable's decorative-only rows, so it gets a
+     pressed state too. No :focus-visible: the <tr> has no tabindex/role
+     (a pre-existing keyboard-accessibility gap, flagged in the M3-5 PR,
+     not fixed here — adding one is a markup/semantics change beyond a
+     state-layer-only slice). */
   tbody tr:hover {
-    background: var(--hover);
+    background: var(--state-hover);
+  }
+  tbody tr:active {
+    background: var(--state-pressed);
   }
   tbody tr.parked {
     opacity: 0.65;

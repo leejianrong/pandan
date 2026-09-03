@@ -157,6 +157,16 @@
   }
   .th-btn:hover {
     color: var(--text);
+    background: var(--state-hover);
+  }
+  .th-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    color: var(--text);
+    background: var(--state-focus);
+  }
+  .th-btn:active {
+    background: var(--state-pressed);
   }
   tbody td {
     padding: 0.5rem 0.7rem;
@@ -166,8 +176,12 @@
   tbody tr:last-child td {
     border-bottom: none;
   }
+  /* Decorative row highlight only — <tr> carries no click handler/role
+     here (this table's rows aren't independently interactive), so no
+     focus/pressed state is added. Just the --hover -> --state-hover
+     rename (M8 M3-5, KAN-1094); same value. */
   tbody tr:hover {
-    background: var(--hover);
+    background: var(--state-hover);
   }
   .title-cell {
     max-width: 28rem;
