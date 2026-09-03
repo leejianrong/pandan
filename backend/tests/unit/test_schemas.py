@@ -113,6 +113,36 @@ def test_epic_create_rejects_bad_target_date():
         EpicCreate(name="ok", target_date="not-a-date")
 
 
+def test_epic_color_defaults_to_none():
+    # M8 V63 (KAN-984): color is optional, unlike label.color.
+    assert EpicCreate(name="Q3 Launch").color is None
+    assert EpicUpdate().color is None
+
+
+def test_epic_create_accepts_palette_token_or_hex_color():
+    assert EpicCreate(name="ok", color="fuchsia").color == "fuchsia"
+    assert EpicCreate(name="ok", color="#0ea5e9").color == "#0ea5e9"
+
+
+def test_epic_create_rejects_unknown_color():
+    with pytest.raises(ValidationError):
+        EpicCreate(name="ok", color="banana")
+
+
+def test_epic_update_accepts_color_and_clears():
+    upd = EpicUpdate(color="sky")
+    assert upd.color == "sky"
+    # Unlike LabelUpdate (which rejects an explicit null), None is a genuine,
+    # permanent value for epic.color — clearing it is a real operation.
+    cleared = EpicUpdate(color=None)
+    assert cleared.model_dump(exclude_unset=True) == {"color": None}
+
+
+def test_epic_update_rejects_unknown_color():
+    with pytest.raises(ValidationError):
+        EpicUpdate(color="banana")
+
+
 @pytest.mark.parametrize("bad_title", ["", "   ", "\t\n"])
 def test_create_rejects_empty_or_whitespace_title(bad_title):
     with pytest.raises(ValidationError):

@@ -2657,7 +2657,22 @@ def test_epic_create_maps_all_options(monkeypatch, env):
             "create_epic",
             {
                 "name": "Onboarding", "board_id": 2, "description": "d",
-                "target_date": "2026-09-01T00:00:00Z", "lead": "ada",
+                "target_date": "2026-09-01T00:00:00Z", "lead": "ada", "color": None,
+            },
+        )
+    ]
+
+
+def test_epic_create_passes_color(monkeypatch, env):
+    # M8 V63 (KAN-984): --color rides alongside the other optional epic fields.
+    fake = patch_client(monkeypatch, FakeClient(result=EPIC))
+    assert cli.run(["epic", "create", "Onboarding", "--color", "fuchsia"]) == 0
+    assert fake.calls == [
+        (
+            "create_epic",
+            {
+                "name": "Onboarding", "board_id": None, "description": None,
+                "target_date": None, "lead": None, "color": "fuchsia",
             },
         )
     ]
@@ -2676,7 +2691,21 @@ def test_epic_update_maps_fields(monkeypatch, env):
             "update_epic",
             {
                 "epic_id": 1, "name": "New", "description": "x",
-                "target_date": "2026-12-31T12:00:00Z", "lead": "grace",
+                "target_date": "2026-12-31T12:00:00Z", "lead": "grace", "color": None,
+            },
+        )
+    ]
+
+
+def test_epic_update_passes_color(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=EPIC))
+    assert cli.run(["epic", "update", "1", "--color", "sky"]) == 0
+    assert fake.calls == [
+        (
+            "update_epic",
+            {
+                "epic_id": 1, "name": None, "description": None,
+                "target_date": None, "lead": None, "color": "sky",
             },
         )
     ]
@@ -3640,7 +3669,7 @@ def test_epic_update_accepts_epic_ticket(monkeypatch, env):
             "update_epic",
             {
                 "epic_id": 7, "name": "New", "description": None,
-                "target_date": None, "lead": None,
+                "target_date": None, "lead": None, "color": None,
             },
         ),
     ]

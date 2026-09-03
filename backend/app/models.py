@@ -364,6 +364,12 @@ class Epic(Base):
         DateTime(timezone=True), nullable=True
     )
     lead: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Epic colour (M8 V63, KAN-984, issue #278). Nullable — unlike label.color this
+    # is NOT required, since an uncoloured epic just keeps today's fixed neutral
+    # chip look (Card.svelte / EpicItem.svelte fall back when this is NULL). Drawn
+    # from the same seven-token palette as label.color and validated identically
+    # (see app.palette.is_valid_label_color) rather than inventing a second palette.
+    color: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Soft-delete tombstone (KAN-19, R5.2). NULL = live; a timestamp = deleted.
     # DELETE sets this instead of removing the row; default reads filter it out
     # (``deleted_at IS NULL``). The FK from ``card.epic_id`` is intentionally left

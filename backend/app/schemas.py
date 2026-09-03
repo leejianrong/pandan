@@ -55,6 +55,7 @@ MAX_ASSIGNEE_LEN = 255  # card.assignee varchar(255)
 MAX_LEAD_LEN = 255  # epic.lead varchar(255)
 MAX_LINK_LABEL_LEN = 255  # card_link.label varchar(255)
 MAX_LABEL_COLOR_LEN = 32  # label.color varchar(32)
+MAX_EPIC_COLOR_LEN = 32  # epic.color varchar(32)
 MAX_EMAIL_LEN = 320  # RFC 5321 upper bound (member lookup)
 MAX_DESCRIPTION_LEN = 20_000  # Text column — long markdown
 MAX_TEXT_LEN = 10_000  # Text columns — comment body, attention note
@@ -471,6 +472,9 @@ class EpicCreate(BaseModel):
     # target/ship date; ``lead`` an optional free-text owner. Both optional → NULL.
     target_date: datetime | None = None
     lead: Annotated[str | None, Field(max_length=MAX_LEAD_LEN)] = None
+    # Epic colour (M8 V63, KAN-984, issue #278) — optional, unlike label.color.
+    # Drawn from the same seven-token palette and validated the same way.
+    color: Annotated[str | None, Field(max_length=MAX_EPIC_COLOR_LEN)] = None
 
     @field_validator("name")
     @classmethod
@@ -479,23 +483,47 @@ class EpicCreate(BaseModel):
             raise ValueError("name must not be empty")
         return v
 
+    @field_validator("color")
+    @classmethod
+    def known_color(cls, v: str | None) -> str | None:
+        """The same palette rule as :class:`LabelCreate` (V62, KAN-983) — but only
+        when a colour was actually given, since (unlike a label) ``None`` is a
+        legitimate, permanent value here, not just "not sent"."""
+        if v is not None and not is_valid_label_color(v):
+            raise ValueError(label_color_error())
+        return v
+
 
 class EpicUpdate(BaseModel):
     """Field edits for an epic. All optional — only sent fields are applied.
 
-    ``target_date`` / ``lead`` (V31, KAN-295) accept a value to set, or ``null`` to
+    ``target_date`` / ``lead`` / ``color`` accept a value to set, or ``null`` to
     clear (the router applies only the fields actually sent, via ``exclude_unset``)."""
 
     name: Annotated[str | None, Field(max_length=MAX_NAME_LEN)] = None
     description: Annotated[str | None, Field(max_length=MAX_DESCRIPTION_LEN)] = None
     target_date: datetime | None = None
     lead: Annotated[str | None, Field(max_length=MAX_LEAD_LEN)] = None
+    # Epic colour (M8 V63, KAN-984). Genuinely clearable — ``null`` means "remove
+    # the colour", unlike label.color's LabelUpdate which rejects null outright.
+    color: Annotated[str | None, Field(max_length=MAX_EPIC_COLOR_LEN)] = None
 
     @field_validator("name")
     @classmethod
     def name_non_empty(cls, v: str | None) -> str | None:
         if v is not None and not v.strip():
             raise ValueError("name must not be empty")
+        return v
+
+    @field_validator("color")
+    @classmethod
+    def known_color(cls, v: str | None) -> str | None:
+        """The same palette rule as :class:`EpicCreate`. Fires only when ``color``
+        was actually sent (Pydantic v2 skips validators on an unset default), so
+        an explicit ``null`` — a real, valid value here — still reaches this
+        validator and passes straight through, clearing the column."""
+        if v is not None and not is_valid_label_color(v):
+            raise ValueError(label_color_error())
         return v
 
 
@@ -536,6 +564,9 @@ class EpicRead(BaseModel):
     # Lightweight project fields (V31, KAN-295) — real columns, read directly.
     target_date: datetime | None
     lead: str | None
+    # Epic colour (M8 V63, KAN-984) — a real column, plain passthrough. Null for
+    # an epic that hasn't been given one; renders with the fixed neutral chip look.
+    color: str | None
     # Derived progress rollup + health signal (V32, KAN-296) — NOT stored columns;
     # the epics router attaches them per read from a grouped child-card COUNT +
     # ``app.epic_rollup.compute_rollup``. ``health`` is null when target_date is unset.

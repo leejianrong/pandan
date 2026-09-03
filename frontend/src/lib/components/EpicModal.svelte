@@ -1,8 +1,10 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Trash2, X } from "lucide-svelte";
+  import { labelColor } from "../api";
   import { cardsForEpic, editEpic, epicStore, removeEpic } from "../board.svelte";
   import { displayRef } from "../tickets";
+  import EpicColorPicker from "./EpicColorPicker.svelte";
   import Modal from "./Modal.svelte";
 
   // Edit an epic's name + description in place, with its story rollup shown for
@@ -23,14 +25,18 @@
   const initial = untrack(() => ({
     name: epic?.name ?? "",
     desc: epic?.description ?? "",
+    color: epic?.color ?? null,
   }));
   let name = $state(initial.name);
   let description = $state(initial.desc);
+  let color = $state<string | null>(initial.color);
   let submitting = $state(false);
   let error = $state<string | null>(null);
 
   const dirty = $derived(
-    name.trim() !== initial.name || description.trim() !== initial.desc,
+    name.trim() !== initial.name ||
+      description.trim() !== initial.desc ||
+      color !== initial.color,
   );
   const canSubmit = $derived(name.trim().length > 0 && dirty && !submitting);
 
@@ -43,6 +49,7 @@
       await editEpic(epic.id, {
         name: name.trim(),
         description: description.trim() || null,
+        color,
       });
       onclose();
     } catch (e) {
@@ -73,6 +80,14 @@
   <Modal label="Epic {displayRef(epic)}: {epic.name}" {onclose}>
     <form class="card-form epic-modal" onsubmit={submit}>
       <header class="modal-head">
+        {#if epic.color}
+          <span
+            class="epic-color-dot"
+            style="background: {labelColor(epic.color)}"
+            title="Epic colour"
+            aria-hidden="true"
+          ></span>
+        {/if}
         <span class="ticket epic-ticket" title={epic.ticket_number}>{displayRef(epic)}</span>
         <span class="epic-count">
           {stories.length}
@@ -105,6 +120,13 @@
             rows="3"
             bind:value={description}
           ></textarea>
+
+          <span class="field-label">Colour</span>
+          <EpicColorPicker
+            name="epic-{epic.id}-color"
+            value={color}
+            onchange={(c) => (color = c)}
+          />
 
           <div class="epic-rollup-block">
             <span class="field-label">Stories</span>

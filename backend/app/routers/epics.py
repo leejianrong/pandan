@@ -159,6 +159,7 @@ def create_epic(
         description=payload.description,
         target_date=payload.target_date,
         lead=payload.lead,
+        color=payload.color,
     )
     db.add(epic)
     db.commit()

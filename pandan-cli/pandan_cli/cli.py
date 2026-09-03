@@ -2689,6 +2689,7 @@ def _cmd_epic_create(client: PandanClient, config: Config, args: argparse.Namesp
         description=args.description,
         target_date=args.target_date,
         lead=args.lead,
+        color=args.color,
     )
 
 
@@ -2699,6 +2700,7 @@ def _cmd_epic_update(client: PandanClient, config: Config, args: argparse.Namesp
         description=args.description,
         target_date=args.target_date,
         lead=args.lead,
+        color=args.color,
     )
 
 
@@ -4101,6 +4103,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="a target/ship date (ISO-8601 timestamp)",
     )
     p_epic_create.add_argument("--lead", help="a free-text owner (person/agent handle)")
+    p_epic_create.add_argument(
+        "--color", metavar="COLOR",
+        help=(
+            "a palette token or hex, e.g. sky or #0ea5e9 (optional; omit for no "
+            f"colour). tokens: {', '.join(LABEL_PALETTE)}"
+        ),
+    )
     p_epic_create.set_defaults(
         func=_cmd_epic_create, noun="epic", hints=_HINTS["epic create"]
     )
@@ -4117,6 +4126,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="a target/ship date (ISO-8601 timestamp)",
     )
     p_epic_update.add_argument("--lead", help="a free-text owner (person/agent handle)")
+    p_epic_update.add_argument(
+        "--color", metavar="COLOR",
+        help=(
+            "new palette token or hex, e.g. sky or #0ea5e9. "
+            f"tokens: {', '.join(LABEL_PALETTE)}"
+        ),
+    )
     p_epic_update.set_defaults(func=_cmd_epic_update, noun="epic")
 
     p_epic_delete = epic_sub.add_parser("delete", parents=[common], help="delete an epic")

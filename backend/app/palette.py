@@ -13,6 +13,10 @@ offers only the former; the hex branch exists so the ~existing stored values kee
 validating and no value migration is needed (R4.2 — and there is nothing additive to
 migrate here, since the column is already ``varchar(32)``).
 
+M8 V63 (KAN-984) reuses this exact palette + :func:`is_valid_label_color` for the new,
+**nullable** ``epic.color`` — issue #278's colour ask was never label-specific, and a
+second seven-hue palette would just be this one with different names.
+
 WHY SEVEN TOKENS AND NOT THE SHAPE'S "~12"
 ------------------------------------------
 The palette is **disjoint from the status colours** (settled 2026-08-23, SHAPING Q5)
