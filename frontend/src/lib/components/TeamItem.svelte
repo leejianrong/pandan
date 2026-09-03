@@ -166,7 +166,7 @@
     display: inline-flex;
     align-items: center;
     padding: 0.1rem 0.45rem;
-    border-radius: 999px;
+    border-radius: var(--shape-full);
     font-size: var(--type-label-small-size);
     line-height: var(--type-label-small-line-height);
     letter-spacing: var(--type-label-small-tracking);
@@ -214,7 +214,7 @@
     font-weight: var(--type-body-medium-weight);
     letter-spacing: var(--type-body-medium-tracking);
     padding: 0.3rem 0.5rem;
-    border-radius: 6px;
+    border-radius: var(--shape-small);
     background: var(--hover);
   }
   .member-email,

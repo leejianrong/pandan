@@ -144,7 +144,7 @@
   .table-wrap {
     overflow-x: auto;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--shape-medium);
     background: var(--card-bg);
   }
   .card-table {

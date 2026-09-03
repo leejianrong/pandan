@@ -205,7 +205,7 @@
     place-items: center;
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: var(--shape-small);
     background: var(--agent-soft);
     color: var(--agent);
     flex: none;

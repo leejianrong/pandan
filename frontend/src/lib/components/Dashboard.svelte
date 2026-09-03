@@ -705,7 +705,7 @@
     padding: 0.85rem 1rem;
     background: var(--card-bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--shape-medium);
     box-shadow: var(--shadow-sm);
   }
   .stat-icon {
@@ -713,7 +713,7 @@
     place-items: center;
     width: 34px;
     height: 34px;
-    border-radius: 9px;
+    border-radius: var(--shape-small);
     flex: none;
     background: var(--accent-soft);
     color: var(--accent);
@@ -767,7 +767,7 @@
   .panel {
     background: var(--card-bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--shape-medium);
     padding: 1rem 1.1rem 1.1rem;
     margin-bottom: 1rem;
   }
@@ -796,7 +796,7 @@
     letter-spacing: var(--type-label-medium-tracking);
     color: var(--muted);
     background: var(--surface-2);
-    border-radius: 10px;
+    border-radius: var(--shape-full);
     padding: 0.05rem 0.5rem;
     font-variant-numeric: tabular-nums;
   }
@@ -877,7 +877,7 @@
     gap: 0.45rem;
     padding: 0.4rem 0.5rem;
     background: var(--surface-2);
-    border-radius: 6px;
+    border-radius: var(--shape-small);
   }
   .ticket {
     font-family: var(--mono);
@@ -916,7 +916,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.02em;
-    border-radius: 4px;
+    border-radius: var(--shape-full);
     padding: 0.08rem 0.35rem;
   }
   .mini-badge.attn {
@@ -938,7 +938,7 @@
     text-decoration: none;
     background: var(--accent-soft);
     color: var(--accent);
-    border-radius: 4px;
+    border-radius: var(--shape-full);
     padding: 0.08rem 0.35rem;
   }
   .mini-link:hover {
@@ -953,7 +953,7 @@
     padding: 0.55rem 0.6rem;
     background: var(--surface-2);
     border-left: 3px solid var(--danger);
-    border-radius: 6px;
+    border-radius: var(--shape-small);
   }
   .attn-top {
     display: flex;
@@ -1062,12 +1062,12 @@
     min-width: 0;
     height: 9px;
     background: var(--surface-2);
-    border-radius: 4px;
+    border-radius: var(--shape-full);
     display: flex;
     align-items: center;
   }
   .bar-track .bar {
-    border-radius: 4px;
+    border-radius: var(--shape-full);
   }
   .ideal-tick {
     position: absolute;
@@ -1095,7 +1095,7 @@
     letter-spacing: var(--type-label-medium-tracking);
     padding: 0.25rem 1.6rem 0.25rem 0.5rem;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--shape-extra-small);
     background-color: var(--card-bg);
     color: var(--text);
   }
@@ -1199,7 +1199,7 @@
     letter-spacing: var(--type-label-medium-tracking);
     padding: 0.25rem 1.6rem 0.25rem 0.5rem;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--shape-extra-small);
     background-color: var(--card-bg);
     color: var(--text);
   }
@@ -1217,7 +1217,7 @@
     align-items: start;
     gap: 0.65rem;
     padding: 0.5rem 0.55rem;
-    border-radius: 6px;
+    border-radius: var(--shape-small);
   }
   .feed-row:hover {
     background: var(--surface-2);
@@ -1227,7 +1227,7 @@
     place-items: center;
     width: 28px;
     height: 28px;
-    border-radius: 8px;
+    border-radius: var(--shape-small);
     background: var(--accent-soft);
     color: var(--accent);
     flex: none;

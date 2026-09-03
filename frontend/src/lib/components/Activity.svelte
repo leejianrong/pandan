@@ -168,7 +168,7 @@
     place-items: center;
     width: 30px;
     height: 30px;
-    border-radius: 8px;
+    border-radius: var(--shape-small);
     background: var(--accent-soft);
     color: var(--accent);
     flex: none;
