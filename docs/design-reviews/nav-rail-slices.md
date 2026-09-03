@@ -42,10 +42,14 @@ reopened by a slice above:
 
 ## Testing notes
 
-- **NR-1** is the one slice that needs a genuinely new e2e spec (`nav-rail.spec.ts` or similar) — none
-  of the four board-scoped destinations it makes rail-navigable have an existing "reached via nav"
-  test, since the drawer itself was never asserted on (see SHAPING's *Existing test exposure*). Cover:
-  each of the 7 items navigates to its view, and the active one carries `aria-current`.
+- **NR-1** is the one slice that needs a genuinely new e2e spec (`nav-rail.spec.ts`) — none of the
+  seven board-scoped destinations it makes rail-navigable have an existing "reached via nav" test,
+  since the drawer itself was never asserted on (see SHAPING's *Existing test exposure*). Cover: each
+  of the 7 items navigates to its view, and the active one carries `aria-current`. **Also run the full
+  suite, not just the new spec** — NR-1 shipped, `frontend/e2e/helpers.ts`'s `openView()` broke for
+  every spec touching a shared label (Activity/Backlog/Dashboard/Epics/Labels/Trash), not just the
+  "Board" case SHAPING's D1 called out; see D1's correction for the fix (scope `openView` to the
+  drawer). Confirm the whole suite is green, not just the new spec, before calling NR-1 done.
 - **NR-2** is a regression check first, a feature second: confirm `epic-story.spec.ts:50` and
   `trash.spec.ts:65` pass unmodified (they should — same accessible name, now sourced from the rail
   instead of the pill), then add coverage for the rail's Board item specifically if the NR-1 spec
