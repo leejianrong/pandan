@@ -3020,3 +3020,60 @@ every later slice builds on top of it. Landing-page scope was an open question o
 confirmed **include** the landing page this time, overriding that precedent — worth checking
 `docs/design-reviews/nav-ia-audit.md` or a future landing-specific card if that answer needs to be
 recorded somewhere more durable than this log entry.
+
+### Result: all six cards landed (KAN-1089–1094, PRs #346–352)
+
+The full chain landed in one continuous session with no reverts and no hotfixes. Sequencing choice
+validated itself: KAN-1091 (type scale) and KAN-1092 (shape scale) each independently discovered
+that their card text under-scoped the sweep — the card for each named only a couple of literal
+`var()` sites to remap, but a purpose-consistent scale only makes sense applied to *every* matching
+selector in the app (174 `font-size` sites for M3-2, ~130 `border-radius` sites for M3-3), so both
+agents inferred and executed the wider scope, each citing the other as precedent. **Worth writing
+into the ticket next time a "systematic token sweep" card is shaped**: say the full-sweep depth
+explicitly rather than relying on an agent to infer it from a parenthetical example list — two
+agents independently made the right call here, but that's a pattern worth trusting less than a
+clear instruction.
+
+KAN-1090 surfaced a **real cross-theme M3 gotcha**, not just a style nit: the surface-container tone
+steps run in *opposite* directions per scheme (light: `-lowest` is brightest; dark: `-lowest` is
+darkest), so naively reusing the same tier name for `--card-bg` in both themes silently broke the
+"card pops above the page" convention in dark mode only — caught by the agent's own before/after
+screenshot regression check, not by `svelte-check` or CI (nothing type-checks a wrong-but-valid
+hex value). **Visual review of a generated-palette PR earns its keep here**; a color-token slice
+is exactly the kind of change CI is structurally unable to catch.
+
+KAN-1094 (state layers, the epic's riskiest slice by design — it's the one slice that touches the
+`svelte-dnd-action` dragged-card state the whole "tokens-only, no `m3-svelte`" epic decision exists
+to protect) landed clean: the dragged-state CSS hooks the library's own fixed
+`#dnd-action-dragged-el` id (verified by the agent reading `node_modules/svelte-dnd-action/dist/
+index.js` directly rather than guessing), so no `Column.svelte`/dndzone/event-handler code was
+touched at all — the interaction logic and the visual state layer stayed fully decoupled, which is
+exactly what "tokens-only" was supposed to buy. Held for PM merge review (not self-merged, unlike
+1091–1093) specifically because of that risk; review confirmed the diff was as conservative as
+reported.
+
+**A subagent got stuck twice in a "wait for a notification that will never come" loop** on
+KAN-1094: it started a background Playwright check from inside its own worktree, then ended its
+turn saying it would wait for a completion notification — but a *subagent* (not the top-level
+session) gets no such async push for its own backgrounded work, so it just sat there and had to be
+resumed twice by the PM with an explicit "stop waiting, poll the task's status yourself in your
+next tool call" before it self-corrected. Worth remembering as a PM: if a delegated agent reports
+"waiting for X to notify me" and X is something *it* started (not something the harness is tracking
+for the top-level session), that's a dead end — nudge it to poll synchronously rather than assuming
+it'll come back on its own.
+
+**Findings surfaced but NOT filed as follow-up cards this session** (flagged to the maintainer
+instead, since filing them unilaterally would be scope creep beyond the six cards asked for):
+- KAN-1089's audit found the ⌘K command palette's `VIEWS` list is stale (missing Labels and
+  Backlog, both added after the palette was last touched) — a small, concrete bug, not a design
+  question.
+- KAN-1089 also flagged: "view" collides across three unrelated meanings in the app's own UI copy
+  (the drawer, a saved query, a board/table layout mode); no breadcrumb outside the Board pill; and
+  a redundant no-op Inbox entry duplicating the bell.
+- KAN-1094's audit found `.menu-pop`/`.board-menu` in `app.css` is dead CSS — no component
+  references it anymore (the real dropdown surface is Bits UI's `.ui-item`/`.ui-popup`) — safe to
+  delete whenever someone's next in that file.
+- KAN-1089's own deliverable (`docs/design-reviews/nav-ia-audit.md`) explicitly did NOT implement
+  its recommended nav restructure — that's future shaping work, not this session's scope, and per
+  the audit's own sequencing note should land before any further nav-chrome (SideNav, top bar)
+  restyling to avoid re-skinning something about to move.
