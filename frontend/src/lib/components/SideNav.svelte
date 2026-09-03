@@ -142,9 +142,9 @@
     z-index: 100;
     width: 264px;
     max-width: 82vw;
-    background: var(--card-bg);
+    background: var(--elevation-3-surface);
     border-right: 1px solid var(--border);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--elevation-3-shadow);
     transform: translateX(-100%);
     transition: transform 0.2s ease;
     display: flex;
