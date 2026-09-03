@@ -90,9 +90,16 @@ export async function pickSelect(
 // Dashboard/Epics/Activity/Tokens/Members/Trash moved out of the always-visible
 // top bar into a drawer: open it (hamburger), then click the item, which navigates
 // and closes the drawer. Board stays a top-bar pill (click "Board" directly).
+//
+// Scoped to the drawer (role "complementary") rather than page-wide: since NR-1
+// (KAN-1148) the persistent NavRail duplicates most of these labels (role
+// "navigation"), so an unscoped getByRole is ambiguous for every shared item.
 export async function openView(page: Page, name: string): Promise<void> {
   await page.getByRole("button", { name: "Open menu" }).click();
-  await page.getByRole("button", { name, exact: true }).click();
+  await page
+    .getByRole("complementary")
+    .getByRole("button", { name, exact: true })
+    .click();
 }
 
 export function column(page: Page, label: string): Locator {

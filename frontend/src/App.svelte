@@ -14,6 +14,8 @@
   import CommandPalette from "./lib/components/CommandPalette.svelte";
   import SideNav from "./lib/components/SideNav.svelte";
   import type { DrawerView } from "./lib/components/SideNav.svelte";
+  import NavRail from "./lib/components/NavRail.svelte";
+  import type { RailView } from "./lib/components/NavRail.svelte";
   import Tokens from "./lib/components/Tokens.svelte";
   import Members from "./lib/components/Members.svelte";
   import Teams from "./lib/components/Teams.svelte";
@@ -84,6 +86,11 @@
   function navigateFromDrawer(next: DrawerView) {
     show(next);
     drawerOpen = false;
+  }
+
+  // Navigating from the persistent rail (NR-1, KAN-1148) — no drawer to close.
+  function navigateFromRail(next: RailView) {
+    show(next);
   }
 
   // Auth gating (M3 V6, A9): undefined = check in flight; null = logged out (show
@@ -246,38 +253,44 @@
 
   <CommandPalette bind:open={paletteOpen} navigate={(v) => show(v as typeof view)} />
 
-  <main>
-    {#if view === "board"}
-      <Board />
-    {:else if view === "dashboard"}
-      <Dashboard navigate={() => show("board")} />
-    {:else if view === "epics"}
-      <Epics />
-    {:else if view === "labels"}
-      <Labels />
-    {:else if view === "backlog"}
-      <Backlog />
-    {:else if view === "activity"}
-      <Activity />
-    {:else if view === "tokens"}
-      <Tokens />
-    {:else if view === "members"}
-      <Members />
-    {:else if view === "teams"}
-      <Teams />
-    {:else if view === "settings"}
-      <section class="settings-stub">
-        <h2>Settings</h2>
-        <p>Account settings are coming soon.</p>
-        <p>
-          Looking for personal access tokens?
-          <button class="link" onclick={() => show("tokens")}>Open Tokens →</button>
-        </p>
-      </section>
-    {:else}
-      <Trash />
-    {/if}
-  </main>
+  <!-- app-shell (NR-1, KAN-1148): a layout column for the persistent rail.
+       Runs alongside the existing hamburger+SideNav drawer (both work; see
+       nav-rail-shaping.md D3) until NR-4 removes the drawer. -->
+  <div class="app-shell">
+    <NavRail {view} onNavigate={navigateFromRail} />
+    <main>
+      {#if view === "board"}
+        <Board />
+      {:else if view === "dashboard"}
+        <Dashboard navigate={() => show("board")} />
+      {:else if view === "epics"}
+        <Epics />
+      {:else if view === "labels"}
+        <Labels />
+      {:else if view === "backlog"}
+        <Backlog />
+      {:else if view === "activity"}
+        <Activity />
+      {:else if view === "tokens"}
+        <Tokens />
+      {:else if view === "members"}
+        <Members />
+      {:else if view === "teams"}
+        <Teams />
+      {:else if view === "settings"}
+        <section class="settings-stub">
+          <h2>Settings</h2>
+          <p>Account settings are coming soon.</p>
+          <p>
+            Looking for personal access tokens?
+            <button class="link" onclick={() => show("tokens")}>Open Tokens →</button>
+          </p>
+        </section>
+      {:else}
+        <Trash />
+      {/if}
+    </main>
+  </div>
 
   <!-- Keyboard-shortcuts help overlay (V36, KAN-300). Mounted here at the top level
        (not inside Board) so the avatar menu's "Keyboard shortcuts" entry (KAN-392)
@@ -289,6 +302,20 @@
 {/if}
 
 <style>
+  /* Layout column for NavRail + main (NR-1, KAN-1148). Previously header/main
+     were plain top-level siblings with no shell — app.css's own `main`
+     selector still governs main's padding/etc, this just gives the rail a
+     place to sit beside it. */
+  .app-shell {
+    display: flex;
+    align-items: flex-start;
+    min-height: 0;
+  }
+  .app-shell > :global(main) {
+    flex: 1;
+    min-width: 0;
+  }
+
   .settings-stub {
     max-width: 32rem;
     color: var(--muted);

@@ -41,6 +41,18 @@ audit's rough sketch (§4) left underspecified and that would have broken CI if 
   Board item (7 items: Dashboard, Epics, Labels, Backlog, Activity, Members, Trash), and the slice that
   adds Board to the rail (NR-2) removes the pill in the same PR — the two changes are atomic precisely
   so there is never a moment with two "Board" buttons on screen.
+
+  **Correction, found while building NR-1:** this reasoning was scoped too narrowly at shaping time —
+  it only checked "Board" because that's the audit's own wording, but the *same* ambiguity applies to
+  **all 7 of NR-1's items**, since the rail deliberately duplicates the drawer's labels for the whole
+  NR-1–NR-3 coexistence window (D3). `frontend/e2e/helpers.ts`'s `openView(page, name)` — used by
+  `activity`/`backlog`/`dashboard`/`epic-story`/`epic-rollup`/`keyboard`/`labels`/`trash`/`ui-polish`
+  .spec.ts — did an unscoped `page.getByRole("button", { name, exact: true })`, which broke the moment
+  the rail existed alongside the drawer (3 specs failed on the first NR-1 test run). Fixed by scoping
+  that helper to the drawer specifically (`getByRole("complementary")`, the `<aside>`'s implicit role,
+  vs. the rail's `<nav>` = role `navigation`) rather than by changing NR-1's item set — the helper's own
+  intent was always "use the drawer," so scoping it preserves that intent instead of working around it.
+  No slice boundary changed; this was a test-infra gap in the coexistence window, not a re-shape.
 - **D2 — Tokens/Teams are never added to the rail, at any point.** They're account-scoped (audit §1),
   so the rail's final item set is fixed at 7→8 (D1) from the start; NR-3 only adds them to the avatar
   menu and removes them from the old drawer. No slice does throwaway work adding-then-removing a rail
