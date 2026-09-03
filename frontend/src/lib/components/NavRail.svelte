@@ -7,19 +7,21 @@
   // component — no open/onClose/scrim/onOpenInbox, since this is always
   // visible and never shows Inbox (that stays the top-bar bell only).
   //
-  // Deliberately excludes "Board" (D1, nav-rail-shaping.md): adding it here
-  // while the top-bar .board-tab pill still exists would give two buttons
-  // named "Board" at once, breaking epic-story.spec.ts/trash.spec.ts's
-  // getByRole("button", { name: "Board", exact: true }) under Playwright's
-  // strict mode. NR-2 adds it here and retires the pill atomically.
+  // "Board" is the rail's first item (NR-2, KAN-1149) — added here atomically
+  // with retiring the top-bar .board-tab pill in App.svelte, so there is
+  // never a moment with two buttons named "Board" on screen (see D1,
+  // nav-rail-shaping.md, and its correction — the same collision actually
+  // hit all 7 of NR-1's items during the drawer/rail coexistence window,
+  // fixed in frontend/e2e/helpers.ts's openView() rather than here).
   //
-  // Also excludes Tokens/Teams (account-scoped, D2) and Inbox (already has
+  // Still excludes Tokens/Teams (account-scoped, D2) and Inbox (already has
   // the bell, D3/crease 4) — those never appear in the rail at any point.
   import {
     Activity,
     Archive,
     Layers,
     LayoutDashboard,
+    SquareKanban,
     Tag,
     Trash2,
     Users,
@@ -27,6 +29,7 @@
   import type { Icon } from "lucide-svelte";
 
   export type RailView =
+    | "board"
     | "dashboard"
     | "epics"
     | "labels"
@@ -39,6 +42,7 @@
     $props();
 
   const items: { id: RailView; label: string; icon: typeof Icon }[] = [
+    { id: "board", label: "Board", icon: SquareKanban },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "epics", label: "Epics", icon: Layers },
     { id: "labels", label: "Labels", icon: Tag },
