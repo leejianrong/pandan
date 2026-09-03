@@ -333,7 +333,19 @@
   }
   .chip-btn:hover,
   .mode-toggle button:hover {
-    background: var(--hover);
+    /* Layered over --card-bg (a solid resting fill), not a flat replace —
+       same 2-stop-gradient technique as app.css (M8 M3-5, KAN-1094). */
+    background: linear-gradient(var(--state-hover), var(--state-hover)), var(--card-bg);
+  }
+  .chip-btn:focus-visible,
+  .mode-toggle button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    background: linear-gradient(var(--state-focus), var(--state-focus)), var(--card-bg);
+  }
+  .chip-btn:active,
+  .mode-toggle button:active {
+    background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--card-bg);
   }
   .mode-toggle {
     display: inline-flex;
@@ -343,6 +355,15 @@
     color: var(--accent);
     background: var(--accent-soft);
     border-color: var(--accent);
+  }
+  .mode-toggle button.active:hover {
+    background: linear-gradient(var(--state-hover), var(--state-hover)), var(--accent-soft);
+  }
+  .mode-toggle button.active:focus-visible {
+    background: linear-gradient(var(--state-focus), var(--state-focus)), var(--accent-soft);
+  }
+  .mode-toggle button.active:active {
+    background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--accent-soft);
   }
   button.primary {
     padding: 0.35rem 0.7rem;
@@ -356,6 +377,21 @@
     border: 1px solid var(--accent);
     border-radius: var(--shape-full);
     cursor: pointer;
+  }
+  /* Pairs with --on-accent, not the on-surface --state-* family — see the
+     token comment in app.css. (This local button.primary hardcodes #fff
+     rather than var(--on-accent) — a pre-existing inconsistency, left
+     alone; out of scope for a state-layer-only slice.) */
+  button.primary:hover {
+    background: linear-gradient(var(--state-hover-on-accent), var(--state-hover-on-accent)), var(--accent);
+  }
+  button.primary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    background: linear-gradient(var(--state-focus-on-accent), var(--state-focus-on-accent)), var(--accent);
+  }
+  button.primary:active {
+    background: linear-gradient(var(--state-pressed-on-accent), var(--state-pressed-on-accent)), var(--accent);
   }
   button.primary:disabled {
     opacity: 0.5;

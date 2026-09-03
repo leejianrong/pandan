@@ -59,7 +59,37 @@
   --danger: #ba1a1a;
   --danger-soft: #ffdad6;
   --on-danger: #ffffff;
-  --hover: rgba(20, 25, 30, 0.06);
+  /* M3 state layers (M8 M3-5, KAN-1094) — replaces the old flat --hover (a
+     single hardcoded 6% overlay reused for every interactive element
+     regardless of surface) with the four spec opacities (hover 8% / focus
+     12% / pressed 12% / dragged 16%, scales-tokens.md), each a wash of the
+     PAIRED content colour over the resting surface per M3's on-surface/
+     on-* pairing rule — never a single "one overlay fits all" colour.
+     Defined ONCE here, in terms of --text/--on-accent/--on-danger (all
+     three already theme-scoped below): a custom property that references
+     var(--text) re-resolves against whichever --text is cascaded on :root
+     at USE time, so these stay correct in dark mode / the data-theme
+     toggle with no per-theme duplication — the same trick the elevation
+     tokens' color-mix() already relies on. --state-* pairs with
+     --text (on-surface — buttons, menu/list rows, cards, the dragged
+     card); --state-*-on-accent pairs with --on-accent (button.primary and
+     any other solid --accent fill); --state-*-on-danger pairs with
+     --on-danger (button.danger). No dragged-on-accent/-on-danger: only
+     cards (surface-coloured) are draggable. Applied as a plain background
+     where the resting surface is transparent (menu rows, icon buttons,
+     tabs); layered via a 2-stop background gradient over an opaque resting
+     fill (button, card) so the underlying colour/tint keeps showing
+     through — see the individual rules below for which. */
+  --state-hover: color-mix(in srgb, var(--text) 8%, transparent);
+  --state-focus: color-mix(in srgb, var(--text) 12%, transparent);
+  --state-pressed: color-mix(in srgb, var(--text) 12%, transparent);
+  --state-dragged: color-mix(in srgb, var(--text) 16%, transparent);
+  --state-hover-on-accent: color-mix(in srgb, var(--on-accent) 8%, transparent);
+  --state-focus-on-accent: color-mix(in srgb, var(--on-accent) 12%, transparent);
+  --state-pressed-on-accent: color-mix(in srgb, var(--on-accent) 12%, transparent);
+  --state-hover-on-danger: color-mix(in srgb, var(--on-danger) 8%, transparent);
+  --state-focus-on-danger: color-mix(in srgb, var(--on-danger) 12%, transparent);
+  --state-pressed-on-danger: color-mix(in srgb, var(--on-danger) 12%, transparent);
   /* M3 elevation scale (M8 M3-4, KAN-1093) — replaces the old flat --shadow-sm/
      --shadow-md/--shadow-lg with the full six-step (0-5) M3 elevation scale.
      Each level pairs a two-layer box-shadow (key + ambient, scaled roughly by
@@ -161,7 +191,10 @@
     --danger: #ffb4ab;
     --danger-soft: #93000a;
     --on-danger: #690005;
-    --hover: rgba(255, 255, 255, 0.06);
+    /* --state-* (M8 M3-5): no redefinition needed here — they're derived
+       from --text/--on-accent/--on-danger above via color-mix() in the
+       single definition in the light :root block, and re-resolve against
+       THIS block's --text automatically. See that block's comment. */
     /* M3 elevation, dark scheme — same six-step scale as the light block's
        comment; shadow alpha stays black but modest (a black shadow barely
        reads on a near-black surface), while the tint percentage is boosted
@@ -223,7 +256,8 @@
   --danger: #ffb4ab;
   --danger-soft: #93000a;
   --on-danger: #690005;
-  --hover: rgba(255, 255, 255, 0.06);
+  /* --state-* (M8 M3-5): no redefinition needed here — see the comment in
+     the prefers-color-scheme dark block above. */
   /* M3 elevation, dark scheme (forced by the in-app toggle) — identical values
      to the prefers-color-scheme block above; see its comment. */
   --elevation-0-shadow: none;
@@ -420,6 +454,17 @@ body {
   cursor: pointer;
 }
 .board-tab:hover {
+  background: var(--state-hover);
+  color: var(--text);
+}
+.board-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: var(--state-focus);
+  color: var(--text);
+}
+.board-tab:active {
+  background: var(--state-pressed);
   color: var(--text);
 }
 .board-tab.active {
@@ -496,7 +541,15 @@ body {
   color: var(--text);
 }
 .menu-pop button:hover {
-  background: var(--hover);
+  background: var(--state-hover);
+}
+.menu-pop button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--state-focus);
+}
+.menu-pop button:active {
+  background: var(--state-pressed);
 }
 .menu-pop button.danger {
   background: none;
@@ -505,6 +558,14 @@ body {
 }
 .menu-pop button.danger:hover {
   background: var(--danger-soft);
+}
+.menu-pop button.danger:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: -2px;
+  background: var(--danger-soft);
+}
+.menu-pop button.danger:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--danger-soft);
 }
 
 /* Current user + logout, pushed to the right of the top bar (M3 V6). */
@@ -555,6 +616,19 @@ body {
   letter-spacing: var(--type-label-medium-tracking);
   font-weight: 700;
   cursor: pointer;
+}
+/* Pairs with --on-accent (a solid --accent fill), same as button.primary. */
+.user-avatar:hover {
+  background: linear-gradient(var(--state-hover-on-accent), var(--state-hover-on-accent)), var(--accent);
+}
+.user-avatar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: linear-gradient(var(--state-focus-on-accent), var(--state-focus-on-accent)), var(--accent);
+}
+.user-avatar:active,
+.user-avatar[data-state="open"] {
+  background: linear-gradient(var(--state-pressed-on-accent), var(--state-pressed-on-accent)), var(--accent);
 }
 
 main {
@@ -654,9 +728,40 @@ main {
   transition: box-shadow 0.12s ease, background 0.12s ease, transform 0.12s ease;
 }
 .card:hover {
-  background: var(--elevation-3-surface);
+  /* Layered, not a flat swap: the elevation-3 tint wash stays the base
+     layer, the M3 hover state layer composites on top of it (2-stop
+     gradient trick — see the --state-* token comment near the top of this
+     file for why). */
+  background: linear-gradient(var(--state-hover), var(--state-hover)), var(--elevation-3-surface);
   box-shadow: var(--elevation-3-shadow);
   transform: translateY(-1px);
+}
+.card:active {
+  /* Pressed keeps the RESTING elevation (no lift/shadow bump — that's
+     hover's job) and layers the stronger 12% pressed wash instead. */
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--elevation-1-surface);
+  box-shadow: var(--elevation-1-shadow);
+  transform: none;
+}
+/* M3 dragged state (M8 M3-5, KAN-1094) — svelte-dnd-action doesn't add a
+   class to the item; it clones the whole dragged element (Column.svelte's
+   `.card-dnd` wrapper, `.card` nested inside) into a floating, cursor-
+   following copy with the FIXED id `dnd-action-dragged-el` (its own
+   DRAGGED_ELEMENT_ID constant — see node_modules/svelte-dnd-action/dist/
+   index.js). That id is the "class it applies during drag" this slice is
+   after, and it's a pure CSS hook: styling `#dnd-action-dragged-el .card`
+   needs no change to Column.svelte, the dndzone options, or any drag event
+   handler — the actual interaction/wiring this epic is protecting stays
+   untouched. copyStylesFromTo() (same file) copies computed background/
+   border/etc from `.card-dnd` (a plain, unstyled wrapper) onto the CLONE'S
+   ROOT as inline styles, never onto this nested `.card`, so this rule
+   can't be shadowed by an inline style the library sets. Reuses hover's
+   elevation-3 lift (this app's existing "hovered/dragged card = 3"
+   convention, M3-4) as the base and layers the stronger 16% dragged wash
+   over it, same 2-stop-gradient technique as hover/pressed above. */
+#dnd-action-dragged-el .card {
+  background: linear-gradient(var(--state-dragged), var(--state-dragged)), var(--elevation-3-surface);
+  box-shadow: var(--elevation-3-shadow);
 }
 .card-top {
   display: flex;
@@ -854,10 +959,40 @@ main {
   border-radius: var(--shape-full);
   padding: 0.1rem 0.45rem;
 }
+/* Zero interactive state at all before this slice — a real <button>
+   (see CardForm.svelte/CardModal.svelte), just cursor:pointer and
+   nothing else. */
+.label-toggle:hover {
+  background: var(--state-hover);
+  color: var(--text);
+  border-color: var(--muted);
+}
+.label-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: var(--state-focus);
+  color: var(--text);
+}
+.label-toggle:active {
+  background: var(--state-pressed);
+  color: var(--text);
+}
 .label-toggle.selected {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: var(--accent);
+}
+.label-toggle.selected:hover {
+  background: linear-gradient(var(--state-hover), var(--state-hover)), var(--accent-soft);
+  color: var(--accent);
+}
+.label-toggle.selected:focus-visible {
+  background: linear-gradient(var(--state-focus), var(--state-focus)), var(--accent-soft);
+  color: var(--accent);
+}
+.label-toggle.selected:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--accent-soft);
+  color: var(--accent);
 }
 /* Dependency references on the card face (KAN-30): tickets this card is blocked
    by / blocks, each hover-titled with the referenced card's full title. */
@@ -917,7 +1052,17 @@ main {
   padding: 0.08rem 0.4rem;
 }
 .link-chip:hover {
+  background: linear-gradient(var(--state-hover), var(--state-hover)), var(--accent-soft);
   text-decoration: underline;
+}
+.link-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: linear-gradient(var(--state-focus), var(--state-focus)), var(--accent-soft);
+  text-decoration: underline;
+}
+.link-chip:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--accent-soft);
 }
 .link-label {
   overflow: hidden;
@@ -1000,7 +1145,17 @@ main {
   border-radius: var(--shape-full);
 }
 .icon-btn:hover {
-  background: var(--hover);
+  background: var(--state-hover);
+  color: var(--text);
+}
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: var(--state-focus);
+  color: var(--text);
+}
+.icon-btn:active {
+  background: var(--state-pressed);
   color: var(--text);
 }
 /* Reset the solid `button.danger` fill (higher element+class specificity) so the
@@ -1012,6 +1167,16 @@ main {
 }
 .icon-btn.danger:hover {
   background: var(--danger-soft);
+  color: var(--danger);
+}
+.icon-btn.danger:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 1px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.icon-btn.danger:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--danger-soft);
   color: var(--danger);
 }
 button.link {
@@ -1028,7 +1193,29 @@ button.link:hover {
   color: var(--text);
   text-decoration: underline;
 }
+/* No background wash here (unlike every other interactive element in this
+   file) — button.link has zero padding, so a state-layer box would clip
+   tight against the text with no breathing room; giving it one would mean
+   adding padding + a compensating negative margin everywhere it's used,
+   which is a layout change beyond this slice. Flagged in the M3-5 PR.
+   Focus/pressed still get a visible affordance (outline / colour), just
+   not the wash. */
+button.link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  color: var(--text);
+}
+button.link:active {
+  color: var(--accent);
+}
 button.link.danger:hover {
+  color: var(--danger);
+}
+button.link.danger:focus-visible {
+  outline-color: var(--danger);
+  color: var(--danger);
+}
+button.link.danger:active {
   color: var(--danger);
 }
 
@@ -1046,6 +1233,19 @@ button.danger {
   background: var(--danger);
   color: var(--on-danger);
   border-color: var(--danger);
+}
+/* Pairs with --on-danger (a solid, saturated fill), not the on-surface
+   --state-* family — same pairing rule as button.primary below. */
+button.danger:hover {
+  background: linear-gradient(var(--state-hover-on-danger), var(--state-hover-on-danger)), var(--danger);
+}
+button.danger:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+  background: linear-gradient(var(--state-focus-on-danger), var(--state-focus-on-danger)), var(--danger);
+}
+button.danger:active {
+  background: linear-gradient(var(--state-pressed-on-danger), var(--state-pressed-on-danger)), var(--danger);
 }
 
 .add {
@@ -1065,7 +1265,19 @@ button.danger {
   letter-spacing: var(--type-label-large-tracking);
 }
 .add:hover {
-  background: var(--hover);
+  background: var(--state-hover);
+  border-color: var(--muted);
+  color: var(--text);
+}
+.add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: var(--state-focus);
+  border-color: var(--muted);
+  color: var(--text);
+}
+.add:active {
+  background: var(--state-pressed);
   border-color: var(--muted);
   color: var(--text);
 }
@@ -1244,10 +1456,40 @@ button {
   color: var(--text);
   padding: 0.4rem 0.8rem;
 }
+/* Every plain <button> had NO hover/focus/pressed state at all before this
+   slice — the single biggest gap the M3-5 audit found. Layered over
+   --card-bg (a solid resting fill) rather than a flat replace, same
+   2-stop-gradient technique used throughout this file. */
+button:hover {
+  background: linear-gradient(var(--state-hover), var(--state-hover)), var(--card-bg);
+}
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: linear-gradient(var(--state-focus), var(--state-focus)), var(--card-bg);
+}
+button:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--card-bg);
+}
 button.primary {
   background: var(--accent);
   color: var(--on-accent);
   border-color: var(--accent);
+}
+/* Pairs with --on-accent, not the on-surface --state-* family (M3's
+   pairing rule: the state layer is a wash of the CONTENT colour, and this
+   button's content is on-accent white/near-white on a solid --accent
+   fill, not --text on --card-bg). */
+button.primary:hover {
+  background: linear-gradient(var(--state-hover-on-accent), var(--state-hover-on-accent)), var(--accent);
+}
+button.primary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: linear-gradient(var(--state-focus-on-accent), var(--state-focus-on-accent)), var(--accent);
+}
+button.primary:active {
+  background: linear-gradient(var(--state-pressed-on-accent), var(--state-pressed-on-accent)), var(--accent);
 }
 button.primary:disabled {
   opacity: 0.5;
@@ -1289,7 +1531,17 @@ button.primary:disabled {
   color: var(--text);
 }
 .btn-add:hover {
-  background: var(--hover);
+  background: linear-gradient(var(--state-hover), var(--state-hover)), var(--card-bg);
+  border-color: var(--muted);
+}
+.btn-add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: linear-gradient(var(--state-focus), var(--state-focus)), var(--card-bg);
+  border-color: var(--muted);
+}
+.btn-add:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--card-bg);
   border-color: var(--muted);
 }
 /* Inline labelled danger action (token Revoke) — always visible in list rows. */
@@ -1309,6 +1561,14 @@ button.primary:disabled {
 }
 .btn-inline-danger:hover {
   background: var(--danger-soft);
+}
+.btn-inline-danger:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 1px;
+  background: var(--danger-soft);
+}
+.btn-inline-danger:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--danger-soft);
 }
 .epics-list {
   display: flex;
@@ -1381,7 +1641,7 @@ button.primary:disabled {
   line-height: var(--type-body-medium-line-height);
   font-weight: var(--type-body-medium-weight);
   letter-spacing: var(--type-body-medium-tracking);
-  background: var(--hover);
+  background: var(--state-hover);
   padding: 0.4rem 0.5rem;
   border-radius: var(--shape-extra-small);
   overflow-x: auto;
@@ -1461,20 +1721,36 @@ button.primary:disabled {
 }
 .board-switcher select:hover {
   border-color: var(--muted);
-  background-color: var(--hover);
+  /* Layered, not a flat replace (the pre-M3-5 version fully swapped
+     background-color, silently discarding --card-bg underneath) — a
+     2-stop gradient composites the translucent state layer OVER the
+     opaque resting fill instead of replacing it. */
+  background-image: linear-gradient(var(--state-hover), var(--state-hover)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a828b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
 }
 .board-switcher select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   border-color: var(--accent);
+  background-image: linear-gradient(var(--state-focus), var(--state-focus)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a828b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+.board-switcher select:active {
+  background-image: linear-gradient(var(--state-pressed), var(--state-pressed)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a828b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
 }
 .board-switcher input {
   border-radius: var(--shape-extra-small);
+}
+.board-switcher input:hover {
+  border-color: var(--muted);
+  background-image: linear-gradient(var(--state-hover), var(--state-hover));
 }
 .board-switcher input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   border-color: var(--accent);
+  background-image: linear-gradient(var(--state-focus), var(--state-focus));
 }
 
 /* ---- Clickable card / epic face (opens the modal) ---- */
@@ -1484,6 +1760,7 @@ button.primary:disabled {
 .card[role="button"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  background: linear-gradient(var(--state-focus), var(--state-focus)), var(--elevation-1-surface);
 }
 /* Keyboard-navigation focus ring (V36, KAN-300): a persistent, high-contrast ring
    on the card the keyboard is acting on, so the "focused card" stays visible even
@@ -1492,6 +1769,7 @@ button.primary:disabled {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   box-shadow: 0 0 0 4px var(--accent-soft);
+  background: linear-gradient(var(--state-focus), var(--state-focus)), var(--elevation-1-surface);
 }
 .card.is-blocked {
   border-left: 3px solid var(--danger);
@@ -1693,15 +1971,30 @@ button.primary:disabled {
   border-left: 1px solid var(--border);
 }
 .desc-tab:hover {
+  background: var(--state-hover);
+  color: var(--text);
+}
+.desc-tab:active {
+  background: var(--state-pressed);
   color: var(--text);
 }
 .desc-tab.active {
   background: var(--accent);
   color: var(--on-accent);
 }
+.desc-tab.active:hover {
+  background: linear-gradient(var(--state-hover-on-accent), var(--state-hover-on-accent)), var(--accent);
+}
+.desc-tab.active:active {
+  background: linear-gradient(var(--state-pressed-on-accent), var(--state-pressed-on-accent)), var(--accent);
+}
 .desc-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+  background: var(--state-focus);
+}
+.desc-tab.active:focus-visible {
+  background: linear-gradient(var(--state-focus-on-accent), var(--state-focus-on-accent)), var(--accent);
 }
 
 .desc-input {
@@ -2394,6 +2687,10 @@ button.primary:disabled {
 }
 .ui-select:hover {
   border-color: var(--muted);
+  background: linear-gradient(var(--state-hover), var(--state-hover)), var(--card-bg);
+}
+.ui-select:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--card-bg);
 }
 /* Compact variant: auto-width to content (filter row, inline pickers). */
 .ui-select.compact {
@@ -2405,6 +2702,7 @@ button.primary:disabled {
   outline: 2px solid var(--accent);
   outline-offset: 0;
   border-color: var(--accent);
+  background: linear-gradient(var(--state-focus), var(--state-focus)), var(--card-bg);
 }
 .ui-select:disabled {
   opacity: 0.55;
@@ -2490,10 +2788,21 @@ button.primary:disabled {
   border: 1px solid var(--border);
   border-radius: var(--shape-extra-small);
 }
-.ui-item[data-highlighted],
-.ui-item[data-selected],
 .ui-item:hover {
-  background: var(--hover);
+  background: var(--state-hover);
+  outline: none;
+}
+/* [data-highlighted] is Bits UI's roving-focus indicator for an open
+   listbox/menu (set on mouse hover AND on arrow-key navigation alike,
+   since DOM focus itself stays on the trigger) — the 12% focus wash, not
+   hover's 8%, since for keyboard users this IS the focus state. */
+.ui-item[data-highlighted],
+.ui-item[data-selected] {
+  background: var(--state-focus);
+  outline: none;
+}
+.ui-item:active {
+  background: var(--state-pressed);
   outline: none;
 }
 /* Select listbox only: the chosen value reads teal (+ a trailing check). */
@@ -2511,9 +2820,14 @@ button.primary:disabled {
 .ui-item.danger {
   color: var(--danger);
 }
-.ui-item.danger[data-highlighted],
 .ui-item.danger:hover {
   background: var(--danger-soft);
+}
+.ui-item.danger[data-highlighted] {
+  background: var(--danger-soft);
+}
+.ui-item.danger:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--danger-soft);
 }
 .ui-sep {
   height: 1px;
@@ -2582,12 +2896,36 @@ button.primary:disabled {
   background: var(--accent);
   border-color: var(--accent);
 }
+/* .ui-check-row itself has zero padding (the clickable area is the whole
+   label + box, sized by its text), so — like button.link above — a
+   row-wide wash would clip tight with no breathing room. The self-
+   contained 18px .ui-checkbox box takes the wash instead; unchecked pairs
+   with --text (on --card-bg), checked pairs with --on-accent (on the
+   solid --accent fill), same pairing rule as everywhere else. */
+.ui-check-row:hover .ui-checkbox {
+  background: linear-gradient(var(--state-hover), var(--state-hover)), var(--card-bg);
+  border-color: var(--muted);
+}
+.ui-check-row:hover .ui-checkbox.is-checked {
+  background: linear-gradient(var(--state-hover-on-accent), var(--state-hover-on-accent)), var(--accent);
+  border-color: var(--accent);
+}
+.ui-check-row:active .ui-checkbox {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--card-bg);
+}
+.ui-check-row:active .ui-checkbox.is-checked {
+  background: linear-gradient(var(--state-pressed-on-accent), var(--state-pressed-on-accent)), var(--accent);
+}
 .ui-check-row:focus-visible {
   outline: none;
 }
 .ui-check-row:focus-visible .ui-checkbox {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+  background: linear-gradient(var(--state-focus), var(--state-focus)), var(--card-bg);
+}
+.ui-check-row:focus-visible .ui-checkbox.is-checked {
+  background: linear-gradient(var(--state-focus-on-accent), var(--state-focus-on-accent)), var(--accent);
 }
 
 /* ---- Popover panel (richer floating content) ---- */
@@ -2764,7 +3102,11 @@ button.primary:disabled {
   color: var(--muted);
 }
 .inbox-mark-all:hover:not(:disabled) {
-  background: var(--hover);
+  background: var(--state-hover);
+  color: var(--text);
+}
+.inbox-mark-all:active:not(:disabled) {
+  background: var(--state-pressed);
   color: var(--text);
 }
 .inbox-mark-all:disabled {
@@ -2774,6 +3116,8 @@ button.primary:disabled {
 .inbox-mark-all:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+  background: var(--state-focus);
+  color: var(--text);
 }
 
 /* ---- All / Unread filter ---- */
@@ -2798,7 +3142,11 @@ button.primary:disabled {
 }
 .inbox-tab:hover {
   color: var(--text);
-  background: var(--hover);
+  background: var(--state-hover);
+}
+.inbox-tab:active {
+  color: var(--text);
+  background: var(--state-pressed);
 }
 .inbox-tab.active {
   background: var(--accent-soft);
@@ -2808,6 +3156,8 @@ button.primary:disabled {
 .inbox-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+  background: var(--state-focus);
+  color: var(--text);
 }
 
 /* ---- Status / loading / error line ---- */
@@ -2847,7 +3197,7 @@ button.primary:disabled {
   transition: background 0.12s ease;
 }
 .note:hover {
-  background: var(--hover);
+  background: var(--state-hover);
 }
 /* Unread: a teal left rail + faint accent wash so it reads at a glance. */
 .note.unread {
@@ -2969,9 +3319,17 @@ button.primary:disabled {
   color: var(--accent);
   border-color: var(--accent);
 }
+.note-mark:active {
+  background: linear-gradient(var(--state-pressed), var(--state-pressed)), var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .note-mark:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 /* Reveal the mark-read button on hover/focus, hiding the dot in its place. Touch /
    no-hover devices keep the button visible (they can't hover). */

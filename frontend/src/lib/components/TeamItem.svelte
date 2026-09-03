@@ -215,7 +215,10 @@
     letter-spacing: var(--type-body-medium-tracking);
     padding: 0.3rem 0.5rem;
     border-radius: var(--shape-small);
-    background: var(--hover);
+    /* Static decorative row tint (a non-interactive <li>), not a hover
+       state — just carried the old --hover token name. Renamed to
+       --state-hover (M8 M3-5, KAN-1094); same value. */
+    background: var(--state-hover);
   }
   .member-email,
   .board-name {
