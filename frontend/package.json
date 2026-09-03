@@ -13,6 +13,7 @@
     "e2e:ui": "playwright test --ui"
   },
   "devDependencies": {
+    "@material/material-color-utilities": "^0.4.0",
     "@playwright/test": "^1.62.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tsconfig/svelte": "^5.0.4",

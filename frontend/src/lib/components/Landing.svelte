@@ -106,17 +106,22 @@
   /* Palette scoped to the landing only — reuses the app's accent values, adds the
      surfaces/dark-mode the marketing page needs without touching the rest of the app. */
   .landing {
-    /* Graphite (Zinc & Teal) — matches the app (see app.css). */
-    --ground: #f6f7f8;
+    /* M3 role palette (M3-1, KAN-1090) — matches the app (see app.css's :root
+       block for the seed/generation/mapping notes; the names here are the
+       landing's own long-standing local aliases: --ground/--surface/--line/
+       --ink map to app.css's --bg/--card-bg/--border/--text, --accent-2(-soft)
+       to --agent(-soft)). Kept as a literal value mirror rather than reading
+       app.css's custom properties directly, same as before this ticket. */
+    --ground: #f7faf8;
     --surface: #ffffff;
-    --line: #dcdfe4;
-    --ink: #1a1d21;
-    --muted: #616870;
-    --accent: #0d9488;
-    --accent-soft: #d5f1ec;
-    --accent-2: #7c3aed;
-    --accent-2-soft: #eee6fd;
-    --btn-ink: #1a1d21;
+    --line: #bec9c6;
+    --ink: #191c1b;
+    --muted: #3f4947;
+    --accent: #006a61;
+    --accent-soft: #73f8e7;
+    --accent-2: #46617a;
+    --accent-2-soft: #cde5ff;
+    --btn-ink: #191c1b;
     --btn-on: #ffffff;
     --shadow: 0 1px 1px rgba(20, 25, 30, 0.08), 0 8px 20px -12px rgba(20, 25, 30, 0.28);
     --radius: 8px;
@@ -136,32 +141,32 @@
      light), or the toggle set data-theme="dark" on <html>. */
   @media (prefers-color-scheme: dark) {
     :global(html:not([data-theme="light"])) .landing {
-      --ground: #101315;
-      --surface: #1a1f23;
-      --line: #2b3238;
-      --ink: #e8ebed;
-      --muted: #99a2ab;
-      --accent: #2dd4bf;
-      --accent-soft: #0f312d;
-      --accent-2: #b794f6;
-      --accent-2-soft: #241a3d;
-      --btn-ink: #e8ebed;
-      --btn-on: #101315;
+      --ground: #101413;
+      --surface: #323535;
+      --line: #3f4947;
+      --ink: #e0e3e1;
+      --muted: #bec9c6;
+      --accent: #52dbcb;
+      --accent-soft: #005049;
+      --accent-2: #aecae6;
+      --accent-2-soft: #2e4961;
+      --btn-ink: #e0e3e1;
+      --btn-on: #101413;
       --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 10px 30px -14px rgba(0, 0, 0, 0.7);
     }
   }
   :global(html[data-theme="dark"]) .landing {
-    --ground: #101315;
-    --surface: #1a1f23;
-    --line: #2b3238;
-    --ink: #e8ebed;
-    --muted: #99a2ab;
-    --accent: #2dd4bf;
-    --accent-soft: #0f312d;
-    --accent-2: #b794f6;
-    --accent-2-soft: #241a3d;
-    --btn-ink: #e8ebed;
-    --btn-on: #101315;
+    --ground: #101413;
+    --surface: #323535;
+    --line: #3f4947;
+    --ink: #e0e3e1;
+    --muted: #bec9c6;
+    --accent: #52dbcb;
+    --accent-soft: #005049;
+    --accent-2: #aecae6;
+    --accent-2-soft: #2e4961;
+    --btn-ink: #e0e3e1;
+    --btn-on: #101413;
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 10px 30px -14px rgba(0, 0, 0, 0.7);
   }
 
