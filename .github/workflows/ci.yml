@@ -158,6 +158,14 @@ jobs:
               # own filter.
               - 'Dockerfile'
               - '.dockerignore'
+              # KAN-864: both the MCP server and the CLI import `pandan_client`
+              # BY PATH (KAN-21) rather than as a published dependency, so a
+              # change to the shared client is a real input to both adapters'
+              # suites — exactly like `mcp/pandan_mcp/server.py` is a real input
+              # to the `cli` job below (test_parity.py). Without this line a
+              # pandan-client-only PR ran neither adapter's tests, so a client
+              # change that broke both silently reported success on both jobs.
+              - 'pandan-client/**'
             client:
               - 'pandan-client/**'
             cli:
@@ -172,6 +180,10 @@ jobs:
               # first, so the two compose — but a guard whose CI does not run it
               # is the KAN-452 / KAN-484 shape, and this closes it directly.
               - 'mcp/pandan_mcp/server.py'
+              # KAN-864: same shared-client hole as the `mcp` filter above — the
+              # CLI imports `pandan_client` by path too, so a client-only PR must
+              # run the CLI suite as well, not just the standalone `client` job.
+              - 'pandan-client/**'
             # Bump-on-fix guard (V50, KAN-435): `cli_code` is a change to CLI
             # BEHAVIOUR, `cli_version` is a change to a version declaration. The
             # `cli` job fails when the first is true and the second is not — a
