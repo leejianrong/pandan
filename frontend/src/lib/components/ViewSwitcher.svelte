@@ -235,7 +235,7 @@
     margin-bottom: 1rem;
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--shape-medium);
   }
   .view-group,
   .view-actions {
@@ -328,7 +328,7 @@
     color: var(--text);
     background: var(--card-bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--shape-full);
     cursor: pointer;
   }
   .chip-btn:hover,
@@ -354,7 +354,7 @@
     color: #fff;
     background: var(--accent);
     border: 1px solid var(--accent);
-    border-radius: var(--radius);
+    border-radius: var(--shape-full);
     cursor: pointer;
   }
   button.primary:disabled {

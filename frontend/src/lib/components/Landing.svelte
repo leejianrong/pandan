@@ -195,7 +195,7 @@
     height: 34px;
     padding: 0;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--shape-full);
     background: var(--surface);
     color: var(--muted);
     cursor: pointer;
@@ -294,7 +294,7 @@
     background: var(--btn-ink);
     color: var(--btn-on);
     border: 1px solid var(--btn-ink);
-    border-radius: var(--radius);
+    border-radius: var(--shape-full);
     padding: 0.7rem 1.25rem;
     font-size: var(--type-label-large-size);
     line-height: var(--type-label-large-line-height);
@@ -358,7 +358,7 @@
   .tile {
     background: var(--surface);
     border: 1px solid var(--line);
-    border-radius: var(--radius);
+    border-radius: var(--shape-medium);
     padding: 1.1rem 1.15rem 1.25rem;
     box-shadow: var(--shadow);
   }
@@ -369,7 +369,7 @@
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    border-radius: 3px;
+    border-radius: var(--shape-full);
     padding: 0.12rem 0.5rem;
     margin-bottom: 0.7rem;
     background: var(--accent-soft);

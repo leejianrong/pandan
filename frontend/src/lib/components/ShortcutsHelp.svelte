@@ -175,7 +175,7 @@
     background: var(--accent-soft);
     color: var(--accent);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--shape-extra-small);
     box-shadow: 0 1px 0 var(--border);
   }
 </style>

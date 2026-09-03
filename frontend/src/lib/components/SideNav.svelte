@@ -184,7 +184,7 @@
     width: 100%;
     padding: 0.55rem 0.65rem;
     border: 1px solid transparent;
-    border-radius: 7px;
+    border-radius: var(--shape-full);
     background: none;
     color: var(--text);
     font: inherit;
@@ -227,7 +227,7 @@
     font-variant-numeric: tabular-nums;
     background: var(--accent);
     color: #fff;
-    border-radius: 999px;
+    border-radius: var(--shape-full);
     flex: none;
   }
 
@@ -241,7 +241,7 @@
     border: 1px solid transparent;
     background: none;
     color: var(--muted);
-    border-radius: 6px;
+    border-radius: var(--shape-full);
     cursor: pointer;
   }
   .icon-btn:hover {

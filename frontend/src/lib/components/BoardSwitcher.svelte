@@ -199,7 +199,7 @@
     display: inline-flex;
     align-items: center;
     padding: 0.1rem 0.45rem;
-    border-radius: 999px;
+    border-radius: var(--shape-full);
     font-size: var(--type-label-small-size);
     line-height: var(--type-label-small-line-height);
     font-weight: 600;

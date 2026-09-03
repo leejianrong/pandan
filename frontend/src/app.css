@@ -62,10 +62,24 @@
   --hover: rgba(20, 25, 30, 0.06);
   --shadow-sm: 0 1px 0 rgba(20, 25, 30, 0.06);
   --shadow-md: 0 1px 1px rgba(20, 25, 30, 0.08), 0 8px 20px -12px rgba(20, 25, 30, 0.28);
-  --radius: 8px;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  /* Modal system (KAN-65/66) — a larger radius + scrim + elevation for dialogs. */
-  --radius-lg: 14px;
+  /* M3 shape scale (M8 M3-3, KAN-1092) — replaces the old ad hoc --radius (8px) /
+     --radius-lg (14px) with the full seven-step scale below, then every
+     border-radius in this file (and the Svelte components) is mapped onto one of
+     these steps by component convention rather than a one-off pixel guess: cards
+     = medium, chips/pills/badges/tags = full, modals/dialogs/command palette =
+     extra-large, buttons = full, form inputs/selects = extra-small, dropdown /
+     popover menus = small/medium depending on richness, larger structural
+     containers (the board column) = large. Shape doesn't change per theme, so
+     these live in the single shared :root block rather than the light/dark
+     split above. */
+  --shape-none: 0px;
+  --shape-extra-small: 4px;
+  --shape-small: 8px;
+  --shape-medium: 12px;
+  --shape-large: 16px;
+  --shape-extra-large: 28px;
+  --shape-full: 9999px;
   --scrim: rgba(18, 22, 26, 0.42);
   --shadow-lg: 0 24px 60px -18px rgba(15, 20, 25, 0.45), 0 4px 12px -6px rgba(15, 20, 25, 0.25);
 
@@ -355,7 +369,7 @@ body {
   line-height: var(--type-label-large-line-height);
   font-weight: var(--type-label-large-weight);
   letter-spacing: var(--type-label-large-tracking);
-  border-radius: 7px;
+  border-radius: var(--shape-full);
   cursor: pointer;
 }
 .board-tab:hover {
@@ -380,7 +394,7 @@ body {
   font: inherit;
   padding: 0.3rem 0.5rem;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--shape-extra-small);
   background: var(--card-bg);
   color: var(--text);
 }
@@ -393,7 +407,7 @@ body {
   font: inherit;
   padding: 0.3rem 0.5rem;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--shape-extra-small);
 }
 .board-switcher .confirm-msg {
   font-size: var(--type-body-medium-size);
@@ -416,7 +430,7 @@ body {
   padding: 0.25rem;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--shape-small);
   box-shadow: var(--shadow-md);
 }
 .menu-pop button {
@@ -431,7 +445,7 @@ body {
   font-weight: var(--type-label-large-weight);
   letter-spacing: var(--type-label-large-tracking);
   padding: 0.45rem 0.55rem;
-  border-radius: 6px;
+  border-radius: var(--shape-extra-small);
   color: var(--text);
 }
 .menu-pop button:hover {
@@ -455,7 +469,7 @@ body {
   gap: 0.4rem;
   padding: 0.25rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--shape-full);
   background: var(--bg);
   color: var(--muted);
 }
@@ -505,7 +519,7 @@ main {
   align-items: center;
   gap: 1rem;
   padding: 0.6rem 1rem;
-  border-radius: 6px;
+  border-radius: var(--shape-small);
   margin-bottom: 1rem;
 }
 .banner.error {
@@ -525,7 +539,7 @@ main {
 
 .column {
   background: var(--col-bg);
-  border-radius: 8px;
+  border-radius: var(--shape-large);
   padding: 0.75rem;
   display: flex;
   flex-direction: column;
@@ -573,7 +587,7 @@ main {
   letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
   background: var(--card-bg);
-  border-radius: 10px;
+  border-radius: var(--shape-full);
   padding: 0.05rem 0.5rem;
 }
 
@@ -587,7 +601,7 @@ main {
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--shape-medium);
   padding: 0.6rem 0.7rem;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.12s ease, transform 0.12s ease;
@@ -624,7 +638,7 @@ main {
   font-variant-numeric: tabular-nums;
   background: var(--accent-soft);
   color: var(--accent);
-  border-radius: 20px;
+  border-radius: var(--shape-full);
   padding: 0 0.35rem;
 }
 .epic-tag {
@@ -641,7 +655,7 @@ main {
   font-weight: 600;
   background: var(--agent-soft);
   color: var(--agent);
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.08rem 0.4rem;
 }
 /* Recognise a colored epic's cards at a glance (M8 V63, KAN-984, issue #278) — a
@@ -666,7 +680,7 @@ main {
   letter-spacing: 0.02em;
   background: var(--danger-soft);
   color: var(--danger);
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.08rem 0.4rem;
 }
 /* Needs-human handoff (M5 V13, KAN-246): a card an agent flagged for a human. Uses
@@ -683,7 +697,7 @@ main {
   letter-spacing: 0.02em;
   background: var(--accent-soft);
   color: var(--accent);
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.08rem 0.4rem;
 }
 .card-title {
@@ -729,7 +743,7 @@ main {
   letter-spacing: var(--type-label-small-tracking);
   font-weight: 600;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.06rem 0.4rem;
 }
 .label-dot {
@@ -763,7 +777,7 @@ main {
   font-weight: 600;
   color: var(--muted);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.06rem 0.4rem;
 }
 .due-pill.overdue {
@@ -789,7 +803,7 @@ main {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.1rem 0.45rem;
 }
 .label-toggle.selected {
@@ -828,7 +842,7 @@ main {
   font-weight: 600;
   background: var(--accent-soft);
   color: var(--accent);
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.05rem 0.35rem;
 }
 /* Work-link chips on the card face (KAN-34): a labelled link to the PR / branch /
@@ -851,7 +865,7 @@ main {
   text-decoration: none;
   background: var(--accent-soft);
   color: var(--accent);
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.08rem 0.4rem;
 }
 .link-chip:hover {
@@ -935,7 +949,7 @@ main {
   border: 1px solid transparent;
   background: none;
   color: var(--muted);
-  border-radius: 6px;
+  border-radius: var(--shape-full);
 }
 .icon-btn:hover {
   background: var(--hover);
@@ -996,7 +1010,7 @@ button.danger {
   text-align: left;
   padding: 0.45rem 0.6rem;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: var(--shape-full);
   font-size: var(--type-label-large-size);
   line-height: var(--type-label-large-line-height);
   font-weight: var(--type-label-large-weight);
@@ -1014,7 +1028,7 @@ button.danger {
   gap: 0.4rem;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--shape-medium);
   padding: 0.6rem;
 }
 /* Legacy raw controls — excludes the U2 primitives (.ui-input/.ui-textarea/
@@ -1025,7 +1039,7 @@ button.danger {
   font: inherit;
   padding: 0.4rem;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--shape-extra-small);
   width: 100%;
   background-color: var(--card-bg);
   color: var(--text);
@@ -1142,7 +1156,7 @@ button.danger {
   gap: 0.15rem;
   padding: 0.35rem 0.5rem;
   background: var(--accent-soft);
-  border-radius: 4px;
+  border-radius: var(--shape-small);
 }
 .comment-body {
   font-size: var(--type-body-medium-size);
@@ -1176,7 +1190,7 @@ button.danger {
 button {
   font: inherit;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   border: 1px solid var(--border);
   background: var(--card-bg);
   color: var(--text);
@@ -1222,7 +1236,7 @@ button.primary:disabled {
   letter-spacing: var(--type-label-large-tracking);
   padding: 0.4rem 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--shape-full);
   background: var(--card-bg);
   color: var(--text);
 }
@@ -1243,7 +1257,7 @@ button.primary:disabled {
   font-weight: var(--type-label-large-weight);
   letter-spacing: var(--type-label-large-tracking);
   padding: 0.3rem 0.5rem;
-  border-radius: 6px;
+  border-radius: var(--shape-full);
 }
 .btn-inline-danger:hover {
   background: var(--danger-soft);
@@ -1293,7 +1307,7 @@ button.primary:disabled {
 .token-reveal {
   background: var(--accent-soft);
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--shape-medium);
   padding: 0.75rem;
   margin: 0.75rem 0;
   display: flex;
@@ -1321,7 +1335,7 @@ button.primary:disabled {
   letter-spacing: var(--type-body-medium-tracking);
   background: var(--hover);
   padding: 0.4rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--shape-extra-small);
   overflow-x: auto;
   white-space: nowrap;
 }
@@ -1390,7 +1404,7 @@ button.primary:disabled {
   padding-bottom: 0.35rem;
   padding-left: 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--shape-extra-small);
   background-color: var(--card-bg);
   color: var(--text);
   max-width: 12rem;
@@ -1407,7 +1421,7 @@ button.primary:disabled {
   border-color: var(--accent);
 }
 .board-switcher input {
-  border-radius: 7px;
+  border-radius: var(--shape-extra-small);
 }
 .board-switcher input:focus-visible {
   outline: 2px solid var(--accent);
@@ -1451,7 +1465,7 @@ button.primary:disabled {
   width: min(760px, 100%);
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--shape-extra-large);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
   display: flex;
@@ -1482,7 +1496,7 @@ button.primary:disabled {
   gap: 0;
   padding: 0;
   border: none;
-  border-radius: 0;
+  border-radius: var(--shape-none);
   background: none;
 }
 
@@ -1529,7 +1543,7 @@ button.primary:disabled {
   color: var(--muted);
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--shape-full);
   padding: 0.15rem 0.55rem;
 }
 .status-pill .dot {
@@ -1587,7 +1601,7 @@ button.primary:disabled {
   color: var(--text);
   width: 100%;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--shape-extra-small);
   padding: 0.2rem 0.45rem;
   margin: -0.2rem 0 0.75rem -0.45rem;
   background: none;
@@ -1610,7 +1624,7 @@ button.primary:disabled {
 .desc-toggle {
   display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--shape-full);
   overflow: hidden;
   background: var(--card-bg);
 }
@@ -1651,7 +1665,7 @@ button.primary:disabled {
   line-height: 1.6;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--shape-extra-small);
   padding: 0.55rem 0.65rem;
   margin-top: 0.4rem;
   background: var(--card-bg);
@@ -1738,13 +1752,13 @@ button.primary:disabled {
   font-size: 0.85em;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--shape-extra-small);
   padding: 0.05rem 0.3rem;
 }
 .markdown-body pre {
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--shape-medium);
   padding: 0.6rem 0.75rem;
   overflow-x: auto;
   margin: 0 0 0.7rem;
@@ -1775,7 +1789,7 @@ button.primary:disabled {
 .rail-field input,
 .rail-field select {
   width: 100%;
-  border-radius: 7px;
+  border-radius: var(--shape-extra-small);
   background-color: var(--card-bg);
   color: var(--text);
 }
@@ -1836,7 +1850,7 @@ button.primary:disabled {
   gap: 0.6rem;
   padding: 0;
   background: none;
-  border-radius: 0;
+  border-radius: var(--shape-none);
 }
 .comment-body-wrap {
   flex: 1;
@@ -1863,7 +1877,7 @@ button.primary:disabled {
 }
 .comment-add input {
   flex: 1;
-  border-radius: 8px;
+  border-radius: var(--shape-extra-small);
 }
 
 /* Modal footer */
@@ -1907,7 +1921,7 @@ button.primary:disabled {
 .progress .bar {
   flex: 1;
   height: 6px;
-  border-radius: 6px;
+  border-radius: var(--shape-full);
   background: var(--surface-2);
   overflow: hidden;
 }
@@ -1915,7 +1929,7 @@ button.primary:disabled {
   display: block;
   height: 100%;
   background: var(--accent);
-  border-radius: 6px;
+  border-radius: var(--shape-full);
 }
 .progress .bar i.full {
   background: var(--success);
@@ -1944,7 +1958,7 @@ button.primary:disabled {
   align-items: center;
   gap: 0.28rem;
   padding: 0.1rem 0.5rem;
-  border-radius: 999px;
+  border-radius: var(--shape-full);
   font-size: var(--type-label-medium-size);
   letter-spacing: var(--type-label-medium-tracking);
   font-weight: 600;
@@ -2037,7 +2051,7 @@ button.primary:disabled {
   color: var(--muted);
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--shape-full);
   padding: 0.05rem 0.5rem;
 }
 .section-rule {
@@ -2146,7 +2160,7 @@ button.primary:disabled {
   place-items: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--shape-small);
   background: var(--agent-soft);
   color: var(--agent);
   flex: none;
@@ -2157,7 +2171,7 @@ button.primary:disabled {
 }
 .token-prefix {
   background: var(--surface-2);
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.1rem 0.4rem;
 }
 .token-meta {
@@ -2174,7 +2188,7 @@ button.primary:disabled {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.1rem 0.4rem;
   background: var(--agent-soft);
   color: var(--agent);
@@ -2275,7 +2289,7 @@ button.primary:disabled {
   color: var(--text);
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--shape-extra-small);
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .ui-textarea {
@@ -2325,7 +2339,7 @@ button.primary:disabled {
   color: var(--text);
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--shape-extra-small);
   cursor: pointer;
   text-align: left;
   transition: border-color 0.12s ease, background 0.12s ease;
@@ -2372,7 +2386,7 @@ button.primary:disabled {
   z-index: 120;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--shape-small);
   box-shadow: var(--shadow-md);
   padding: 0.25rem;
   min-width: var(--bits-select-anchor-width, 180px);
@@ -2396,7 +2410,7 @@ button.primary:disabled {
   border: none;
   background: none;
   text-align: left;
-  border-radius: 6px;
+  border-radius: var(--shape-extra-small);
   color: var(--text);
   cursor: pointer;
   user-select: none;
@@ -2426,7 +2440,7 @@ button.primary:disabled {
   background: var(--accent-soft);
   color: var(--accent);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--shape-extra-small);
 }
 .ui-item[data-highlighted],
 .ui-item[data-selected],
@@ -2508,7 +2522,7 @@ button.primary:disabled {
   place-items: center;
   width: 18px;
   height: 18px;
-  border-radius: 5px;
+  border-radius: var(--shape-extra-small);
   border: 1px solid var(--border);
   background: var(--card-bg);
   /* The check glyph's colour, only visible once .is-checked paints the
@@ -2533,7 +2547,7 @@ button.primary:disabled {
   z-index: 120;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--shape-medium);
   box-shadow: var(--shadow-md);
   padding: 0.85rem;
   width: 240px;
@@ -2544,7 +2558,7 @@ button.primary:disabled {
   width: 100%;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--shape-extra-large);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
@@ -2586,7 +2600,7 @@ button.primary:disabled {
   color: var(--muted);
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--shape-extra-small);
   padding: 0.05rem 0.35rem;
 }
 .ui-command-empty {
@@ -2635,7 +2649,7 @@ button.primary:disabled {
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  border-radius: 999px;
+  border-radius: var(--shape-full);
   border: 2px solid var(--card-bg);
 }
 
@@ -2646,7 +2660,7 @@ button.primary:disabled {
   max-width: calc(100vw - 2rem);
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--shape-medium);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
   display: flex;
@@ -2676,7 +2690,7 @@ button.primary:disabled {
   font-weight: 700;
   color: var(--accent);
   background: var(--accent-soft);
-  border-radius: 999px;
+  border-radius: var(--shape-full);
   padding: 0.1rem 0.45rem;
   font-variant-numeric: tabular-nums;
 }
@@ -2696,7 +2710,7 @@ button.primary:disabled {
   font-weight: 600;
   cursor: pointer;
   padding: 0.28rem 0.5rem;
-  border-radius: 6px;
+  border-radius: var(--shape-full);
   border: 1px solid transparent;
   background: none;
   color: var(--muted);
@@ -2729,7 +2743,7 @@ button.primary:disabled {
   font-weight: 600;
   cursor: pointer;
   padding: 0.25rem 0.65rem;
-  border-radius: 999px;
+  border-radius: var(--shape-full);
   border: 1px solid transparent;
   background: none;
   color: var(--muted);
@@ -2780,7 +2794,7 @@ button.primary:disabled {
   align-items: start;
   gap: 0.65rem;
   padding: 0.6rem 0.55rem 0.6rem 0.7rem;
-  border-radius: 8px;
+  border-radius: var(--shape-small);
   border-left: 3px solid transparent;
   transition: background 0.12s ease;
 }
@@ -2805,7 +2819,7 @@ button.primary:disabled {
   place-items: center;
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--shape-small);
   flex: none;
   margin-top: 0.05rem;
 }
@@ -2838,7 +2852,7 @@ button.primary:disabled {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-radius: 4px;
+  border-radius: var(--shape-full);
   padding: 0.05rem 0.35rem;
 }
 .note-kind.needs_human {
@@ -2899,7 +2913,7 @@ button.primary:disabled {
   border: 1px solid var(--border);
   background: var(--card-bg);
   color: var(--muted);
-  border-radius: 6px;
+  border-radius: var(--shape-full);
   cursor: pointer;
 }
 .note-mark:hover {
