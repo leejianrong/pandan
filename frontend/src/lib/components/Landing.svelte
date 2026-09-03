@@ -123,7 +123,12 @@
     --accent-2-soft: #cde5ff;
     --btn-ink: #191c1b;
     --btn-on: #ffffff;
-    --shadow: 0 1px 1px rgba(20, 25, 30, 0.08), 0 8px 20px -12px rgba(20, 25, 30, 0.28);
+    /* M3 elevation (M3-4, KAN-1093) — mirrors app.css's --elevation-1-shadow
+       (level 1: this page's tiles/button are the marketing-chrome equivalent
+       of a resting card). Kept literal, same mirroring convention as the
+       M3-1 palette above; no surface-tint wash here since --btn-github is a
+       solid-fill button, not an elevated surface. */
+    --shadow: 0 1px 2px rgba(20, 25, 30, 0.05), 0 1px 3px rgba(20, 25, 30, 0.09);
     --radius: 8px;
     --maxw: 1000px;
 
@@ -152,7 +157,7 @@
       --accent-2-soft: #2e4961;
       --btn-ink: #e0e3e1;
       --btn-on: #101413;
-      --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 10px 30px -14px rgba(0, 0, 0, 0.7);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     }
   }
   :global(html[data-theme="dark"]) .landing {
@@ -167,7 +172,7 @@
     --accent-2-soft: #2e4961;
     --btn-ink: #e0e3e1;
     --btn-on: #101413;
-    --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 10px 30px -14px rgba(0, 0, 0, 0.7);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 
   .topbar {

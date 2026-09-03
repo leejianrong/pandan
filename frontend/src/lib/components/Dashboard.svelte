@@ -703,10 +703,10 @@
     align-items: center;
     gap: 0.7rem;
     padding: 0.85rem 1rem;
-    background: var(--card-bg);
+    background: var(--elevation-1-surface);
     border: 1px solid var(--border);
     border-radius: var(--shape-medium);
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--elevation-1-shadow);
   }
   .stat-icon {
     display: grid;

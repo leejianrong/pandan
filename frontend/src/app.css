@@ -60,8 +60,32 @@
   --danger-soft: #ffdad6;
   --on-danger: #ffffff;
   --hover: rgba(20, 25, 30, 0.06);
-  --shadow-sm: 0 1px 0 rgba(20, 25, 30, 0.06);
-  --shadow-md: 0 1px 1px rgba(20, 25, 30, 0.08), 0 8px 20px -12px rgba(20, 25, 30, 0.28);
+  /* M3 elevation scale (M8 M3-4, KAN-1093) — replaces the old flat --shadow-sm/
+     --shadow-md/--shadow-lg with the full six-step (0-5) M3 elevation scale.
+     Each level pairs a two-layer box-shadow (key + ambient, scaled roughly by
+     the spec's dp progression 0/1/3/6/8/12 in scales-tokens.md) with an
+     --elevation-N-surface: a wash of --accent (the primary role) mixed over
+     --card-bg via color-mix() at an increasing percentage per level — M3's
+     elevation model is "shadow AND tint together", not a bigger shadow.
+     Component mapping (documented in the PR): resting card/stat-tile = 1,
+     hovered/dragged card = 3, dropdown/select-popup/popover menu = 2,
+     modal/dialog/command-palette/nav-drawer = 3, notification panel = 3.
+     Light's tint percentages (5/8/11/12/14%) are M3's own light-surface
+     overlay table; dark boosts them (6/10/14/16/18%, see the dark block)
+     because a black shadow barely reads against a near-black surface, so
+     dark leans relatively more on the tint to signal depth. */
+  --elevation-0-shadow: none;
+  --elevation-0-surface: var(--card-bg);
+  --elevation-1-shadow: 0 1px 2px rgba(20, 25, 30, 0.05), 0 1px 3px rgba(20, 25, 30, 0.09);
+  --elevation-1-surface: color-mix(in srgb, var(--accent) 5%, var(--card-bg));
+  --elevation-2-shadow: 0 1px 2px rgba(20, 25, 30, 0.06), 0 4px 10px -4px rgba(20, 25, 30, 0.16);
+  --elevation-2-surface: color-mix(in srgb, var(--accent) 8%, var(--card-bg));
+  --elevation-3-shadow: 0 1px 3px rgba(20, 25, 30, 0.08), 0 10px 22px -10px rgba(20, 25, 30, 0.24);
+  --elevation-3-surface: color-mix(in srgb, var(--accent) 11%, var(--card-bg));
+  --elevation-4-shadow: 0 2px 4px rgba(20, 25, 30, 0.09), 0 14px 28px -12px rgba(20, 25, 30, 0.28);
+  --elevation-4-surface: color-mix(in srgb, var(--accent) 12%, var(--card-bg));
+  --elevation-5-shadow: 0 3px 5px rgba(20, 25, 30, 0.1), 0 20px 38px -14px rgba(20, 25, 30, 0.34);
+  --elevation-5-surface: color-mix(in srgb, var(--accent) 14%, var(--card-bg));
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* M3 shape scale (M8 M3-3, KAN-1092) — replaces the old ad hoc --radius (8px) /
      --radius-lg (14px) with the full seven-step scale below, then every
@@ -81,7 +105,6 @@
   --shape-extra-large: 28px;
   --shape-full: 9999px;
   --scrim: rgba(18, 22, 26, 0.42);
-  --shadow-lg: 0 24px 60px -18px rgba(15, 20, 25, 0.45), 0 4px 12px -6px rgba(15, 20, 25, 0.25);
 
   /* Label palette (V62, KAN-983) — the seven hues a label may be coloured with.
      DISJOINT from the semantic tokens above (--accent/--agent/--danger/--success/
@@ -139,10 +162,23 @@
     --danger-soft: #93000a;
     --on-danger: #690005;
     --hover: rgba(255, 255, 255, 0.06);
-    --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.5);
-    --shadow-md: 0 10px 28px -14px rgba(0, 0, 0, 0.8);
+    /* M3 elevation, dark scheme — same six-step scale as the light block's
+       comment; shadow alpha stays black but modest (a black shadow barely
+       reads on a near-black surface), while the tint percentage is boosted
+       relative to light so depth still reads. */
+    --elevation-0-shadow: none;
+    --elevation-0-surface: var(--card-bg);
+    --elevation-1-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --elevation-1-surface: color-mix(in srgb, var(--accent) 6%, var(--card-bg));
+    --elevation-2-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.5);
+    --elevation-2-surface: color-mix(in srgb, var(--accent) 10%, var(--card-bg));
+    --elevation-3-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.6);
+    --elevation-3-surface: color-mix(in srgb, var(--accent) 14%, var(--card-bg));
+    --elevation-4-shadow: 0 10px 22px -10px rgba(0, 0, 0, 0.65);
+    --elevation-4-surface: color-mix(in srgb, var(--accent) 16%, var(--card-bg));
+    --elevation-5-shadow: 0 16px 32px -12px rgba(0, 0, 0, 0.7);
+    --elevation-5-surface: color-mix(in srgb, var(--accent) 18%, var(--card-bg));
     --scrim: rgba(0, 0, 0, 0.62);
-    --shadow-lg: 0 24px 60px -18px rgba(0, 0, 0, 0.85), 0 4px 14px -6px rgba(0, 0, 0, 0.7);
 
     /* Label palette (V62, KAN-983) — the seven hues a label may be coloured with.
        DISJOINT from the semantic tokens above (--accent/--agent/--danger/--success/
@@ -188,10 +224,21 @@
   --danger-soft: #93000a;
   --on-danger: #690005;
   --hover: rgba(255, 255, 255, 0.06);
-  --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 10px 28px -14px rgba(0, 0, 0, 0.8);
+  /* M3 elevation, dark scheme (forced by the in-app toggle) — identical values
+     to the prefers-color-scheme block above; see its comment. */
+  --elevation-0-shadow: none;
+  --elevation-0-surface: var(--card-bg);
+  --elevation-1-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elevation-1-surface: color-mix(in srgb, var(--accent) 6%, var(--card-bg));
+  --elevation-2-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.5);
+  --elevation-2-surface: color-mix(in srgb, var(--accent) 10%, var(--card-bg));
+  --elevation-3-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.6);
+  --elevation-3-surface: color-mix(in srgb, var(--accent) 14%, var(--card-bg));
+  --elevation-4-shadow: 0 10px 22px -10px rgba(0, 0, 0, 0.65);
+  --elevation-4-surface: color-mix(in srgb, var(--accent) 16%, var(--card-bg));
+  --elevation-5-shadow: 0 16px 32px -12px rgba(0, 0, 0, 0.7);
+  --elevation-5-surface: color-mix(in srgb, var(--accent) 18%, var(--card-bg));
   --scrim: rgba(0, 0, 0, 0.62);
-  --shadow-lg: 0 24px 60px -18px rgba(0, 0, 0, 0.85), 0 4px 14px -6px rgba(0, 0, 0, 0.7);
 
   /* Label palette (V62, KAN-983) — the seven hues a label may be coloured with.
      DISJOINT from the semantic tokens above (--accent/--agent/--danger/--success/
@@ -428,10 +475,10 @@ body {
   display: flex;
   flex-direction: column;
   padding: 0.25rem;
-  background: var(--card-bg);
+  background: var(--elevation-2-surface);
   border: 1px solid var(--border);
   border-radius: var(--shape-small);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--elevation-2-shadow);
 }
 .menu-pop button {
   display: flex;
@@ -599,15 +646,16 @@ main {
 }
 
 .card {
-  background: var(--card-bg);
+  background: var(--elevation-1-surface);
   border: 1px solid var(--border);
   border-radius: var(--shape-medium);
   padding: 0.6rem 0.7rem;
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.12s ease, transform 0.12s ease;
+  box-shadow: var(--elevation-1-shadow);
+  transition: box-shadow 0.12s ease, background 0.12s ease, transform 0.12s ease;
 }
 .card:hover {
-  box-shadow: var(--shadow-md);
+  background: var(--elevation-3-surface);
+  box-shadow: var(--elevation-3-shadow);
   transform: translateY(-1px);
 }
 .card-top {
@@ -1463,10 +1511,10 @@ button.primary:disabled {
 .modal {
   position: relative;
   width: min(760px, 100%);
-  background: var(--card-bg);
+  background: var(--elevation-3-surface);
   border: 1px solid var(--border);
   border-radius: var(--shape-extra-large);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elevation-3-shadow);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -2384,10 +2432,10 @@ button.primary:disabled {
 /* ---- Popup surface (Select listbox / DropdownMenu content) ---- */
 .ui-popup {
   z-index: 120;
-  background: var(--card-bg);
+  background: var(--elevation-2-surface);
   border: 1px solid var(--border);
   border-radius: var(--shape-small);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--elevation-2-shadow);
   padding: 0.25rem;
   min-width: var(--bits-select-anchor-width, 180px);
   max-height: min(320px, var(--bits-floating-available-height, 320px));
@@ -2545,10 +2593,10 @@ button.primary:disabled {
 /* ---- Popover panel (richer floating content) ---- */
 .ui-popover {
   z-index: 120;
-  background: var(--card-bg);
+  background: var(--elevation-2-surface);
   border: 1px solid var(--border);
   border-radius: var(--shape-medium);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--elevation-2-shadow);
   padding: 0.85rem;
   width: 240px;
 }
@@ -2556,10 +2604,10 @@ button.primary:disabled {
 /* ---- Command palette (reused by V35 ⌘K) ---- */
 .ui-command {
   width: 100%;
-  background: var(--card-bg);
+  background: var(--elevation-3-surface);
   border: 1px solid var(--border);
   border-radius: var(--shape-extra-large);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elevation-3-shadow);
   overflow: hidden;
 }
 .ui-command-search {
@@ -2658,10 +2706,10 @@ button.primary:disabled {
   z-index: 120;
   width: 384px;
   max-width: calc(100vw - 2rem);
-  background: var(--card-bg);
+  background: var(--elevation-3-surface);
   border: 1px solid var(--border);
   border-radius: var(--shape-medium);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--elevation-3-shadow);
   overflow: hidden;
   display: flex;
   flex-direction: column;
