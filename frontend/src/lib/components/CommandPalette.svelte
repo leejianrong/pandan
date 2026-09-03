@@ -60,6 +60,8 @@
     { id: "board", label: "Board" },
     { id: "dashboard", label: "Dashboard" },
     { id: "epics", label: "Epics" },
+    { id: "labels", label: "Labels" },
+    { id: "backlog", label: "Backlog" },
     { id: "activity", label: "Activity" },
     { id: "tokens", label: "Tokens" },
     { id: "members", label: "Members" },
