@@ -262,7 +262,8 @@
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    font-size: 0.68rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -293,7 +294,10 @@
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: 0.8rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
+    font-weight: var(--type-label-large-weight);
+    letter-spacing: var(--type-label-large-tracking);
     color: var(--muted);
   }
   .filter.checkbox {
@@ -317,7 +321,10 @@
     gap: 0.35rem;
     padding: 0.35rem 0.6rem;
     font: inherit;
-    font-size: 0.82rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
+    font-weight: var(--type-label-large-weight);
+    letter-spacing: var(--type-label-large-tracking);
     color: var(--text);
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -340,7 +347,10 @@
   button.primary {
     padding: 0.35rem 0.7rem;
     font: inherit;
-    font-size: 0.82rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
+    font-weight: var(--type-label-large-weight);
+    letter-spacing: var(--type-label-large-tracking);
     color: #fff;
     background: var(--accent);
     border: 1px solid var(--accent);

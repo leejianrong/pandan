@@ -206,7 +206,9 @@
   }
   .feed-summary {
     margin: 0;
-    font-size: 0.9rem;
+    font-size: var(--type-body-medium-size);
+    font-weight: var(--type-body-medium-weight);
+    letter-spacing: var(--type-body-medium-tracking);
     line-height: 1.4;
     color: var(--text);
     overflow-wrap: anywhere;
@@ -216,7 +218,10 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.78rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
+    font-weight: var(--type-label-medium-weight);
+    letter-spacing: var(--type-label-medium-tracking);
     color: var(--muted);
   }
   .feed-actor {
@@ -236,7 +241,9 @@
     border-radius: 50%;
     background: var(--agent-soft);
     color: var(--agent);
-    font-size: 0.62rem;
+    font-size: var(--type-label-small-size);
+    line-height: var(--type-label-small-line-height);
+    letter-spacing: var(--type-label-small-tracking);
     font-weight: 700;
     flex: none;
   }
@@ -254,7 +261,10 @@
     justify-content: center;
     gap: 0.35rem;
     margin-top: 1rem;
-    font-size: 0.78rem;
+    font-size: var(--type-body-small-size);
+    line-height: var(--type-body-small-line-height);
+    font-weight: var(--type-body-small-weight);
+    letter-spacing: var(--type-body-small-tracking);
     color: var(--muted);
   }
 </style>

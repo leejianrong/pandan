@@ -199,6 +199,93 @@
   --label-ink: #cbd5e1;
 }
 
+/* M3 type scale (M8... M3-2, KAN-1091) — the 15-role scale from
+   material-components/material-web's generated tokens (size/line-height/weight/
+   letter-spacing per role), wired once here as custom properties and applied by
+   PURPOSE at each call site (a card title is title-medium because it's a title,
+   not because 1rem happened to look right) rather than duplicated as ad hoc
+   font-size numbers throughout the file. Theme-independent (unlike the color
+   block above) so it lives in a plain :root, not per light/dark scheme. Two
+   independent font "slots" exist in the full M3 spec (brand vs. plain); this
+   app uses one system-ui stack for both, so only size/line-height/weight/
+   tracking vary per role. */
+:root {
+  --type-display-large-size: 3.5625rem;
+  --type-display-large-line-height: 4rem;
+  --type-display-large-weight: 400;
+  --type-display-large-tracking: -0.015625rem;
+
+  --type-display-medium-size: 2.8125rem;
+  --type-display-medium-line-height: 3.25rem;
+  --type-display-medium-weight: 400;
+  --type-display-medium-tracking: 0;
+
+  --type-display-small-size: 2.25rem;
+  --type-display-small-line-height: 2.75rem;
+  --type-display-small-weight: 400;
+  --type-display-small-tracking: 0;
+
+  --type-headline-large-size: 2rem;
+  --type-headline-large-line-height: 2.5rem;
+  --type-headline-large-weight: 400;
+  --type-headline-large-tracking: 0;
+
+  --type-headline-medium-size: 1.75rem;
+  --type-headline-medium-line-height: 2.25rem;
+  --type-headline-medium-weight: 400;
+  --type-headline-medium-tracking: 0;
+
+  --type-headline-small-size: 1.5rem;
+  --type-headline-small-line-height: 2rem;
+  --type-headline-small-weight: 400;
+  --type-headline-small-tracking: 0;
+
+  --type-title-large-size: 1.375rem;
+  --type-title-large-line-height: 1.75rem;
+  --type-title-large-weight: 400;
+  --type-title-large-tracking: 0;
+
+  --type-title-medium-size: 1rem;
+  --type-title-medium-line-height: 1.5rem;
+  --type-title-medium-weight: 500;
+  --type-title-medium-tracking: 0.009375rem;
+
+  --type-title-small-size: 0.875rem;
+  --type-title-small-line-height: 1.25rem;
+  --type-title-small-weight: 500;
+  --type-title-small-tracking: 0.00625rem;
+
+  --type-body-large-size: 1rem;
+  --type-body-large-line-height: 1.5rem;
+  --type-body-large-weight: 400;
+  --type-body-large-tracking: 0.03125rem;
+
+  --type-body-medium-size: 0.875rem;
+  --type-body-medium-line-height: 1.25rem;
+  --type-body-medium-weight: 400;
+  --type-body-medium-tracking: 0.015625rem;
+
+  --type-body-small-size: 0.75rem;
+  --type-body-small-line-height: 1rem;
+  --type-body-small-weight: 400;
+  --type-body-small-tracking: 0.025rem;
+
+  --type-label-large-size: 0.875rem;
+  --type-label-large-line-height: 1.25rem;
+  --type-label-large-weight: 500;
+  --type-label-large-tracking: 0.00625rem;
+
+  --type-label-medium-size: 0.75rem;
+  --type-label-medium-line-height: 1rem;
+  --type-label-medium-weight: 500;
+  --type-label-medium-tracking: 0.03125rem;
+
+  --type-label-small-size: 0.6875rem;
+  --type-label-small-line-height: 1rem;
+  --type-label-small-weight: 500;
+  --type-label-small-tracking: 0.03125rem;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -224,13 +311,17 @@ body {
 }
 .brand-name {
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: var(--type-title-medium-size);
+  line-height: var(--type-title-medium-line-height);
   letter-spacing: -0.01em;
   color: var(--text);
 }
 /* Larger lockup for the landing header. */
 .brand-lg .brand-name {
-  font-size: 1.15rem;
+  font-size: var(--type-title-large-size);
+  line-height: var(--type-title-large-line-height);
+  font-weight: var(--type-title-large-weight);
+  letter-spacing: var(--type-title-large-tracking);
 }
 .brand-glyph {
   display: grid;
@@ -260,7 +351,10 @@ body {
   background: none;
   color: var(--muted);
   padding: 0.3rem 0.8rem;
-  font-size: 0.85rem;
+  font-size: var(--type-label-large-size);
+  line-height: var(--type-label-large-line-height);
+  font-weight: var(--type-label-large-weight);
+  letter-spacing: var(--type-label-large-tracking);
   border-radius: 7px;
   cursor: pointer;
 }
@@ -302,7 +396,10 @@ body {
   border-radius: 4px;
 }
 .board-switcher .confirm-msg {
-  font-size: 0.82rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
 }
 .board-menu {
   position: relative;
@@ -329,7 +426,10 @@ body {
   border: none;
   background: none;
   text-align: left;
-  font-size: 0.85rem;
+  font-size: var(--type-label-large-size);
+  line-height: var(--type-label-large-line-height);
+  font-weight: var(--type-label-large-weight);
+  letter-spacing: var(--type-label-large-tracking);
   padding: 0.45rem 0.55rem;
   border-radius: 6px;
   color: var(--text);
@@ -363,7 +463,10 @@ body {
   border: none;
   background: none;
   color: var(--text);
-  font-size: 0.85rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   width: 14rem;
   max-width: 30vw;
   outline: none;
@@ -386,7 +489,9 @@ body {
   border-radius: 50%;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 0.8rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  letter-spacing: var(--type-label-medium-tracking);
   font-weight: 700;
   cursor: pointer;
 }
@@ -435,7 +540,8 @@ main {
 }
 .column-head h2 {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: var(--type-label-large-size);
+  line-height: var(--type-label-large-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -461,7 +567,10 @@ main {
   margin-left: auto;
 }
 .count {
-  font-size: 0.75rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
   background: var(--card-bg);
   border-radius: 10px;
@@ -495,7 +604,8 @@ main {
 }
 .ticket {
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--muted);
@@ -507,7 +617,9 @@ main {
   place-items: center;
   min-width: 20px;
   height: 18px;
-  font-size: 0.68rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  letter-spacing: var(--type-label-medium-tracking);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   background: var(--accent-soft);
@@ -523,7 +635,9 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.64rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  letter-spacing: var(--type-label-small-tracking);
   font-weight: 600;
   background: var(--agent-soft);
   color: var(--agent);
@@ -545,7 +659,8 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  font-size: 0.62rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -561,7 +676,8 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  font-size: 0.62rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -572,7 +688,9 @@ main {
 }
 .card-title {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--type-title-medium-size);
+  font-weight: var(--type-title-medium-weight);
+  letter-spacing: var(--type-title-medium-tracking);
   line-height: 1.35;
 }
 /* Priority badge (M5 V11, KAN-244): a colored dot + level, hidden for "none". */
@@ -580,7 +698,8 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  font-size: 0.62rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -605,7 +724,9 @@ main {
   align-items: center;
   gap: 0.28rem;
   max-width: 14ch;
-  font-size: 0.64rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  letter-spacing: var(--type-label-small-tracking);
   font-weight: 600;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -626,7 +747,9 @@ main {
    #278): two labels sharing a colour are still distinguishable at a glance.
    Absent when the label has no emoji — the chip's look is exactly pre-V64. */
 .label-emoji {
-  font-size: 0.85rem;
+  font-size: var(--type-label-large-size);
+  font-weight: var(--type-label-large-weight);
+  letter-spacing: var(--type-label-large-tracking);
   line-height: 1;
   flex: none;
 }
@@ -634,7 +757,9 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  font-size: 0.64rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  letter-spacing: var(--type-label-small-tracking);
   font-weight: 600;
   color: var(--muted);
   border: 1px solid var(--border);
@@ -656,7 +781,9 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 0.28rem;
-  font-size: 0.7rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  letter-spacing: var(--type-label-medium-tracking);
   font-weight: 600;
   cursor: pointer;
   background: transparent;
@@ -684,7 +811,10 @@ main {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.68rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
 }
 .dep-label {
@@ -692,7 +822,9 @@ main {
 }
 .dep-ref {
   font-family: var(--mono);
-  font-size: 0.64rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  letter-spacing: var(--type-label-small-tracking);
   font-weight: 600;
   background: var(--accent-soft);
   color: var(--accent);
@@ -712,7 +844,9 @@ main {
   align-items: center;
   gap: 0.2rem;
   max-width: 16ch;
-  font-size: 0.64rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  letter-spacing: var(--type-label-small-tracking);
   font-weight: 600;
   text-decoration: none;
   background: var(--accent-soft);
@@ -740,7 +874,10 @@ main {
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
 }
 .who-name {
@@ -757,12 +894,17 @@ main {
   border-radius: 50%;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 0.6rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  letter-spacing: var(--type-label-small-tracking);
   font-weight: 700;
 }
 .empty {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   text-align: center;
   padding: 0.5rem 0;
 }
@@ -814,7 +956,10 @@ button.link {
   border: none;
   background: none;
   padding: 0;
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
 }
 button.link:hover {
@@ -830,7 +975,10 @@ button.link.danger:hover {
 }
 .confirm-msg {
   margin: 0 0 0.5rem;
-  font-size: 0.82rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
 }
 button.danger {
   background: var(--danger);
@@ -849,7 +997,10 @@ button.danger {
   padding: 0.45rem 0.6rem;
   cursor: pointer;
   border-radius: 8px;
-  font-size: 0.82rem;
+  font-size: var(--type-label-large-size);
+  line-height: var(--type-label-large-line-height);
+  font-weight: var(--type-label-large-weight);
+  letter-spacing: var(--type-label-large-tracking);
 }
 .add:hover {
   background: var(--hover);
@@ -892,7 +1043,10 @@ button.danger {
 .form-error {
   margin: 0;
   color: var(--danger);
-  font-size: 0.8rem;
+  font-size: var(--type-body-small-size);
+  line-height: var(--type-body-small-line-height);
+  font-weight: var(--type-body-small-weight);
+  letter-spacing: var(--type-body-small-tracking);
 }
 
 /* Blocker editor in the card form (KAN-30, edit mode). */
@@ -902,7 +1056,9 @@ button.danger {
   gap: 0.3rem;
 }
 .field-label {
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  letter-spacing: var(--type-label-medium-tracking);
   font-weight: 600;
   color: var(--muted);
 }
@@ -925,7 +1081,10 @@ button.danger {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
 }
 
 /* Work-link editor in the card form (KAN-34, edit mode). */
@@ -953,7 +1112,10 @@ button.danger {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--accent);
 }
 .link-add .link-label-input {
@@ -983,7 +1145,9 @@ button.danger {
   border-radius: 4px;
 }
 .comment-body {
-  font-size: 0.78rem;
+  font-size: var(--type-body-medium-size);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   line-height: 1.35;
   white-space: pre-wrap;
   word-break: break-word;
@@ -993,13 +1157,19 @@ button.danger {
   align-items: center;
   justify-content: space-between;
   gap: 0.4rem;
-  font-size: 0.64rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  font-weight: var(--type-label-small-weight);
+  letter-spacing: var(--type-label-small-tracking);
   color: var(--muted);
 }
 .comment-empty,
 .rail-empty {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: var(--type-body-small-size);
+  line-height: var(--type-body-small-line-height);
+  font-weight: var(--type-body-small-weight);
+  letter-spacing: var(--type-body-small-tracking);
   color: var(--muted);
 }
 
@@ -1035,7 +1205,8 @@ button.primary:disabled {
 }
 .epics-head h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--type-title-small-size);
+  line-height: var(--type-title-small-line-height);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text);
@@ -1045,7 +1216,10 @@ button.primary:disabled {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.82rem;
+  font-size: var(--type-label-large-size);
+  line-height: var(--type-label-large-line-height);
+  font-weight: var(--type-label-large-weight);
+  letter-spacing: var(--type-label-large-tracking);
   padding: 0.4rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -1064,7 +1238,10 @@ button.primary:disabled {
   border: 1px solid transparent;
   background: none;
   color: var(--danger);
-  font-size: 0.8rem;
+  font-size: var(--type-label-large-size);
+  line-height: var(--type-label-large-line-height);
+  font-weight: var(--type-label-large-weight);
+  letter-spacing: var(--type-label-large-tracking);
   padding: 0.3rem 0.5rem;
   border-radius: 6px;
 }
@@ -1079,11 +1256,17 @@ button.primary:disabled {
 }
 .epic-desc {
   margin: 0.3rem 0 0;
-  font-size: 0.8rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   color: var(--muted);
 }
 .epic-count {
-  font-size: 0.7rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
 }
 .epic-stories {
@@ -1094,7 +1277,10 @@ button.primary:disabled {
   gap: 0.15rem;
 }
 .epic-stories li {
-  font-size: 0.78rem;
+  font-size: var(--type-body-small-size);
+  line-height: var(--type-body-small-line-height);
+  font-weight: var(--type-body-small-weight);
+  letter-spacing: var(--type-body-small-tracking);
   color: var(--text);
 }
 .epic-stories .ticket {
@@ -1116,7 +1302,10 @@ button.primary:disabled {
 }
 .token-reveal-title {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--type-title-small-size);
+  line-height: var(--type-title-small-line-height);
+  font-weight: var(--type-title-small-weight);
+  letter-spacing: var(--type-title-small-tracking);
 }
 .token-reveal-row {
   display: flex;
@@ -1126,7 +1315,10 @@ button.primary:disabled {
 .secret {
   flex: 1;
   font-family: var(--mono);
-  font-size: 0.8rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   background: var(--hover);
   padding: 0.4rem 0.5rem;
   border-radius: 4px;
@@ -1145,18 +1337,26 @@ button.primary:disabled {
 }
 .token-name {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--type-title-small-size);
+  line-height: var(--type-title-small-line-height);
+  letter-spacing: var(--type-title-small-tracking);
 }
 .token-prefix {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
 }
 .token-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
 }
 .token-actions {
@@ -1295,7 +1495,10 @@ button.primary:disabled {
   border-bottom: 1px solid var(--border);
 }
 .modal-head .ticket {
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
 }
 .modal-close {
   margin-left: auto;
@@ -1318,7 +1521,8 @@ button.primary:disabled {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.66rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1365,7 +1569,8 @@ button.primary:disabled {
 
 .card-modal .field-label,
 .epic-modal .field-label {
-  font-size: 0.7rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1375,7 +1580,7 @@ button.primary:disabled {
 /* Title as an edit-in-place heading. */
 .modal-title-input {
   font: inherit;
-  font-size: 1.3rem;
+  font-size: var(--type-title-large-size);
   font-weight: 650;
   line-height: 1.3;
   letter-spacing: -0.015em;
@@ -1415,7 +1620,8 @@ button.primary:disabled {
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  letter-spacing: var(--type-label-medium-tracking);
   font-weight: 600;
   padding: 0.2rem 0.6rem;
   cursor: pointer;
@@ -1439,7 +1645,9 @@ button.primary:disabled {
 .desc-input {
   width: 100%;
   font: inherit;
-  font-size: 0.92rem;
+  font-size: var(--type-body-large-size);
+  font-weight: var(--type-body-large-weight);
+  letter-spacing: var(--type-body-large-tracking);
   line-height: 1.6;
   color: var(--text);
   border: 1px solid var(--border);
@@ -1459,7 +1667,9 @@ button.primary:disabled {
 .desc-rendered {
   margin-top: 0.4rem;
   min-height: 5.5rem;
-  font-size: 0.92rem;
+  font-size: var(--type-body-large-size);
+  font-weight: var(--type-body-large-weight);
+  letter-spacing: var(--type-body-large-tracking);
   line-height: 1.6;
   color: var(--text);
   overflow-wrap: anywhere;
@@ -1467,7 +1677,10 @@ button.primary:disabled {
 .desc-empty {
   margin: 0.4rem 0 0;
   min-height: 5.5rem;
-  font-size: 0.92rem;
+  font-size: var(--type-body-large-size);
+  line-height: var(--type-body-large-line-height);
+  font-weight: var(--type-body-large-weight);
+  letter-spacing: var(--type-body-large-tracking);
   color: var(--muted);
   font-style: italic;
 }
@@ -1491,13 +1704,22 @@ button.primary:disabled {
   font-weight: 650;
 }
 .markdown-body h1 {
-  font-size: 1.3rem;
+  font-size: var(--type-title-large-size);
+  line-height: var(--type-title-large-line-height);
+  font-weight: var(--type-title-large-weight);
+  letter-spacing: var(--type-title-large-tracking);
 }
 .markdown-body h2 {
-  font-size: 1.15rem;
+  font-size: var(--type-title-medium-size);
+  line-height: var(--type-title-medium-line-height);
+  font-weight: var(--type-title-medium-weight);
+  letter-spacing: var(--type-title-medium-tracking);
 }
 .markdown-body h3 {
-  font-size: 1.02rem;
+  font-size: var(--type-title-small-size);
+  line-height: var(--type-title-small-line-height);
+  font-weight: var(--type-title-small-weight);
+  letter-spacing: var(--type-title-small-tracking);
 }
 .markdown-body ul,
 .markdown-body ol {
@@ -1630,7 +1852,9 @@ button.primary:disabled {
   border: 1px solid var(--border);
   border-radius: 4px 10px 10px 10px;
   padding: 0.5rem 0.65rem;
-  font-size: 0.88rem;
+  font-size: var(--type-body-medium-size);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   line-height: 1.55;
 }
 .comment-add {
@@ -1657,7 +1881,10 @@ button.primary:disabled {
 }
 .modal-foot .confirm-msg {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
 }
 
 /* Epic modal main column */
@@ -1694,7 +1921,10 @@ button.primary:disabled {
   background: var(--success);
 }
 .progress .pct {
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1715,7 +1945,8 @@ button.primary:disabled {
   gap: 0.28rem;
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
-  font-size: 0.7rem;
+  font-size: var(--type-label-medium-size);
+  letter-spacing: var(--type-label-medium-tracking);
   font-weight: 600;
   line-height: 1.5;
   white-space: nowrap;
@@ -1747,19 +1978,25 @@ button.primary:disabled {
 }
 .page-head h2 {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: var(--type-title-large-size);
+  line-height: var(--type-title-large-line-height);
   font-weight: 700;
   letter-spacing: -0.015em;
   color: var(--text);
 }
 .page-sub {
   margin: 0.15rem 0 0;
-  font-size: 0.86rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   color: var(--muted);
 }
 .page-intro {
   margin: 0.35rem 0 1.4rem;
-  font-size: 0.88rem;
+  font-size: var(--type-body-medium-size);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   line-height: 1.55;
   color: var(--muted);
   max-width: 62ch;
@@ -1785,14 +2022,18 @@ button.primary:disabled {
   background: var(--success);
 }
 .section-label {
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--muted);
 }
 .section-count {
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: var(--type-label-medium-weight);
+  letter-spacing: var(--type-label-medium-tracking);
   color: var(--muted);
   background: var(--card-bg);
   border: 1px solid var(--border);
@@ -1826,7 +2067,7 @@ button.primary:disabled {
 }
 .epic-name {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--type-title-medium-size);
   font-weight: 650;
   letter-spacing: -0.01em;
   line-height: 1.3;
@@ -1851,7 +2092,10 @@ button.primary:disabled {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.83rem;
+  font-size: var(--type-body-small-size);
+  line-height: var(--type-body-small-line-height);
+  font-weight: var(--type-body-small-weight);
+  letter-spacing: var(--type-body-small-tracking);
   color: var(--text);
 }
 .epic-stories .sdot {
@@ -1925,7 +2169,8 @@ button.primary:disabled {
   color: color-mix(in srgb, var(--text) 75%, var(--muted));
 }
 .token-scope {
-  font-size: 0.72rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -1942,7 +2187,10 @@ button.primary:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.85rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   color: var(--muted);
 }
 .scope-field select {
@@ -1950,7 +2198,10 @@ button.primary:disabled {
 }
 .scope-hint {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--type-body-small-size);
+  line-height: var(--type-body-small-line-height);
+  font-weight: var(--type-body-small-weight);
+  letter-spacing: var(--type-body-small-tracking);
   color: var(--muted);
 }
 
@@ -1984,7 +2235,8 @@ button.primary:disabled {
   min-width: 0;
 }
 .ui-label {
-  font-size: 0.7rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1996,12 +2248,16 @@ button.primary:disabled {
   font-weight: 700;
 }
 .ui-hint {
-  font-size: 0.72rem;
+  font-size: var(--type-body-small-size);
+  font-weight: var(--type-body-small-weight);
+  letter-spacing: var(--type-body-small-tracking);
   color: var(--muted);
   line-height: 1.4;
 }
 .ui-error {
-  font-size: 0.72rem;
+  font-size: var(--type-body-small-size);
+  font-weight: var(--type-body-small-weight);
+  letter-spacing: var(--type-body-small-tracking);
   color: var(--danger);
   line-height: 1.4;
 }
@@ -2010,7 +2266,10 @@ button.primary:disabled {
 .ui-input,
 .ui-textarea {
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   width: 100%;
   padding: 0.45rem 0.6rem;
   color: var(--text);
@@ -2057,7 +2316,10 @@ button.primary:disabled {
   justify-content: space-between;
   gap: 0.5rem;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   width: 100%;
   padding: 0.45rem 0.6rem;
   color: var(--text);
@@ -2126,7 +2388,10 @@ button.primary:disabled {
   gap: 0.5rem;
   width: 100%;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--type-label-large-size);
+  line-height: var(--type-label-large-line-height);
+  font-weight: var(--type-label-large-weight);
+  letter-spacing: var(--type-label-large-tracking);
   padding: 0.45rem 0.55rem;
   border: none;
   background: none;
@@ -2151,7 +2416,9 @@ button.primary:disabled {
   margin-left: auto;
   flex: none;
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: var(--type-label-small-size);
+  font-weight: var(--type-label-small-weight);
+  letter-spacing: var(--type-label-small-tracking);
   line-height: 1;
   min-width: 1.2rem;
   text-align: center;
@@ -2193,7 +2460,8 @@ button.primary:disabled {
   border: 0;
 }
 .ui-menu-label {
-  font-size: 0.64rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2202,7 +2470,10 @@ button.primary:disabled {
 }
 /* Secondary line under a menu heading (e.g. the signed-in email, KAN-319/U4). */
 .ui-menu-subtitle {
-  font-size: 0.8rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   color: var(--text);
   padding: 0 0.55rem 0.35rem;
   max-width: 240px;
@@ -2217,7 +2488,10 @@ button.primary:disabled {
   align-items: center;
   gap: 0.5rem;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--type-label-large-size);
+  line-height: var(--type-label-large-line-height);
+  font-weight: var(--type-label-large-weight);
+  letter-spacing: var(--type-label-large-tracking);
   color: var(--text);
   background: none;
   border: none;
@@ -2284,7 +2558,10 @@ button.primary:disabled {
 }
 .ui-command-search input {
   font: inherit;
-  font-size: 0.9rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   width: 100%;
   border: none;
   background: none;
@@ -2302,7 +2579,10 @@ button.primary:disabled {
 .ui-command .kbd {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: 0.66rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  font-weight: var(--type-label-small-weight);
+  letter-spacing: var(--type-label-small-tracking);
   color: var(--muted);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -2312,7 +2592,10 @@ button.primary:disabled {
 .ui-command-empty {
   padding: 1.25rem;
   text-align: center;
-  font-size: 0.8rem;
+  font-size: var(--type-body-small-size);
+  line-height: var(--type-body-small-line-height);
+  font-weight: var(--type-body-small-weight);
+  letter-spacing: var(--type-body-small-tracking);
   color: var(--muted);
 }
 
@@ -2347,7 +2630,8 @@ button.primary:disabled {
      reserved for the blocked/CI rows inside the panel (KAN-303 approved design). */
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 0.62rem;
+  font-size: var(--type-label-small-size);
+  letter-spacing: var(--type-label-small-tracking);
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -2379,13 +2663,16 @@ button.primary:disabled {
 }
 .inbox-head h3 {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: var(--type-title-small-size);
+  line-height: var(--type-title-small-line-height);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text);
 }
 .inbox-count {
-  font-size: 0.68rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  letter-spacing: var(--type-label-small-tracking);
   font-weight: 700;
   color: var(--accent);
   background: var(--accent-soft);
@@ -2403,7 +2690,9 @@ button.primary:disabled {
   align-items: center;
   gap: 0.35rem;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  letter-spacing: var(--type-label-medium-tracking);
   font-weight: 600;
   cursor: pointer;
   padding: 0.28rem 0.5rem;
@@ -2434,7 +2723,9 @@ button.primary:disabled {
 }
 .inbox-tab {
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  letter-spacing: var(--type-label-medium-tracking);
   font-weight: 600;
   cursor: pointer;
   padding: 0.25rem 0.65rem;
@@ -2464,7 +2755,10 @@ button.primary:disabled {
   justify-content: center;
   gap: 0.6rem;
   padding: 1.5rem 1rem;
-  font-size: 0.82rem;
+  font-size: var(--type-body-medium-size);
+  line-height: var(--type-body-medium-line-height);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   color: var(--muted);
 }
 
@@ -2539,7 +2833,8 @@ button.primary:disabled {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.6rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2564,7 +2859,9 @@ button.primary:disabled {
 }
 .note-text {
   margin: 0.3rem 0 0;
-  font-size: 0.83rem;
+  font-size: var(--type-body-medium-size);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   line-height: 1.4;
   color: var(--text);
   overflow-wrap: anywhere;
@@ -2572,7 +2869,10 @@ button.primary:disabled {
 .note-time {
   display: block;
   margin-top: 0.28rem;
-  font-size: 0.72rem;
+  font-size: var(--type-label-small-size);
+  line-height: var(--type-label-small-line-height);
+  font-weight: var(--type-label-small-weight);
+  letter-spacing: var(--type-label-small-tracking);
   color: var(--muted);
 }
 
@@ -2634,7 +2934,10 @@ button.primary:disabled {
   padding: 0.55rem 0.9rem;
   border-top: 1px solid var(--border);
   text-align: center;
-  font-size: 0.74rem;
+  font-size: var(--type-body-small-size);
+  line-height: var(--type-body-small-line-height);
+  font-weight: var(--type-body-small-weight);
+  letter-spacing: var(--type-body-small-tracking);
   color: var(--muted);
   flex: none;
 }
@@ -2659,12 +2962,17 @@ button.primary:disabled {
 }
 .inbox-empty h4 {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: var(--type-title-small-size);
+  line-height: var(--type-title-small-line-height);
+  font-weight: var(--type-title-small-weight);
+  letter-spacing: var(--type-title-small-tracking);
   color: var(--text);
 }
 .inbox-empty p {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--type-body-medium-size);
+  font-weight: var(--type-body-medium-weight);
+  letter-spacing: var(--type-body-medium-tracking);
   color: var(--muted);
   max-width: 26ch;
   line-height: 1.45;

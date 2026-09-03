@@ -125,7 +125,10 @@
   .card-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.85rem;
+    font-size: var(--type-body-medium-size);
+    line-height: var(--type-body-medium-line-height);
+    font-weight: var(--type-body-medium-weight);
+    letter-spacing: var(--type-body-medium-tracking);
   }
   thead th {
     position: sticky;
@@ -142,7 +145,8 @@
     width: 100%;
     padding: 0.55rem 0.7rem;
     font: inherit;
-    font-size: 0.78rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
     font-weight: 600;
     letter-spacing: 0.02em;
     text-transform: uppercase;
@@ -184,7 +188,8 @@
   }
   th:last-child {
     padding: 0.55rem 0.7rem;
-    font-size: 0.78rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
     font-weight: 600;
     letter-spacing: 0.02em;
     text-transform: uppercase;

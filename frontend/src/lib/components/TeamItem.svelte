@@ -156,7 +156,8 @@
     margin-bottom: 0;
   }
   .team-name {
-    font-size: 1rem;
+    font-size: var(--type-title-medium-size);
+    line-height: var(--type-title-medium-line-height);
     font-weight: 650;
     letter-spacing: -0.01em;
     color: var(--text);
@@ -166,7 +167,9 @@
     align-items: center;
     padding: 0.1rem 0.45rem;
     border-radius: 999px;
-    font-size: 0.72rem;
+    font-size: var(--type-label-small-size);
+    line-height: var(--type-label-small-line-height);
+    letter-spacing: var(--type-label-small-tracking);
     font-weight: 600;
     text-transform: capitalize;
     color: var(--agent);
@@ -186,7 +189,8 @@
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: 0.7rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -205,7 +209,10 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
-    font-size: 0.85rem;
+    font-size: var(--type-body-medium-size);
+    line-height: var(--type-body-medium-line-height);
+    font-weight: var(--type-body-medium-weight);
+    letter-spacing: var(--type-body-medium-tracking);
     padding: 0.3rem 0.5rem;
     border-radius: 6px;
     background: var(--hover);
@@ -219,20 +226,28 @@
   }
   .member-role {
     flex: none;
-    font-size: 0.75rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
+    font-weight: var(--type-label-medium-weight);
+    letter-spacing: var(--type-label-medium-tracking);
     color: var(--muted);
     text-transform: capitalize;
   }
   .board-key {
     flex: none;
     font-family: var(--mono);
-    font-size: 0.75rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
+    letter-spacing: var(--type-label-medium-tracking);
     font-weight: 600;
     color: var(--accent);
   }
   .empty-inline {
     margin: 0;
-    font-size: 0.82rem;
+    font-size: var(--type-body-medium-size);
+    line-height: var(--type-body-medium-line-height);
+    font-weight: var(--type-body-medium-weight);
+    letter-spacing: var(--type-body-medium-tracking);
     color: var(--muted);
   }
 </style>

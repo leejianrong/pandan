@@ -162,7 +162,8 @@
     border-bottom: 1px solid var(--border);
   }
   .drawer-title {
-    font-size: 0.7rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -187,7 +188,10 @@
     background: none;
     color: var(--text);
     font: inherit;
-    font-size: 0.9rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
+    font-weight: var(--type-label-large-weight);
+    letter-spacing: var(--type-label-large-tracking);
     text-align: left;
     cursor: pointer;
   }
@@ -216,7 +220,9 @@
     padding: 0 5px;
     display: grid;
     place-items: center;
-    font-size: 0.65rem;
+    font-size: var(--type-label-small-size);
+    line-height: var(--type-label-small-line-height);
+    letter-spacing: var(--type-label-small-tracking);
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     background: var(--accent);

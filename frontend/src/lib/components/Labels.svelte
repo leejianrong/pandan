@@ -374,7 +374,10 @@
   }
   .label-usage {
     color: var(--muted);
-    font-size: 0.8rem;
+    font-size: var(--type-body-small-size);
+    line-height: var(--type-body-small-line-height);
+    font-weight: var(--type-body-small-weight);
+    letter-spacing: var(--type-body-small-tracking);
     flex: none;
   }
   .label-actions {
@@ -419,7 +422,9 @@
     flex: 0 0 5.5rem;
   }
   .label-emoji {
-    font-size: 1rem;
+    font-size: var(--type-title-medium-size);
+    font-weight: var(--type-title-medium-weight);
+    letter-spacing: var(--type-title-medium-tracking);
     line-height: 1;
     flex: none;
   }
