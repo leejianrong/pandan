@@ -57,9 +57,18 @@ reopened by a slice above:
 - **NR-3** should assert both halves in one spec: the avatar menu gains Tokens/Teams (extend
   `keyboard.spec.ts`'s existing avatar-menu tests or add alongside them), and the drawer's remaining
   item list no longer includes either — a spec that only checks the addition could miss a forgotten
-  drawer row.
-- **NR-4** has no drawer spec to delete (there isn't one), but should confirm nothing else references
-  `SideNav` — `grep -rn "SideNav" frontend/src` should return only the deleted file's own history in
-  git, not a lingering import.
+  drawer row. **Also grep for `openView(page, "Tokens")` / `openView(page, "Teams")`** — building this
+  found both `tokens.spec.ts` and `helpers.ts`'s own `createTeam()` (used by `teams.spec.ts`) still
+  reached those views through the drawer; fixed with a new `openAccountMenuView()` helper (see
+  nav-rail-shaping.md D2's correction).
+- **NR-4 will hit the same class of gap, at full scale — check for it going in.** `openView()` is used
+  by `activity`/`backlog`/`dashboard`/`epic-story`/`epic-rollup`/`keyboard`/`labels`/`trash`/`ui-polish`
+  .spec.ts to reach the 6 items still left in the drawer after NR-3 (Dashboard, Epics, Labels, Backlog,
+  Activity, Members, Trash). Deleting `SideNav.svelte` breaks `openView()` itself, not just individual
+  callers — every one of those specs needs to switch to going through the rail instead (which already
+  has `aria-label="Views"`/role `navigation`, unambiguous once the drawer's `role="complementary"` is
+  gone). Confirm nothing else references `SideNav` — `grep -rn "SideNav" frontend/src` should return
+  only the deleted file's own history in git, not a lingering import — but that grep alone won't catch
+  the `openView()` breakage; run the full suite, not just a new spec, the way NR-1 and NR-3 both had to.
 
 Next: pick up NR-1 (already filed as KAN-1148 — retitle/resize it per the table above, then start).

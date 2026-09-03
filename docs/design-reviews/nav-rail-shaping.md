@@ -57,6 +57,16 @@ audit's rough sketch (§4) left underspecified and that would have broken CI if 
   so the rail's final item set is fixed at 7→8 (D1) from the start; NR-3 only adds them to the avatar
   menu and removes them from the old drawer. No slice does throwaway work adding-then-removing a rail
   item.
+
+  **Correction, found while building NR-3:** removing Tokens/Teams from the drawer breaks any e2e
+  helper that reached them *through* the drawer, which two did — `frontend/e2e/tokens.spec.ts` (via
+  `openView(page, "Tokens")`) and `helpers.ts`'s own `createTeam()` (via `openView(page, "Teams")`,
+  used by both `teams.spec.ts` tests). Same shape of gap as D1's correction: a slice's *removal* half
+  breaks a test path shaping didn't enumerate, because "existing test exposure" was checked for the
+  drawer's *deletion* (NR-4) but not for individual items dropping out of it earlier. Fixed by adding
+  `openAccountMenuView(page, name)` (opens the avatar menu, clicks the named `menuitem`) and switching
+  both call sites to it — the fix is additive (a new helper), not a rewrite of `openView`, since the
+  drawer's remaining items still need exactly what `openView` already does.
 - **D3 — the rail and the old hamburger+drawer run in parallel for slices NR-1 through NR-3.** Two
   paths to (most of) the same destinations for a few PRs is accepted as a deliberate, harmless
   intermediate state — the same tradeoff the audit itself already made in choosing 4-5 small slices

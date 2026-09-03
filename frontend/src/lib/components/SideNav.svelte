@@ -1,37 +1,35 @@
 <script lang="ts">
-  // Hamburger-triggered side-nav drawer (KAN-319 / U4). The secondary views
-  // (Dashboard, Epics, Activity, Tokens, Members, Trash) moved out of the
-  // always-visible top bar into this left drawer, decluttering the bar. The
-  // primary Board view stays a pill in the top bar (how you return here).
+  // Hamburger-triggered side-nav drawer (KAN-319 / U4). Being phased out by
+  // NavRail.svelte (NR-1..NR-4, KAN-1148..KAN-1151) — this is what's left
+  // after NR-2 moved Board to the rail and NR-3 (KAN-1150) moved the
+  // account-scoped Tokens/Teams into the avatar menu. NR-4 deletes this
+  // component outright once the rail covers everything it used to.
   //
-  // Stateless w.r.t. navigation: App.svelte owns `view` + the `show()` side-effects
-  // (e.g. refetchTokens on Tokens). This component only reports which item was
-  // picked via `onNavigate`, and open/close via `open` + `onClose`.
+  // Stateless w.r.t. navigation: App.svelte owns `view` + the `show()` side-effects.
+  // This component only reports which item was picked via `onNavigate`, and
+  // open/close via `open` + `onClose`.
   import {
     Activity,
     Archive,
     Inbox,
-    KeyRound,
     Layers,
     LayoutDashboard,
     Tag,
     Trash2,
     Users,
-    UsersRound,
     X,
   } from "lucide-svelte";
   import type { Icon } from "lucide-svelte";
 
-  // Mirrors App.svelte's view union (minus "board"/"settings", which aren't in the drawer).
+  // Mirrors App.svelte's view union (minus "board"/"settings"/"tokens"/"teams",
+  // none of which are in the drawer any more).
   export type DrawerView =
     | "dashboard"
     | "epics"
     | "labels"
     | "backlog"
     | "activity"
-    | "tokens"
     | "members"
-    | "teams"
     | "trash";
 
   let {
@@ -60,9 +58,7 @@
     { id: "labels", label: "Labels", icon: Tag },
     { id: "backlog", label: "Backlog", icon: Archive },
     { id: "activity", label: "Activity", icon: Activity },
-    { id: "tokens", label: "Tokens", icon: KeyRound },
     { id: "members", label: "Members", icon: Users },
-    { id: "teams", label: "Teams", icon: UsersRound },
     { id: "trash", label: "Trash", icon: Trash2 },
   ];
 
