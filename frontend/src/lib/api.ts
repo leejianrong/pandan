@@ -62,6 +62,9 @@ export interface Label {
   board_id: number;
   name: string;
   color: string;
+  // A second, independent visual dimension (M8 V64, KAN-985, issue #278): any
+  // single Unicode grapheme cluster, or null — most labels won't have one.
+  emoji: string | null;
   created_at: string;
   // How many cards carry this label. Present ONLY on the board's label list
   // (GET /boards/{id}/labels) — the labels nested under a card read deliberately
@@ -543,14 +546,18 @@ export async function deleteEpic(id: number): Promise<void> {
 export interface LabelCreate {
   name: string;
   color: string;
+  // M8 V64, KAN-985: optional, a single grapheme cluster — omit for no emoji.
+  emoji?: string | null;
 }
 
 // Field edits for a label (V61, KAN-982). Both optional — only the keys present
 // are sent, so recolouring never touches the name. Neither is nullable: a label
-// with no name or no colour cannot render, so there is nothing to "clear".
+// with no name or no colour cannot render, so there is nothing to "clear". `emoji`
+// (M8 V64, KAN-985) is the exception — send null to clear it.
 export interface LabelUpdate {
   name?: string;
   color?: string;
+  emoji?: string | null;
 }
 
 export async function listLabels(boardId: number): Promise<Label[]> {

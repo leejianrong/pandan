@@ -20,6 +20,7 @@ from app.schemas import (
     EpicCreate,
     EpicUpdate,
     LabelCreate,
+    LabelUpdate,
     LinkCreate,
     NeedsHumanRequest,
     PriorityEnum,
@@ -316,6 +317,36 @@ def test_label_create_requires_non_empty_name_and_color():
             LabelCreate(name=bad, color="#000")
         with pytest.raises(ValidationError):
             LabelCreate(name="ok", color=bad)
+
+
+def test_label_emoji_defaults_to_none():
+    # M8 V64 (KAN-985): emoji is optional, unlike name/color.
+    assert LabelCreate(name="bug", color="#ef4444").emoji is None
+    assert LabelUpdate().emoji is None
+
+
+def test_label_create_accepts_a_single_grapheme_emoji():
+    # A ZWJ family sequence — several codepoints, one grapheme (see app.emoji).
+    assert LabelCreate(name="bug", color="#ef4444", emoji="👨‍👩‍👧‍👦").emoji == "👨‍👩‍👧‍👦"
+
+
+def test_label_create_rejects_more_than_one_grapheme():
+    with pytest.raises(ValidationError):
+        LabelCreate(name="bug", color="#ef4444", emoji="ab")
+
+
+def test_label_update_accepts_emoji_and_clears():
+    upd = LabelUpdate(emoji="🐛")
+    assert upd.emoji == "🐛"
+    # Unlike name/color (LabelUpdate rejects an explicit null), None is a genuine,
+    # permanent value for emoji — clearing it is a real operation.
+    cleared = LabelUpdate(emoji=None)
+    assert cleared.model_dump(exclude_unset=True) == {"emoji": None}
+
+
+def test_label_update_rejects_more_than_one_grapheme():
+    with pytest.raises(ValidationError):
+        LabelUpdate(emoji="xy")
 
 
 # --- needs-human handoff (M5 V13, KAN-246) ---------------------------------

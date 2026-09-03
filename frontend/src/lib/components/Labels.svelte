@@ -71,6 +71,10 @@
   let adding = $state(false);
   let newName = $state("");
   let newColor = $state(DEFAULT_COLOR);
+  // A second, independent visual dimension (M8 V64, KAN-985) — free text, since
+  // unlike colour there is no fixed palette; any single grapheme is valid and the
+  // server is the source of truth for that. Optional, so "" means "no emoji".
+  let newEmoji = $state("");
   let busy = $state(false);
   let formError = $state<string | null>(null);
 
@@ -79,6 +83,7 @@
   let editingId = $state<number | null>(null);
   let editName = $state("");
   let editColor = $state("");
+  let editEmoji = $state("");
   let confirmingId = $state<number | null>(null);
 
   // Labels are board-scoped: (re)load whenever the active board changes. Runs on
@@ -95,9 +100,10 @@
     busy = true;
     formError = null;
     try {
-      await addLabel(name, color);
+      await addLabel(name, color, newEmoji.trim() || null);
       newName = "";
       newColor = DEFAULT_COLOR;
+      newEmoji = "";
       adding = false;
     } catch (e) {
       formError = e instanceof ApiError ? e.message : "Failed to create label";
@@ -110,6 +116,7 @@
     editingId = label.id;
     editName = label.name;
     editColor = label.color;
+    editEmoji = label.emoji ?? "";
     confirmingId = null;
     formError = null;
   }
@@ -122,12 +129,14 @@
   async function saveEdit(label: Label) {
     const name = editName.trim();
     const color = editColor.trim();
+    const emoji = editEmoji.trim();
     if (!name || !color || busy) return;
     // Send only what actually changed, so a rename never rewrites the colour (and a
     // no-op save is a no-op request rather than a pointless PATCH).
-    const patch: { name?: string; color?: string } = {};
+    const patch: { name?: string; color?: string; emoji?: string | null } = {};
     if (name !== label.name) patch.name = name;
     if (color !== label.color) patch.color = color;
+    if (emoji !== (label.emoji ?? "")) patch.emoji = emoji || null;
     if (Object.keys(patch).length === 0) {
       editingId = null;
       return;
@@ -243,6 +252,13 @@
       <input placeholder="Label name (required)" aria-label="Label name" bind:value={newName} />
       <div class="row colour-row">
         {@render swatches("new-label-color", newColor, (c) => (newColor = c))}
+        <input
+          class="emoji-input"
+          placeholder="Emoji (optional)"
+          aria-label="Label emoji"
+          maxlength="8"
+          bind:value={newEmoji}
+        />
       </div>
       <div class="row actions">
         <button type="submit" class="primary" disabled={!newName.trim() || !newColor.trim() || busy}>
@@ -274,6 +290,13 @@
           >
             <input aria-label="Label name" bind:value={editName} />
             {@render swatches(`label-${label.id}-color`, editColor, (c) => (editColor = c))}
+            <input
+              class="emoji-input"
+              placeholder="Emoji (optional)"
+              aria-label="Label emoji"
+              maxlength="8"
+              bind:value={editEmoji}
+            />
             <button
               type="submit"
               class="primary"
@@ -287,6 +310,9 @@
           </form>
         {:else}
           <div class="label-info">
+            {#if label.emoji}
+              <span class="label-emoji" aria-hidden="true">{label.emoji}</span>
+            {/if}
             <span
               class="swatch"
               style="background: {labelColor(label.color)}"
@@ -379,6 +405,23 @@
   .label-edit input {
     min-width: 0;
     flex: 1 1 8rem;
+  }
+  /* The emoji field (M8 V64, KAN-985) is a single grapheme, not a sentence — a
+     narrow fixed width reads as "this field is different" without needing a
+     label, and stops it competing with the name input for flex space.
+     `.label-edit .emoji-input` beats the plain-element `.label-edit input`
+     rule above on specificity, no `!important` needed. */
+  .emoji-input {
+    flex: 0 0 5.5rem;
+    text-align: center;
+  }
+  .label-edit .emoji-input {
+    flex: 0 0 5.5rem;
+  }
+  .label-emoji {
+    font-size: 1rem;
+    line-height: 1;
+    flex: none;
   }
   /* The swatch grid (V62). Wraps, because the edit row shares one flex line with the
      name input and the save/cancel buttons — and a legacy colour adds a tenth

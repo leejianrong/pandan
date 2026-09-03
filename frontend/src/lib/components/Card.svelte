@@ -172,6 +172,9 @@
       <div class="card-meta">
         {#each card.labels as label (label.id)}
           <span class="label-chip" title={label.name}>
+            {#if label.emoji}
+              <span class="label-emoji" aria-hidden="true">{label.emoji}</span>
+            {/if}
             <span class="label-dot" style="background: {labelColor(label.color)}" aria-hidden="true"></span>
             <span class="label-name">{label.name}</span>
           </span>

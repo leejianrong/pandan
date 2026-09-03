@@ -357,9 +357,13 @@ export async function refetchLabels(): Promise<void> {
 
 // Create a label on the active board, then refetch the label list (server
 // authoritative). Returns the created label so a caller can attach it immediately.
-export async function addLabel(name: string, color: string): Promise<Label | null> {
+export async function addLabel(
+  name: string,
+  color: string,
+  emoji?: string | null,
+): Promise<Label | null> {
   if (boardStore.activeBoardId == null) return null;
-  const created = await createLabel(boardStore.activeBoardId, { name, color });
+  const created = await createLabel(boardStore.activeBoardId, { name, color, emoji });
   await refetchLabels();
   return created;
 }
@@ -370,7 +374,7 @@ export async function addLabel(name: string, color: string): Promise<Label | nul
 // That coupling is the same one removeLabel documents below, for the same reason.
 export async function editLabel(
   id: number,
-  patch: { name?: string; color?: string },
+  patch: { name?: string; color?: string; emoji?: string | null },
 ): Promise<void> {
   await updateLabel(id, patch);
   await Promise.all([refetchLabels(), refetch()]);
