@@ -1,14 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { cleanupE2eBoards, openFreshBoard } from "./helpers";
 
-// NR-1 (KAN-1148, docs/design-reviews/nav-rail-slices.md): the persistent left
-// rail that replaces the hamburger+drawer's board-scoped items. No existing
-// spec asserted drawer navigation (there was nothing to assert against — the
-// drawer had never been covered), so this is new coverage, not a migration.
-//
-// Deliberately excludes "Board" (see NavRail.svelte's own comment / D1 in
-// nav-rail-shaping.md) — that's NR-2's job, atomically with retiring the
-// top-bar pill.
+// NR-1/NR-2 (KAN-1148/KAN-1149, docs/design-reviews/nav-rail-slices.md): the
+// persistent left rail that replaces the hamburger+drawer's board-scoped
+// items AND (since NR-2) the top-bar Board pill. No existing spec asserted
+// drawer navigation (there was nothing to assert against — the drawer had
+// never been covered), so this is new coverage, not a migration.
 
 test.afterAll(async () => {
   await cleanupE2eBoards();
@@ -60,7 +57,26 @@ test("nav rail highlights exactly one item at a time", async ({ page }) => {
   );
 });
 
-test("nav rail has no 'Board' item yet (NR-2's job)", async ({ page }) => {
+test("nav rail's Board item is current on load and returns from another view", async ({
+  page,
+}) => {
   await openFreshBoard(page);
-  await expect(rail(page).getByRole("button", { name: "Board", exact: true })).toHaveCount(0);
+
+  const boardItem = rail(page).getByRole("button", { name: "Board", exact: true });
+  await expect(boardItem).toHaveAttribute("aria-current", "page");
+
+  await rail(page).getByRole("button", { name: "Trash" }).click();
+  await expect(boardItem).not.toHaveAttribute("aria-current", "page");
+
+  await boardItem.click();
+  await expect(page.getByRole("heading", { name: "Todo", exact: true })).toBeVisible();
+  await expect(boardItem).toHaveAttribute("aria-current", "page");
+});
+
+test("the old top-bar Board pill is gone (NR-2 retired it atomically)", async ({ page }) => {
+  await openFreshBoard(page);
+  // Only the rail's Board button should exist now — no second "Board" button
+  // in the top bar, which would make this locator ambiguous if the pill
+  // still existed.
+  await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveCount(1);
 });

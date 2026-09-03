@@ -88,7 +88,9 @@
     drawerOpen = false;
   }
 
-  // Navigating from the persistent rail (NR-1, KAN-1148) — no drawer to close.
+  // Navigating from the persistent rail (NR-1/NR-2, KAN-1148/KAN-1149) — no
+  // drawer to close. Board is one of the rail's items since NR-2 (the
+  // top-bar pill it used to be is gone — see the .app-shell style comment).
   function navigateFromRail(next: RailView) {
     show(next);
   }
@@ -193,13 +195,6 @@
     </button>
     <Brand />
     <BoardSwitcher />
-    <button
-      class="board-tab"
-      class:active={view === "board"}
-      onclick={() => show("board")}
-    >
-      Board
-    </button>
     <div class="topbar-search">
       <Search size={15} aria-hidden="true" />
       <input

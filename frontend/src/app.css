@@ -439,41 +439,6 @@ body {
   height: 9px;
 }
 
-/* Primary Board view — a pill kept in the top bar (KAN-319/U4). Secondary views
-   moved into the hamburger side-nav drawer (SideNav.svelte). */
-.board-tab {
-  border: 1px solid transparent;
-  background: none;
-  color: var(--muted);
-  padding: 0.3rem 0.8rem;
-  font-size: var(--type-label-large-size);
-  line-height: var(--type-label-large-line-height);
-  font-weight: var(--type-label-large-weight);
-  letter-spacing: var(--type-label-large-tracking);
-  border-radius: var(--shape-full);
-  cursor: pointer;
-}
-.board-tab:hover {
-  background: var(--state-hover);
-  color: var(--text);
-}
-.board-tab:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  background: var(--state-focus);
-  color: var(--text);
-}
-.board-tab:active {
-  background: var(--state-pressed);
-  color: var(--text);
-}
-.board-tab.active {
-  background: var(--accent-soft);
-  border-color: var(--border);
-  color: var(--accent);
-  font-weight: 600;
-}
-
 /* Board switcher in the top bar (M3 V7). */
 .board-switcher {
   display: flex;
