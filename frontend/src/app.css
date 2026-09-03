@@ -1,26 +1,64 @@
 :root,
 :root[data-theme="light"] {
-  /* Board redesign palette — Graphite (Zinc & Teal), light theme.
-     Teal primary; violet reserved for epics + agents; green/red stay semantic.
-     The explicit [data-theme="light"] selector lets the in-app toggle force light
+  /* M3 role palette (M8... M3-1, KAN-1090) — generated from the seed teal
+     #0d9488 with @material/material-color-utilities' `themeFromSourceColor`
+     (see frontend/scripts/gen-m3-tokens.mjs, re-run it to regenerate). These are
+     the SAME custom-property names the Graphite palette used (--accent,
+     --card-bg, etc.) — a pure value swap, not a rename, so every existing
+     var(--x) reference in this file and every component keeps resolving
+     unchanged. Mapping: --border <- outline-variant; --text/--muted <-
+     on-surface/on-surface-variant; --accent <- primary; --accent-soft <-
+     primary-container; --agent (still the "second accent" family, was
+     hand-picked violet) <- tertiary; --agent-soft <- tertiary-container;
+     --danger/--danger-soft <- error/error-container. --success/--success-soft/
+     --warning/--warning-soft have no M3-generated counterpart (only
+     primary/secondary/tertiary/error come out of a seed) and are UNCHANGED
+     hand-picked semantic colours, same as before.
+     --bg/--col-bg/--card-bg/--surface-2 are the three surface-tier neutrals;
+     --bg <- surface always, but --card-bg/--col-bg deliberately do NOT use the
+     same container-tier role name in both schemes. This app's convention
+     (predates this ticket) is "white card pops above a greyer page, in both
+     themes" — and because M3's surface-container tone steps run in OPPOSITE
+     directions per scheme (in light, `-lowest` is the tier CLOSEST to white,
+     i.e. brightest; in dark, `-lowest` is the tier closest to BLACK, i.e.
+     darkest — see color-system.md's surface-container-tiers note + the tone
+     table in gen-m3-tokens.mjs), reusing "-lowest" for --card-bg in dark would
+     make dark cards recede into the page instead of popping above it, an
+     actual regression versus the original hand-picked palette (where dark
+     --card-bg was lighter than --bg, same relative order as light). So: light
+     uses surface-container-lowest (whitest) for --card-bg and
+     surface-container-low for --col-bg; dark uses surface-container-highest
+     (brightest of the tiers) for --card-bg and surface-container for --col-bg
+     — same VISUAL role (brightest/raised vs. a mid tray) in both themes, at
+     the cost of the literal M3 tier name not matching across schemes. The
+     explicit [data-theme="light"] selector lets the in-app toggle force light
      even when the OS prefers dark (it wins over the media query below). */
-  --bg: #f6f7f8;
-  --col-bg: #eceef1;
+  --bg: #f7faf8;
+  --col-bg: #f2f4f2;
   --card-bg: #ffffff;
-  --surface-2: #eceef1;
-  --border: #dcdfe4;
-  --text: #1a1d21;
-  --muted: #616870;
-  --accent: #0d9488;
-  --accent-soft: #d5f1ec;
-  --agent: #7c3aed;
-  --agent-soft: #eee6fd;
+  --surface-2: #f2f4f2;
+  --border: #bec9c6;
+  --text: #191c1b;
+  --muted: #3f4947;
+  --accent: #006a61;
+  --accent-soft: #73f8e7;
+  /* on-primary / on-error (KAN-1090 new tokens) — the M3 pairing rule requires
+     the content colour paired with a role, not an assumed white: a generated
+     dark-mode primary/error is often a LIGHT tone, which white text on top of
+     would fail contrast. Replaces the handful of hard-coded `color: #fff` this
+     file had on solid --accent/--danger backgrounds (avatar, button.primary,
+     button.danger, the active desc-tab, the checked checkbox, the unread
+     badge). */
+  --on-accent: #ffffff;
+  --agent: #46617a;
+  --agent-soft: #cde5ff;
   --success: #16a34a;
   --success-soft: #dcf3e3;
   --warning: #b45309;
   --warning-soft: #fbeccd;
-  --danger: #dc2626;
-  --danger-soft: #fde4e4;
+  --danger: #ba1a1a;
+  --danger-soft: #ffdad6;
+  --on-danger: #ffffff;
   --hover: rgba(20, 25, 30, 0.06);
   --shadow-sm: 0 1px 0 rgba(20, 25, 30, 0.06);
   --shadow-md: 0 1px 1px rgba(20, 25, 30, 0.08), 0 8px 20px -12px rgba(20, 25, 30, 0.28);
@@ -62,23 +100,30 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #101315;
-    --col-bg: #15191c;
-    --card-bg: #1a1f23;
-    --surface-2: #15191c;
-    --border: #2b3238;
-    --text: #e8ebed;
-    --muted: #99a2ab;
-    --accent: #2dd4bf;
-    --accent-soft: #0f312d;
-    --agent: #b794f6;
-    --agent-soft: #241a3d;
+    /* M3 role palette, dark scheme — same seed (#0d9488), same mapping as the
+       light block above (see its comment, including WHY --card-bg/--col-bg
+       use different M3 tier names per scheme); generated together so
+       light/dark are algorithmically consistent rather than two independently
+       hand-tuned palettes. */
+    --bg: #101413;
+    --col-bg: #1d2020;
+    --card-bg: #323535;
+    --surface-2: #1d2020;
+    --border: #3f4947;
+    --text: #e0e3e1;
+    --muted: #bec9c6;
+    --accent: #52dbcb;
+    --accent-soft: #005049;
+    --on-accent: #003732;
+    --agent: #aecae6;
+    --agent-soft: #2e4961;
     --success: #4ade80;
     --success-soft: #14301f;
     --warning: #fbbf24;
     --warning-soft: #3a2c10;
-    --danger: #f87171;
-    --danger-soft: #3a1717;
+    --danger: #ffb4ab;
+    --danger-soft: #93000a;
+    --on-danger: #690005;
     --hover: rgba(255, 255, 255, 0.06);
     --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.5);
     --shadow-md: 0 10px 28px -14px rgba(0, 0, 0, 0.8);
@@ -107,23 +152,27 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #101315;
-  --col-bg: #15191c;
-  --card-bg: #1a1f23;
-  --surface-2: #15191c;
-  --border: #2b3238;
-  --text: #e8ebed;
-  --muted: #99a2ab;
-  --accent: #2dd4bf;
-  --accent-soft: #0f312d;
-  --agent: #b794f6;
-  --agent-soft: #241a3d;
+  /* M3 role palette, dark scheme (forced by the in-app toggle) — identical
+     values to the prefers-color-scheme block above; see its comment. */
+  --bg: #101413;
+  --col-bg: #1d2020;
+  --card-bg: #323535;
+  --surface-2: #1d2020;
+  --border: #3f4947;
+  --text: #e0e3e1;
+  --muted: #bec9c6;
+  --accent: #52dbcb;
+  --accent-soft: #005049;
+  --on-accent: #003732;
+  --agent: #aecae6;
+  --agent-soft: #2e4961;
   --success: #4ade80;
   --success-soft: #14301f;
   --warning: #fbbf24;
   --warning-soft: #3a2c10;
-  --danger: #f87171;
-  --danger-soft: #3a1717;
+  --danger: #ffb4ab;
+  --danger-soft: #93000a;
+  --on-danger: #690005;
   --hover: rgba(255, 255, 255, 0.06);
   --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.5);
   --shadow-md: 0 10px 28px -14px rgba(0, 0, 0, 0.8);
@@ -336,7 +385,7 @@ body {
   border: none;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
@@ -707,7 +756,7 @@ main {
   height: 20px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.6rem;
   font-weight: 700;
 }
@@ -785,7 +834,7 @@ button.link.danger:hover {
 }
 button.danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-danger);
   border-color: var(--danger);
 }
 
@@ -965,7 +1014,7 @@ button {
 }
 button.primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 button.primary:disabled {
@@ -1380,7 +1429,7 @@ button.primary:disabled {
 }
 .desc-tab.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .desc-tab:focus-visible {
   outline: 2px solid var(--accent);
@@ -2188,7 +2237,9 @@ button.primary:disabled {
   border-radius: 5px;
   border: 1px solid var(--border);
   background: var(--card-bg);
-  color: #fff;
+  /* The check glyph's colour, only visible once .is-checked paints the
+     --accent fill below — an on-accent pair, not a bare white. */
+  color: var(--on-accent);
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 .ui-checkbox.is-checked {
@@ -2295,7 +2346,7 @@ button.primary:disabled {
   /* Teal to match the app's "attention to a person" language; danger red stays
      reserved for the blocked/CI rows inside the panel (KAN-303 approved design). */
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.62rem;
   font-weight: 700;
   line-height: 1;
