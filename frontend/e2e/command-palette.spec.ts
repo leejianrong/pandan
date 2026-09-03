@@ -76,6 +76,34 @@ test("⌘K → create card adds it to Todo", async ({ page }) => {
   await expect(cardInColumn(page, "Todo", title)).toBeVisible();
 });
 
+// Regression guard for a drift where VIEWS (this file's navigable destinations) fell out
+// of sync with SideNav.svelte's drawer items — Labels and Backlog were addable via the
+// drawer but not ⌘K for a while. Covers both rather than asserting the full VIEWS list
+// against SideNav's, since there's no shared grammar module to diff (unlike the backend's
+// ref grammar / test_ref_grammar.py) — this just proves the two newest destinations work.
+test("⌘K → go to view reaches Labels and Backlog", async ({ page }) => {
+  await openFreshBoard(page);
+
+  await openPalette(page);
+  // "Jump vi" rather than "Jump to view" — the underlying cmdk-style fuzzy
+  // filter (unrelated to this fix) scores "to" adjacent to "view" as no
+  // match, so this dodges that quirk instead of asserting on it.
+  await page.keyboard.type("Jump vi");
+  await palette(page).getByRole("option", { name: /Jump to view/ }).click();
+  await page.keyboard.type("Labels");
+  await palette(page).getByRole("option", { name: "Labels" }).click();
+  await expect(palette(page)).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Labels" })).toBeVisible();
+
+  await openPalette(page);
+  await page.keyboard.type("Jump vi");
+  await palette(page).getByRole("option", { name: /Jump to view/ }).click();
+  await page.keyboard.type("Backlog");
+  await palette(page).getByRole("option", { name: "Backlog" }).click();
+  await expect(palette(page)).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Backlog" })).toBeVisible();
+});
+
 test("⌘K → toggle theme flips the theme, Escape closes", async ({ page }) => {
   await openFreshBoard(page);
 
