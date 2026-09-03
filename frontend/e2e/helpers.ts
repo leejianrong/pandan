@@ -86,18 +86,19 @@ export async function pickSelect(
   await page.getByRole("option", { name: optionLabel, exact: true }).click();
 }
 
-// Navigate to a secondary view via the hamburger side-nav drawer (KAN-319/U4).
-// Dashboard/Epics/Activity/Tokens/Members/Trash moved out of the always-visible
-// top bar into a drawer: open it (hamburger), then click the item, which navigates
-// and closes the drawer. Board stays a top-bar pill (click "Board" directly).
+// Navigate to a board-scoped secondary view via the persistent NavRail
+// (NR-1..NR-4, KAN-1148..KAN-1151). Originally opened the hamburger side-nav
+// drawer (KAN-319/U4) first; the drawer is gone since NR-4, and every caller
+// of this helper (Activity/Backlog/Dashboard/Epics/Labels/Trash) moved to the
+// rail with it — Tokens/Teams callers already switched to
+// openAccountMenuView() in NR-3, since those live in the avatar menu instead.
 //
-// Scoped to the drawer (role "complementary") rather than page-wide: since NR-1
-// (KAN-1148) the persistent NavRail duplicates most of these labels (role
-// "navigation"), so an unscoped getByRole is ambiguous for every shared item.
+// Scoped to the rail (role "navigation", aria-label "Views") rather than
+// page-wide — harmless now that the drawer is gone, but keeps the intent
+// explicit and matches openAccountMenuView()'s own scoping.
 export async function openView(page: Page, name: string): Promise<void> {
-  await page.getByRole("button", { name: "Open menu" }).click();
   await page
-    .getByRole("complementary")
+    .getByRole("navigation", { name: "Views" })
     .getByRole("button", { name, exact: true })
     .click();
 }

@@ -61,14 +61,35 @@ reopened by a slice above:
   found both `tokens.spec.ts` and `helpers.ts`'s own `createTeam()` (used by `teams.spec.ts`) still
   reached those views through the drawer; fixed with a new `openAccountMenuView()` helper (see
   nav-rail-shaping.md D2's correction).
-- **NR-4 will hit the same class of gap, at full scale — check for it going in.** `openView()` is used
-  by `activity`/`backlog`/`dashboard`/`epic-story`/`epic-rollup`/`keyboard`/`labels`/`trash`/`ui-polish`
-  .spec.ts to reach the 6 items still left in the drawer after NR-3 (Dashboard, Epics, Labels, Backlog,
-  Activity, Members, Trash). Deleting `SideNav.svelte` breaks `openView()` itself, not just individual
-  callers — every one of those specs needs to switch to going through the rail instead (which already
-  has `aria-label="Views"`/role `navigation`, unambiguous once the drawer's `role="complementary"` is
-  gone). Confirm nothing else references `SideNav` — `grep -rn "SideNav" frontend/src` should return
-  only the deleted file's own history in git, not a lingering import — but that grep alone won't catch
-  the `openView()` breakage; run the full suite, not just a new spec, the way NR-1 and NR-3 both had to.
+- **NR-4 hit the anticipated gap, and it was fixed before it could break anything.** `openView()`'s
+  only remaining callers were the 7 rail items (Activity/Backlog/Dashboard/Epics/Labels/Members/Trash,
+  across `activity`/`backlog`/`dashboard`/`epic-story`/`epic-rollup`/`keyboard`/`labels`/`trash`
+  /`ui-polish`.spec.ts). Rather than migrate 9 spec files individually, `openView()` itself was
+  repointed at the rail (`role="navigation"`, `aria-label="Views"`) instead of the drawer
+  (`role="complementary"`) — every call site's *intent* ("navigate to this view") was unchanged, only
+  the underlying UI mechanism was, so one helper edit covered all 9 files. Full suite (78 specs) passed
+  first try with this fix in place. `grep -rn "SideNav" frontend/src` returns only explanatory comments
+  in `App.svelte`/`NavRail.svelte`, no import.
 
-Next: pick up NR-1 (already filed as KAN-1148 — retitle/resize it per the table above, then start).
+## Status: all 4 slices shipped
+
+NR-1 (KAN-1148), NR-2 (KAN-1149), NR-3 (KAN-1150), NR-4 (KAN-1151) all merged and confirmed on prod. The nav rail redesign this doc was shaped for is complete — the
+persistent left rail is the only board-scoped nav surface, Tokens/Teams live in the avatar menu, and
+the hamburger + `SideNav.svelte` are gone. This closes audit creases 1 and 4
+([nav-ia-audit.md](nav-ia-audit.md)) for good, alongside crease 2 (KAN-1146, fixed before this slice
+series began).
+
+**Three real gaps surfaced during implementation that this shaping pass didn't fully anticipate** — all
+fixed in the same PR that found them, not deferred:
+1. NR-1: the "Board" ambiguity D1 called out actually applied to all 7 shared rail/drawer labels, not
+   just Board — `openView()` needed scoping to the drawer.
+2. NR-3: removing Tokens/Teams from the drawer broke two test paths (`tokens.spec.ts`,
+   `helpers.ts`'s `createTeam()`) that reached them through it — fixed with a new
+   `openAccountMenuView()` helper.
+3. NR-4: anticipated in NR-3's own testing notes and confirmed here — fixed by repointing `openView()`
+   at the rail rather than migrating every caller individually.
+
+The pattern across all three: **a slice's *removal* half breaks test paths that only existed because
+of what was being removed**, and "no existing spec asserts on the drawer's contents" (true, checked at
+shaping time) isn't the same claim as "no existing spec depends on the drawer existing." Worth carrying
+into the next shaping pass that removes UI a test suite has grown to route through.
