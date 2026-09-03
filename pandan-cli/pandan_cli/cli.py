@@ -2741,20 +2741,23 @@ def _cmd_label_create(client: PandanClient, config: Config, args: argparse.Names
     # KAN-288: color accepts either the positional or the --color flag (flag wins),
     # falling back to a neutral default so it can be omitted entirely.
     color = args.color_opt or args.color_pos or DEFAULT_LABEL_COLOR
-    return client.create_label(board, args.name, color)
+    return client.create_label(board, args.name, color, emoji=args.emoji)
 
 
 def _cmd_label_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    # Neither field is clearable, so "not passed" is the only meaning of None and a
-    # PATCH with nothing to send is a no-op the API returns unchanged. Refuse it here
-    # instead: a command that silently does nothing is worse than a usage error.
-    if args.name is None and args.color is None:
+    # None of the three is clearable through this client method, so "not passed"
+    # is the only meaning of None and a PATCH with nothing to send is a no-op the
+    # API returns unchanged. Refuse it here instead: a command that silently does
+    # nothing is worse than a usage error.
+    if args.name is None and args.color is None and args.emoji is None:
         raise CliError(
-            "nothing to update; pass --name and/or --color",
+            "nothing to update; pass --name, --color, and/or --emoji",
             code="nothing_to_update",
-            arg="--name/--color",
+            arg="--name/--color/--emoji",
         )
-    return client.update_label(args.label_id, name=args.name, color=args.color)
+    return client.update_label(
+        args.label_id, name=args.name, color=args.color, emoji=args.emoji
+    )
 
 
 def _cmd_label_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -4174,11 +4177,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--color", dest="color_opt", metavar="COLOR",
         help="a palette token or hex, e.g. sky or #0ea5e9 (alternative to the positional)",
     )
+    # M8 V64, KAN-985: a second, independent visual dimension from colour — any
+    # single emoji/grapheme, not a fixed palette. Optional; omit for no emoji.
+    p_label_create.add_argument(
+        "--emoji", metavar="EMOJI",
+        help="a single emoji (optional), e.g. 🐛 — a second visual cue distinct from colour",
+    )
     p_label_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
     p_label_create.set_defaults(func=_cmd_label_create, noun="label")
 
     p_label_update = label_sub.add_parser(
-        "update", parents=[common], help="rename or recolour a label"
+        "update", parents=[common], help="rename, recolour, or re-emoji a label"
     )
     p_label_update.add_argument("label_id", type=int)
     p_label_update.add_argument("--name", help="new label name")
@@ -4188,6 +4197,10 @@ def build_parser() -> argparse.ArgumentParser:
             "new palette token or hex, e.g. sky or #0ea5e9. "
             f"tokens: {', '.join(LABEL_PALETTE)}"
         ),
+    )
+    p_label_update.add_argument(
+        "--emoji", metavar="EMOJI",
+        help="new single emoji, e.g. 🐛 — a second visual cue distinct from colour",
     )
     p_label_update.set_defaults(func=_cmd_label_update, noun="label")
 

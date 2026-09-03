@@ -20,6 +20,7 @@ from .board_keys import (
     is_valid_board_key,
     reserved_board_key_error,
 )
+from .emoji import MAX_LABEL_EMOJI_LEN, is_single_grapheme, label_emoji_error
 from .palette import is_valid_label_color, label_color_error
 
 
@@ -265,6 +266,10 @@ class LabelCreate(BaseModel):
 
     name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
     color: Annotated[str, Field(min_length=1, max_length=MAX_LABEL_COLOR_LEN)]
+    # A second, independent visual dimension (M8 V64, KAN-985, issue #278) — any
+    # single Unicode grapheme cluster, not a fixed palette. Optional, unlike
+    # colour: most labels won't have one.
+    emoji: Annotated[str | None, Field(max_length=MAX_LABEL_EMOJI_LEN)] = None
 
     @field_validator("name", "color")
     @classmethod
@@ -285,19 +290,32 @@ class LabelCreate(BaseModel):
             raise ValueError(label_color_error())
         return v
 
+    @field_validator("emoji")
+    @classmethod
+    def single_grapheme(cls, v: str | None) -> str | None:
+        """Exactly one grapheme cluster (M8 V64, KAN-985) — but only when an emoji
+        was actually given, since (unlike colour) ``None`` is a legitimate,
+        permanent value here, not just "not sent"."""
+        if v is not None and not is_single_grapheme(v):
+            raise ValueError(label_emoji_error())
+        return v
+
 
 class LabelUpdate(BaseModel):
     """Field edits for a label (V61, KAN-982): ``PATCH /labels/{id}``. Both fields
     optional — only sent fields are applied, via ``exclude_unset`` in the router.
 
-    Neither field is nullable: a label with no name or no colour cannot render, so
-    ``null`` is rejected rather than treated as "clear". That is the difference from
-    :class:`EpicUpdate`, whose ``target_date``/``lead`` are genuinely clearable."""
+    Neither ``name`` nor ``color`` is nullable: a label with no name or no colour
+    cannot render, so ``null`` is rejected rather than treated as "clear". ``emoji``
+    (M8 V64, KAN-985) is the exception — like :class:`EpicUpdate`'s
+    ``target_date``/``lead``, it is genuinely clearable, since a label with no
+    emoji is exactly what most labels look like today."""
 
     name: Annotated[str | None, Field(min_length=1, max_length=MAX_NAME_LEN)] = None
     color: Annotated[
         str | None, Field(min_length=1, max_length=MAX_LABEL_COLOR_LEN)
     ] = None
+    emoji: Annotated[str | None, Field(max_length=MAX_LABEL_EMOJI_LEN)] = None
 
     @field_validator("name", "color")
     @classmethod
@@ -333,6 +351,17 @@ class LabelUpdate(BaseModel):
             raise ValueError(label_color_error())
         return v
 
+    @field_validator("emoji")
+    @classmethod
+    def single_grapheme(cls, v: str | None) -> str | None:
+        """The same grapheme rule as :class:`LabelCreate`. Fires only when
+        ``emoji`` was actually sent, so an explicit ``null`` — a real, valid
+        value here — still reaches this validator and passes straight through,
+        clearing the column."""
+        if v is not None and not is_single_grapheme(v):
+            raise ValueError(label_emoji_error())
+        return v
+
 
 class LabelRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -341,6 +370,9 @@ class LabelRead(BaseModel):
     board_id: int
     name: str
     color: str
+    # A second, independent visual dimension (M8 V64, KAN-985) — a real column,
+    # plain passthrough. Null for a label that hasn't been given one.
+    emoji: str | None
     created_at: datetime
 
 

@@ -477,6 +477,43 @@ def test_delete_epic_sends_delete_and_returns_ack_without_parsing_body():
     assert out == {"deleted": 8}
 
 
+def test_create_label_posts_name_and_color():
+    import json
+
+    handler, seen = capture(httpx.Response(201, json={"id": 1, "name": "bug"}))
+    make_client(handler).create_label(5, "bug", "#ef4444")
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/boards/5/labels"
+    assert json.loads(seen["content"]) == {"name": "bug", "color": "#ef4444"}
+
+
+def test_create_label_includes_emoji_when_given():
+    import json
+
+    # M8 V64 (KAN-985): emoji passes through the body when supplied.
+    handler, seen = capture(httpx.Response(201, json={"id": 1, "name": "bug"}))
+    make_client(handler).create_label(5, "bug", "#ef4444", emoji="🐛")
+    assert json.loads(seen["content"]) == {"name": "bug", "color": "#ef4444", "emoji": "🐛"}
+
+
+def test_update_label_patches_provided_fields():
+    import json
+
+    handler, seen = capture(httpx.Response(200, json={"id": 3, "name": "bug"}))
+    make_client(handler).update_label(3, name="fixed")
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/labels/3"
+    assert json.loads(seen["content"]) == {"name": "fixed"}
+
+
+def test_update_label_includes_emoji_when_given():
+    import json
+
+    handler, seen = capture(httpx.Response(200, json={"id": 3, "name": "bug"}))
+    make_client(handler).update_label(3, emoji="🔥")
+    assert json.loads(seen["content"]) == {"emoji": "🔥"}
+
+
 def test_move_card_posts_to_move_with_column_and_position():
     import json
 

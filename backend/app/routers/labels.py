@@ -92,7 +92,9 @@ def create_label(
     """Create a label on a board (editor or above). ``name`` + ``color`` come from
     the body; the board from the path."""
     authorize_board(db, principal, board_id, Access.WRITE)
-    label = Label(board_id=board_id, name=payload.name, color=payload.color)
+    label = Label(
+        board_id=board_id, name=payload.name, color=payload.color, emoji=payload.emoji
+    )
     db.add(label)
     db.commit()
     db.refresh(label)

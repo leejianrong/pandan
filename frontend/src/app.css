@@ -573,6 +573,14 @@ main {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A second, independent visual dimension from colour (M8 V64, KAN-985, issue
+   #278): two labels sharing a colour are still distinguishable at a glance.
+   Absent when the label has no emoji — the chip's look is exactly pre-V64. */
+.label-emoji {
+  font-size: 0.85rem;
+  line-height: 1;
+  flex: none;
+}
 .due-pill {
   display: inline-flex;
   align-items: center;

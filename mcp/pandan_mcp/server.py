@@ -665,14 +665,19 @@ def list_labels(board_id: int | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
-def create_label(name: str, color: str, board_id: int | None = None) -> dict[str, Any]:
+def create_label(
+    name: str, color: str, board_id: int | None = None, emoji: str | None = None
+) -> dict[str, Any]:
     """Create a board-scoped label — a ``name`` and a ``color`` (e.g. a hex like
     ``#0ea5e9``). ``board_id`` targets one board (defaults to PANDAN_BOARD_ID).
-    Returns the created label; attach it to cards via ``label_ids``."""
+    ``emoji`` (M8 V64) is an optional single grapheme cluster — a second,
+    independent visual dimension from colour, so two labels sharing a colour are
+    still distinguishable at a glance; omit for no emoji. Returns the created
+    label; attach it to cards via ``label_ids``."""
     resolved = _board(board_id)
     if resolved is None:
         raise ValueError("board_id is required (set PANDAN_BOARD_ID or pass board_id)")
-    return _client_instance().create_label(resolved, name, color)
+    return _client_instance().create_label(resolved, name, color, emoji=emoji)
 
 
 @mcp.tool()

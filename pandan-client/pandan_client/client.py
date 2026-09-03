@@ -753,12 +753,17 @@ class PandanClient:
             "labels": self._request("GET", f"/boards/{board_id}/labels").json()
         }
 
-    def create_label(self, board_id: int, name: str, color: str) -> dict[str, Any]:
+    def create_label(
+        self, board_id: int, name: str, color: str, *, emoji: str | None = None
+    ) -> dict[str, Any]:
         """Create a board-scoped label (``name`` + ``color`` — e.g. a hex string).
+        ``emoji`` (M8 V64, KAN-985) is an optional single grapheme cluster — a
+        second, independent visual dimension from colour — omitted for no emoji.
         Returns the created label. The label can then be attached to cards on that
         board via ``label_ids`` on create/update."""
+        payload = _clean({"name": name, "color": color, "emoji": emoji})
         return self._request(
-            "POST", f"/boards/{board_id}/labels", json={"name": name, "color": color}
+            "POST", f"/boards/{board_id}/labels", json=payload
         ).json()
 
     def update_label(
@@ -767,16 +772,24 @@ class PandanClient:
         *,
         name: str | None = None,
         color: str | None = None,
+        emoji: str | None = None,
     ) -> dict[str, Any]:
-        """Rename and/or recolour a label by id (V61, KAN-982). Only the arguments
-        you pass are sent, so ``update_label(3, color="#0ea5e9")`` leaves the name
-        alone. Returns the updated label.
+        """Rename, recolour, and/or re-emoji a label by id (V61, KAN-982; ``emoji``
+        added M8 V64, KAN-985). Only the arguments you pass are sent, so
+        ``update_label(3, color="#0ea5e9")`` leaves the name alone. Returns the
+        updated label.
 
         This is the non-destructive edit: unlike :meth:`delete_label` the label keeps
-        every card attachment. Neither field is clearable — a label with no name or
-        no colour cannot render, so ``None`` means "not sent", never "clear"."""
+        every card attachment. ``name``/``color`` are not clearable — a label with no
+        name or no colour cannot render — so for those two ``None`` means "not sent",
+        never "clear". ``emoji`` genuinely IS clearable on the raw API (unlike
+        name/color), but this method still drops it when ``None`` like every other
+        optional field here — the same limitation ``update_epic`` documents for its
+        own clearable fields."""
         payload = {
-            k: v for k, v in (("name", name), ("color", color)) if v is not None
+            k: v
+            for k, v in (("name", name), ("color", color), ("emoji", emoji))
+            if v is not None
         }
         return self._request(
             "PATCH", f"/labels/{label_id}", json=payload

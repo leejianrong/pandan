@@ -184,11 +184,15 @@ class FakeClient:
     def list_labels(self, board_id):
         return self._call("list_labels", board_id=board_id)
 
-    def create_label(self, board_id, name, color):
-        return self._call("create_label", board_id=board_id, name=name, color=color)
+    def create_label(self, board_id, name, color, *, emoji=None):
+        return self._call(
+            "create_label", board_id=board_id, name=name, color=color, emoji=emoji
+        )
 
-    def update_label(self, label_id, *, name=None, color=None):
-        return self._call("update_label", label_id=label_id, name=name, color=color)
+    def update_label(self, label_id, *, name=None, color=None, emoji=None):
+        return self._call(
+            "update_label", label_id=label_id, name=name, color=color, emoji=emoji
+        )
 
     def delete_label(self, label_id):
         return self._call("delete_label", label_id=label_id)
@@ -1523,7 +1527,7 @@ def test_label_create_passes_name_and_color(monkeypatch, env):
     )
     assert cli.run(["label", "create", "bug", "#ef4444", "--board", "2"]) == 0
     assert fake.calls == [
-        ("create_label", {"board_id": 2, "name": "bug", "color": "#ef4444"})
+        ("create_label", {"board_id": 2, "name": "bug", "color": "#ef4444", "emoji": None})
     ]
 
 
@@ -1535,7 +1539,33 @@ def test_label_update_sends_only_the_flags_given(monkeypatch, env):
         monkeypatch, FakeClient(result={"id": 5, "name": "bug", "color": "#222"})
     )
     assert cli.run(["label", "update", "5", "--color", "#222"]) == 0
-    assert fake.calls == [("update_label", {"label_id": 5, "name": None, "color": "#222"})]
+    assert fake.calls == [
+        ("update_label", {"label_id": 5, "name": None, "color": "#222", "emoji": None})
+    ]
+
+
+def test_label_create_passes_emoji(monkeypatch, env):
+    # M8 V64 (KAN-985): --emoji rides alongside name/color on create.
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(result={"id": 1, "board_id": 2, "name": "bug", "color": "#ef4444"}),
+    )
+    assert cli.run(
+        ["label", "create", "bug", "--color", "#ef4444", "--emoji", "🐛", "--board", "2"]
+    ) == 0
+    assert fake.calls == [
+        ("create_label", {"board_id": 2, "name": "bug", "color": "#ef4444", "emoji": "🐛"})
+    ]
+
+
+def test_label_update_passes_emoji(monkeypatch, env):
+    fake = patch_client(
+        monkeypatch, FakeClient(result={"id": 5, "name": "bug", "color": "#222"})
+    )
+    assert cli.run(["label", "update", "5", "--emoji", "🔥"]) == 0
+    assert fake.calls == [
+        ("update_label", {"label_id": 5, "name": None, "color": None, "emoji": "🔥"})
+    ]
 
 
 def test_label_update_with_neither_flag_is_a_usage_error(monkeypatch, env, capsys):
@@ -1827,6 +1857,25 @@ def test_label_list_empty_shows_no_labels(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"labels": []}))
     assert cli.run(["label", "list", "--board", "2"]) == 0
     assert capsys.readouterr().out.strip() == "(no labels)\n0 labels"
+
+
+def test_label_list_default_row_omits_emoji(monkeypatch, env, capsys):
+    """M8 V64 (KAN-985): a wide emoji glyph breaks tab-alignment in the CLI's
+    human rows, so it is opt-in via --fields and never in the default row —
+    even though the API response carries it."""
+    labels = {"labels": [{"id": 1, "name": "bug", "color": "#f00", "emoji": "🐛"}]}
+    patch_client(monkeypatch, FakeClient(result=labels))
+    assert cli.run(["label", "list", "--board", "2"]) == 0
+    out = capsys.readouterr().out.strip()
+    assert "🐛" not in out
+
+
+def test_label_list_fields_can_opt_into_emoji(monkeypatch, env, capsys):
+    labels = {"labels": [{"id": 1, "name": "bug", "color": "#f00", "emoji": "🐛"}]}
+    patch_client(monkeypatch, FakeClient(result=labels))
+    assert cli.run(["label", "list", "--board", "2", "--fields", "name,emoji"]) == 0
+    out = capsys.readouterr().out.strip()
+    assert "bug\t🐛" in out
 
 
 # --- exit codes / error mapping ---------------------------------------------
@@ -3793,7 +3842,7 @@ def test_label_create_color_positional_still_works(monkeypatch, env):
     )
     assert cli.run(["label", "create", "bug", "#ef4444", "--board", "2"]) == 0
     assert fake.calls == [
-        ("create_label", {"board_id": 2, "name": "bug", "color": "#ef4444"})
+        ("create_label", {"board_id": 2, "name": "bug", "color": "#ef4444", "emoji": None})
     ]
 
 
@@ -3804,7 +3853,7 @@ def test_label_create_color_flag(monkeypatch, env):
     )
     assert cli.run(["label", "create", "bug", "--color", "#ef4444", "--board", "2"]) == 0
     assert fake.calls == [
-        ("create_label", {"board_id": 2, "name": "bug", "color": "#ef4444"})
+        ("create_label", {"board_id": 2, "name": "bug", "color": "#ef4444", "emoji": None})
     ]
 
 
@@ -3817,7 +3866,7 @@ def test_label_create_color_flag_wins_over_positional(monkeypatch, env):
         ["label", "create", "bug", "#000000", "--color", "#111111", "--board", "2"]
     ) == 0
     assert fake.calls == [
-        ("create_label", {"board_id": 2, "name": "bug", "color": "#111111"})
+        ("create_label", {"board_id": 2, "name": "bug", "color": "#111111", "emoji": None})
     ]
 
 
@@ -3826,7 +3875,10 @@ def test_label_create_default_color_when_omitted(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result=label))
     assert cli.run(["label", "create", "bug", "--board", "2"]) == 0
     assert fake.calls == [
-        ("create_label", {"board_id": 2, "name": "bug", "color": cli.DEFAULT_LABEL_COLOR})
+        (
+            "create_label",
+            {"board_id": 2, "name": "bug", "color": cli.DEFAULT_LABEL_COLOR, "emoji": None},
+        )
     ]
 
 

@@ -582,6 +582,12 @@ class Label(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     color: Mapped[str] = mapped_column(String(32), nullable=False)
+    # A second, independent visual dimension (M8 V64, KAN-985, issue #278): any
+    # single Unicode grapheme cluster (not a fixed palette, unlike colour), so two
+    # labels sharing a colour are still distinguishable at a glance. Nullable —
+    # most labels won't have one. See app.emoji.is_single_grapheme for why this is
+    # NOT `len(value) == 1` (flags/ZWJ sequences are multiple codepoints).
+    emoji: Mapped[str | None] = mapped_column(String(8), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
