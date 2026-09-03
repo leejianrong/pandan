@@ -1,6 +1,8 @@
 # Nav/IA audit — Board as a first-class tab, everything else hidden
 
-- **Status:** Proposal — audit + recommendation only. No implementation in this doc.
+- **Status:** Proposal — audit + recommendation only. No implementation in this doc. Aligned on
+  2026-09-03 (a visual proposal artifact was built from this doc's recommendation and reviewed); sized
+  into 4 real PRs in [nav-rail-shaping.md](nav-rail-shaping.md) / [nav-rail-slices.md](nav-rail-slices.md).
 - **Date:** 2026-09-03
 - **Context source:** [KAN-1089](https://github.com/leejianrong/pandan/issues/278) / PAN-192, epic
   EPIC-142 "Frontend UX: navigation & IA audit", filed against
