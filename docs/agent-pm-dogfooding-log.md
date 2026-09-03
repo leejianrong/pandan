@@ -2981,3 +2981,42 @@ the one you just brought inside it.**
   expected `ConnectError`. `unshare -rn` (loopback down → `ENETUNREACH`) is a clean, permission-free
   way to mean "nothing is listening". Squeezing the *connect* timeout is not a valid cold-start
   simulation — happy-eyeballs makes it a `ConnectError`; squeeze the *read* timeout instead.
+
+## 2026-09-03 — EPIC-142 (nav/IA audit) + EPIC-143 (M3 tokens) kickoff
+
+New two-epic batch: EPIC-142 "Frontend UX: navigation & IA audit" (one research-only card,
+KAN-1089) and EPIC-143 "Material Design 3 tokens (Graphite → M3, tokens-only)" (KAN-1090–1094,
+M3-1 through M3-5). The M3 epic already settled tokens-only vs. `m3-svelte` before this session —
+the `material-design-3` skill's decision tree exists precisely for that choice, and it was made at
+shaping time, not delegated to an agent.
+
+**KAN-1089 landed first, as a pure research deliverable — no worktree contention with the M3
+chain.** The card's own guess about which hidden views are board- vs. account-scoped turned out
+wrong (it read as roughly a 50/50 split; the live app, verified by running it and reading each
+view's own on-screen copy, is 8-of-10 board-scoped) — a reminder that even the card author's
+framing of "the two kinds of thing" is a hypothesis to verify against the running app, not a given.
+Landed as `docs/design-reviews/nav-ia-audit.md`, a new directory: contributor material, so it's
+outside `docs/guide/` (the published-site subtree, see CLAUDE.md's "How the docs relate") and needs
+no `zensical.toml` nav entry. Confirm this pattern (design-review docs living beside `adr/` and
+`milestone-*/`, not under the published tree) before adding more design-writeup cards.
+
+**Worktree footgun confirmed, not yet fixed:** `docker compose up -d db` run from *inside* a
+worktree directory still resolves to the shared primary-checkout Postgres container
+(`simple-kanban-db-1`) — compose finds the same `docker-compose.yml` up the tree and reuses it
+rather than erroring. CLAUDE.md's worktree section documents `make worktree-db` as the correct
+command but doesn't warn that the naive/habitual `docker compose up -d db` silently does the wrong
+(shared, KAN-240-flavored) thing instead of failing loudly. Worth a doc fix; filed as a note here
+rather than a card since it didn't cause an actual collision this time.
+
+**The M3 chain is being landed strictly serially** (1090 → 1091 → 1092 → 1093 → 1094) even though
+only KAN-1093 carries a *recorded* `blocked_by` (on KAN-1090) — all five slices write to the same
+`app.css` token file and the epic explicitly calls out the regression risk (bespoke
+`svelte-dnd-action` + hover/modal interactions from the July 2026 Graphite revamp), so treating
+"shared hot file" as sufficient reason for serial landing even without a recorded dependency edge.
+KAN-1090's agent was told to stop after green CI rather than self-merge, since it's the epic's
+foundational visual slice (seed color + full role palette) and worth a PM screenshot review before
+every later slice builds on top of it. Landing-page scope was an open question on the card
+(a prior Graphite revamp had explicitly excluded the landing page); this session the maintainer
+confirmed **include** the landing page this time, overriding that precedent — worth checking
+`docs/design-reviews/nav-ia-audit.md` or a future landing-specific card if that answer needs to be
+recorded somewhere more durable than this log entry.
