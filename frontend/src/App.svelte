@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { KeyRound, Keyboard, LogOut, Menu, Moon, Search, Settings, Sun, UsersRound } from "lucide-svelte";
+  import { KeyRound, Keyboard, LogOut, Moon, Search, Settings, Sun, UsersRound } from "lucide-svelte";
   import Activity from "./lib/components/Activity.svelte";
   import Backlog from "./lib/components/Backlog.svelte";
   import Board from "./lib/components/Board.svelte";
@@ -12,8 +12,6 @@
   import Landing from "./lib/components/Landing.svelte";
   import BoardSwitcher from "./lib/components/BoardSwitcher.svelte";
   import CommandPalette from "./lib/components/CommandPalette.svelte";
-  import SideNav from "./lib/components/SideNav.svelte";
-  import type { DrawerView } from "./lib/components/SideNav.svelte";
   import NavRail from "./lib/components/NavRail.svelte";
   import type { RailView } from "./lib/components/NavRail.svelte";
   import Tokens from "./lib/components/Tokens.svelte";
@@ -26,19 +24,16 @@
   import { refetch, refetchBacklog, refetchBoards, refetchEpics, refetchLabels, refetchViews, setQuery } from "./lib/board.svelte";
   import { refetchTokens } from "./lib/tokens.svelte";
   import { refetchTeams } from "./lib/teams.svelte";
-  import {
-    startNotificationPolling,
-    stopNotificationPolling,
-    unreadCount,
-  } from "./lib/notifications.svelte";
+  import { startNotificationPolling, stopNotificationPolling } from "./lib/notifications.svelte";
   import { setSessionUser } from "./lib/session.svelte";
   import { initTheme, themeStore, toggleTheme } from "./lib/theme.svelte";
   import { kbd } from "./lib/keyboard.svelte";
   import { getCurrentUser, logout, type CurrentUser } from "./lib/api";
 
-  // The board is the primary view (a pill in the top bar). Secondary views live in
-  // a hamburger side-nav drawer (KAN-319/U4). Still no client-side router — a
-  // conditional render keyed on `view`.
+  // Every board-scoped view is reachable from the persistent NavRail
+  // (NR-1..NR-4, KAN-1148..KAN-1151 — replaced the old hamburger+SideNav
+  // drawer); Tokens/Teams live in the avatar menu (NR-3). Still no
+  // client-side router — a conditional render keyed on `view`.
   let view = $state<
     | "board"
     | "dashboard"
@@ -53,14 +48,11 @@
     | "settings"
   >("board");
 
-  // The side-nav drawer's open state (secondary views live inside it).
-  let drawerOpen = $state(false);
-
   // The ⌘K command palette's open state (V35, KAN-299).
   let paletteOpen = $state(false);
 
-  // The notification inbox popover's open state (V39, KAN-303). Owned here (not in
-  // Inbox.svelte) so the side-nav's Inbox entry can open the same popover.
+  // The notification inbox popover's open state (V39, KAN-303). Owned here
+  // (not in Inbox.svelte) so it's bindable from the top level.
   let inboxOpen = $state(false);
 
   // ⌘K / Ctrl-K toggles the command palette. This is a deliberate GLOBAL — it
@@ -82,15 +74,9 @@
     if (next === "tokens") refetchTokens();
   }
 
-  // Navigating from the drawer selects the view and closes the drawer.
-  function navigateFromDrawer(next: DrawerView) {
-    show(next);
-    drawerOpen = false;
-  }
-
-  // Navigating from the persistent rail (NR-1/NR-2, KAN-1148/KAN-1149) — no
-  // drawer to close. Board is one of the rail's items since NR-2 (the
-  // top-bar pill it used to be is gone — see the .app-shell style comment).
+  // Navigating from the persistent rail. Board is one of the rail's items
+  // since NR-2 (the top-bar pill it used to be is gone — see the .app-shell
+  // style comment); the old hamburger+drawer this replaced is gone since NR-4.
   function navigateFromRail(next: RailView) {
     show(next);
   }
@@ -189,14 +175,6 @@
   <Landing />
 {:else}
   <header class="topbar">
-    <button
-      class="icon-btn"
-      aria-label="Open menu"
-      aria-expanded={drawerOpen}
-      onclick={() => (drawerOpen = true)}
-    >
-      <Menu size={18} />
-    </button>
     <Brand />
     <BoardSwitcher />
     <div class="topbar-search">
@@ -238,23 +216,11 @@
     </div>
   </header>
 
-  <SideNav
-    {view}
-    open={drawerOpen}
-    unread={unreadCount()}
-    onOpenInbox={() => {
-      inboxOpen = true;
-      drawerOpen = false;
-    }}
-    onNavigate={navigateFromDrawer}
-    onClose={() => (drawerOpen = false)}
-  />
-
   <CommandPalette bind:open={paletteOpen} navigate={(v) => show(v as typeof view)} />
 
-  <!-- app-shell (NR-1, KAN-1148): a layout column for the persistent rail.
-       Runs alongside the existing hamburger+SideNav drawer (both work; see
-       nav-rail-shaping.md D3) until NR-4 removes the drawer. -->
+  <!-- app-shell (NR-1, KAN-1148): a layout column for the persistent rail —
+       the only board-scoped nav surface since NR-4 removed the old
+       hamburger+SideNav drawer it used to run alongside (nav-rail-shaping.md D3). -->
   <div class="app-shell">
     <NavRail {view} onNavigate={navigateFromRail} />
     <main>
