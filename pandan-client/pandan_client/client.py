@@ -72,8 +72,39 @@ def _detail(response: httpx.Response) -> str:
         return response.text or f"request failed ({response.status_code})"
     if isinstance(body, dict) and body.get("detail") is not None:
         detail = body["detail"]
-        return detail if isinstance(detail, str) else str(detail)
+        if isinstance(detail, str):
+            return detail
+        if isinstance(detail, list):
+            formatted = _format_validation_errors(detail)
+            if formatted is not None:
+                return formatted
+        return str(detail)
     return f"request failed ({response.status_code})"
+
+
+def _format_validation_errors(errors: list[Any]) -> str | None:
+    """Join a FastAPI/Pydantic-v2 422 ``detail`` list into one readable clause per
+    error, e.g. ``"story_points: Value error, story_points must be one of {1, 2,
+    3, 5, 8, 13} or null"`` — replacing Python's raw ``repr`` of the list of dicts
+    that used to reach the CLI/agent unreadable.
+
+    Each entry is ``{"loc": [...], "msg": ..., "type": ..., ...}``; ``loc``'s
+    first element is always the request part (``"body"``/``"query"``/...), so
+    it's dropped and the rest joined with ``"."`` to name the field. Returns
+    ``None`` (never raises) the moment an entry doesn't match this shape, so a
+    differently-shaped list falls back to ``str(detail)`` rather than producing
+    a mangled message.
+    """
+    clauses = []
+    for error in errors:
+        if not isinstance(error, dict):
+            return None
+        loc, msg = error.get("loc"), error.get("msg")
+        if not isinstance(loc, list) or not loc or not isinstance(msg, str):
+            return None
+        field = ".".join(str(part) for part in loc[1:]) or str(loc[0])
+        clauses.append(f"{field}: {msg}")
+    return "; ".join(clauses) if clauses else None
 
 
 def _clean(fields: dict[str, Any]) -> dict[str, Any]:
