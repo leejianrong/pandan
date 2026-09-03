@@ -439,11 +439,15 @@ def create_epic(
     description: str | None = None,
     target_date: str | None = None,
     lead: str | None = None,
+    color: str | None = None,
 ) -> dict[str, Any]:
     """Create an epic (a per-board grouping stories can link to via epic_id).
     ``board_id`` targets one board (defaults to PANDAN_BOARD_ID; omit both to use
     your earliest board). ``target_date`` is an optional ISO-8601 target/ship date;
-    ``lead`` is an optional free-text owner (a person/agent handle).
+    ``lead`` is an optional free-text owner (a person/agent handle). ``color``
+    (M8 V63) is an optional palette token (sky/blue/cyan/fuchsia/mulberry/pink/ink)
+    or hex, so cards belonging to this epic are recognisable on the board at a
+    glance; omit for no colour.
     """
     return _client_instance().create_epic(
         name,
@@ -451,6 +455,7 @@ def create_epic(
         description=description,
         target_date=target_date,
         lead=lead,
+        color=color,
     )
 
 
@@ -525,10 +530,12 @@ def update_epic(
     description: str | None = None,
     target_date: str | None = None,
     lead: str | None = None,
+    color: str | None = None,
 ) -> dict[str, Any]:
     """Edit an epic's fields (only the arguments you pass are changed). ``target_date``
-    is an ISO-8601 target/ship date; ``lead`` is a free-text owner. Authorized via the
-    epic's own board — no ``board_id`` needed.
+    is an ISO-8601 target/ship date; ``lead`` is a free-text owner; ``color`` (M8 V63)
+    is a palette token or hex (see ``create_epic``). Authorized via the epic's own
+    board — no ``board_id`` needed.
     """
     return _client_instance().update_epic(
         epic_id,
@@ -536,6 +543,7 @@ def update_epic(
         description=description,
         target_date=target_date,
         lead=lead,
+        color=color,
     )
 
 

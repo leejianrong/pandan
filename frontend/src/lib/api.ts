@@ -193,6 +193,9 @@ export interface Epic {
   // Lightweight project fields (V31, KAN-295) — optional target/ship date + lead.
   target_date: string | null;
   lead: string | null;
+  // Epic colour (M8 V63, KAN-984, issue #278) — a palette token (see LABEL_PALETTE)
+  // or hex, or null for the fixed neutral chip look every epic had before this.
+  color: string | null;
   // Derived, server-authoritative (V32, KAN-296): progress rollup + health signal.
   progress: EpicProgress;
   health: EpicHealth | null;
@@ -204,6 +207,8 @@ export interface EpicCreate {
   name: string;
   description?: string | null;
   board_id?: number;
+  // M8 V63, KAN-984: optional, a palette token or hex — omit for no colour.
+  color?: string | null;
 }
 
 // A board owns a set of cards + epics (M3 V7). owner_id is a user UUID or null.
@@ -247,6 +252,8 @@ export interface BoardUpdate {
 export interface EpicUpdate {
   name?: string;
   description?: string | null;
+  // M8 V63, KAN-984: send null to clear (genuinely clearable, unlike label.color).
+  color?: string | null;
 }
 
 export interface CardMove {

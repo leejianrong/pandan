@@ -574,6 +574,7 @@ class PandanClient:
         description: str | None = None,
         target_date: str | None = None,
         lead: str | None = None,
+        color: str | None = None,
     ) -> dict[str, Any]:
         payload = _clean(
             {
@@ -583,6 +584,9 @@ class PandanClient:
                 # Project fields (V31, KAN-295): target_date (ISO-8601) + lead.
                 "target_date": target_date,
                 "lead": lead,
+                # Epic colour (M8 V63, KAN-984) — a palette token or hex; omit for
+                # no colour, same as omitting on the raw API.
+                "color": color,
             }
         )
         return self._request("POST", "/epics", json=payload).json()
@@ -595,13 +599,19 @@ class PandanClient:
         description: str | None = None,
         target_date: str | None = None,
         lead: str | None = None,
+        color: str | None = None,
     ) -> dict[str, Any]:
+        """Edit an epic. Like ``update_cycle``, ``None`` means *omit* here (``_clean``
+        drops it), so clearing ``target_date``/``lead``/``color`` to null is not
+        reachable through this method — the same limitation every other optional
+        field on this method already has, not a new one ``color`` introduces."""
         payload = _clean(
             {
                 "name": name,
                 "description": description,
                 "target_date": target_date,
                 "lead": lead,
+                "color": color,
             }
         )
         return self._request("PATCH", f"/epics/{epic_id}", json=payload).json()

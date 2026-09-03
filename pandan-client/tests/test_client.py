@@ -411,6 +411,15 @@ def test_create_epic_includes_project_fields_when_given():
     }
 
 
+def test_create_epic_includes_color_when_given():
+    import json
+
+    # M8 V63 (KAN-984): color passes through the body when supplied.
+    handler, seen = capture(httpx.Response(201, json={"id": 1, "name": "E"}))
+    make_client(handler).create_epic("E", color="fuchsia")
+    assert json.loads(seen["content"]) == {"name": "E", "color": "fuchsia"}
+
+
 def test_update_card_patches_provided_fields():
     import json
 
@@ -450,6 +459,14 @@ def test_update_epic_includes_project_fields_when_given():
         "target_date": "2026-12-31T12:00:00Z",
         "lead": "grace",
     }
+
+
+def test_update_epic_includes_color_when_given():
+    import json
+
+    handler, seen = capture(httpx.Response(200, json={"id": 3, "name": "E"}))
+    make_client(handler).update_epic(3, color="sky")
+    assert json.loads(seen["content"]) == {"color": "sky"}
 
 
 def test_delete_epic_sends_delete_and_returns_ack_without_parsing_body():

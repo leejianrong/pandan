@@ -2,6 +2,7 @@
   import { CircleAlert, CircleCheck, Pencil, TriangleAlert, Trash2 } from "lucide-svelte";
   import type { EpicHealth } from "../api";
   import type { Epic } from "../api";
+  import { labelColor } from "../api";
   import { cardsForEpic, removeEpic } from "../board.svelte";
   import { displayRef } from "../tickets";
   import EpicModal from "./EpicModal.svelte";
@@ -83,6 +84,14 @@
     onkeydown={onKeydown}
   >
     <div class="card-top">
+      {#if epic.color}
+        <span
+          class="epic-color-dot"
+          style="background: {labelColor(epic.color)}"
+          title="Epic colour"
+          aria-hidden="true"
+        ></span>
+      {/if}
       <span class="ticket epic-ticket" title={epic.ticket_number}>{displayRef(epic)}</span>
       <span class="epic-count">{total} {total === 1 ? "story" : "stories"}</span>
       {#if health}

@@ -152,7 +152,16 @@
         </span>
       {/if}
       {#if epic}
-        <span class="epic-tag" title="{displayRef(epic)} · {epic.name}">{epic.name}</span>
+        <span class="epic-tag" title="{displayRef(epic)} · {epic.name}">
+          {#if epic.color}
+            <span
+              class="epic-tag-dot"
+              style="background: {labelColor(epic.color)}"
+              aria-hidden="true"
+            ></span>
+          {/if}
+          {epic.name}
+        </span>
       {/if}
       {#if card.story_points != null}
         <span class="points" title="Story points">{card.story_points}</span>

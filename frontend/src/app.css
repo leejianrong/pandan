@@ -467,7 +467,9 @@ main {
   padding: 0 0.35rem;
 }
 .epic-tag {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   max-width: 13ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -478,6 +480,16 @@ main {
   color: var(--agent);
   border-radius: 4px;
   padding: 0.08rem 0.4rem;
+}
+/* Recognise a colored epic's cards at a glance (M8 V63, KAN-984, issue #278) — a
+   dot inside the existing chip rather than recoloring the chip's own fill, which
+   would need a "soft" background variant per palette token that does not exist
+   yet. Absent when the epic has no colour: the chip's look is exactly pre-V63. */
+.epic-tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
 }
 /* Blocked signal (KAN-30): a card with >=1 unfinished blocker. */
 .blocked-badge {
@@ -1233,6 +1245,16 @@ button.primary:disabled {
 }
 .epic-ticket {
   color: var(--agent);
+}
+/* Epic colour dot (M8 V63, KAN-984, issue #278) — shown next to the ticket on the
+   Epics list card face (EpicItem.svelte) and inside the modal header, when the
+   epic has been given a colour. Absent (no dot) is the pre-V63 look, unchanged. */
+.epic-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  flex: none;
 }
 
 .status-pill {
