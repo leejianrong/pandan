@@ -102,6 +102,14 @@ export async function openView(page: Page, name: string): Promise<void> {
     .click();
 }
 
+// Navigate to Tokens/Teams via the avatar account menu (NR-3, KAN-1150) —
+// they're account-scoped, so they moved out of the drawer/rail entirely and
+// live only here now.
+export async function openAccountMenuView(page: Page, name: string): Promise<void> {
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name, exact: true }).click();
+}
+
 export function column(page: Page, label: string): Locator {
   return page.locator(".column", {
     has: page.getByRole("heading", { name: label, exact: true }),
@@ -255,7 +263,7 @@ export function teamItem(page: Page, name: string): Locator {
 
 // Create a team via the Teams view. Leaves the Teams view open.
 export async function createTeam(page: Page, name: string): Promise<void> {
-  await openView(page, "Teams");
+  await openAccountMenuView(page, "Teams");
   await page.getByRole("button", { name: "New team" }).click();
   await page.getByPlaceholder("Team name (required)").fill(name);
   await page.getByRole("button", { name: "Create", exact: true }).click();

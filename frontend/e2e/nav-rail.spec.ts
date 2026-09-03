@@ -80,3 +80,33 @@ test("the old top-bar Board pill is gone (NR-2 retired it atomically)", async ({
   // still existed.
   await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveCount(1);
 });
+
+// NR-3 (KAN-1150): Tokens + Teams fold into the avatar menu and drop out of
+// the drawer. Asserted together, per nav-rail-slices.md's testing notes — a
+// spec that only checks the addition could miss a forgotten drawer row.
+test("Tokens + Teams live in the avatar menu, not the drawer", async ({ page }) => {
+  await openFreshBoard(page);
+
+  await page.getByRole("button", { name: "Account menu" }).click();
+  const avatarMenu = page.getByRole("menu");
+  await expect(avatarMenu.getByRole("menuitem", { name: "Tokens" })).toBeVisible();
+  await expect(avatarMenu.getByRole("menuitem", { name: "Teams" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Open menu" }).click();
+  const drawer = page.getByRole("complementary");
+  await expect(drawer.getByRole("button", { name: "Tokens" })).toHaveCount(0);
+  await expect(drawer.getByRole("button", { name: "Teams" })).toHaveCount(0);
+});
+
+test("selecting Tokens/Teams from the avatar menu navigates there", async ({ page }) => {
+  await openFreshBoard(page);
+
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Tokens" }).click();
+  await expect(page.getByRole("heading", { name: "Agent tokens", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Teams" }).click();
+  await expect(page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
+});

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Keyboard, LogOut, Menu, Moon, Search, Settings, Sun } from "lucide-svelte";
+  import { KeyRound, Keyboard, LogOut, Menu, Moon, Search, Settings, Sun, UsersRound } from "lucide-svelte";
   import Activity from "./lib/components/Activity.svelte";
   import Backlog from "./lib/components/Backlog.svelte";
   import Board from "./lib/components/Board.svelte";
@@ -142,10 +142,14 @@
   }
 
   // Avatar dropdown menu (KAN-319/U4): the signed-in email (as a heading/subtitle),
-  // a Settings entry (stub view), and Log out (danger). Replaces the always-on
-  // inline email + logout icon that used to crowd the top bar.
+  // Tokens + Teams (folded in here since NR-3, KAN-1150 — account-scoped per the
+  // nav-ia-audit, never in the rail), a Settings entry (stub view), and Log out
+  // (danger). Replaces the always-on inline email + logout icon that used to
+  // crowd the top bar.
   const avatarMenuItems: MenuItem[] = [
-    { label: "Settings", icon: Settings, onSelect: () => show("settings") },
+    { label: "Tokens", icon: KeyRound, onSelect: () => show("tokens") },
+    { label: "Teams", icon: UsersRound, onSelect: () => show("teams") },
+    { label: "Settings", icon: Settings, onSelect: () => show("settings"), separatorBefore: true },
     {
       label: "Keyboard shortcuts",
       icon: Keyboard,

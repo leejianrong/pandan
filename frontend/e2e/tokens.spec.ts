@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login, openView, uniqueTitle } from "./helpers";
+import { login, openAccountMenuView, uniqueTitle } from "./helpers";
 
 // M3 V9 demo (ADR 0014): create a named agent token in the UI, see the secret
 // exactly once, then revoke it. A real session is required (the Tokens API is
@@ -7,7 +7,7 @@ import { login, openView, uniqueTitle } from "./helpers";
 test("create a token (revealed once), then revoke it", async ({ page }) => {
   await login(page);
   await page.goto("/");
-  await openView(page, "Tokens");
+  await openAccountMenuView(page, "Tokens");
 
   const name = uniqueTitle("token");
   await page.getByRole("button", { name: "New token" }).click();
