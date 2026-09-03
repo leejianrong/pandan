@@ -338,7 +338,10 @@
     gap: 0.5rem;
   }
   .member-role {
-    font-size: 0.78rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
+    font-weight: var(--type-label-medium-weight);
+    letter-spacing: var(--type-label-medium-tracking);
     color: var(--muted);
     text-transform: capitalize;
   }

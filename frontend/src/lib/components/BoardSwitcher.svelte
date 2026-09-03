@@ -200,7 +200,8 @@
     align-items: center;
     padding: 0.1rem 0.45rem;
     border-radius: 999px;
-    font-size: 0.72rem;
+    font-size: var(--type-label-small-size);
+    line-height: var(--type-label-small-line-height);
     font-weight: 600;
     text-transform: capitalize;
     letter-spacing: 0.01em;

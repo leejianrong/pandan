@@ -209,7 +209,9 @@
     outline-offset: 2px;
   }
   .demo-link {
-    font-size: 0.85rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
+    letter-spacing: var(--type-label-large-tracking);
     color: var(--muted);
     text-decoration: none;
     font-weight: 500;
@@ -242,7 +244,8 @@
   }
 
   .eyebrow {
-    font-size: 0.72rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.14em;
@@ -252,7 +255,11 @@
   h1 {
     margin: 0 auto 1rem;
     max-width: 15ch;
-    font-size: clamp(2.2rem, 6vw, 3.6rem);
+    /* display-large's role size (3.5625rem) is the fluid clamp's ceiling, not a
+       flat value — a fixed 3.5625rem would overflow on narrow viewports. The
+       clamp's min/preferred are the pre-existing hand-tuned responsive curve
+       (predates this ticket; layout, not typography, per the ticket's scope). */
+    font-size: clamp(2.2rem, 6vw, var(--type-display-large-size));
     line-height: 1.05;
     letter-spacing: -0.025em;
     font-weight: 800;
@@ -264,7 +271,10 @@
   .subhead {
     margin: 0 auto;
     max-width: 52ch;
-    font-size: clamp(1rem, 2.2vw, 1.18rem);
+    font-size: var(--type-body-large-size);
+    line-height: var(--type-body-large-line-height);
+    font-weight: var(--type-body-large-weight);
+    letter-spacing: var(--type-body-large-tracking);
     color: var(--muted);
     text-wrap: pretty;
   }
@@ -286,7 +296,9 @@
     border: 1px solid var(--btn-ink);
     border-radius: var(--radius);
     padding: 0.7rem 1.25rem;
-    font-size: 0.98rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
+    letter-spacing: var(--type-label-large-tracking);
     font-weight: 600;
     text-decoration: none;
     box-shadow: var(--shadow);
@@ -314,7 +326,9 @@
   .text-link {
     color: var(--accent);
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
+    letter-spacing: var(--type-label-large-tracking);
     text-decoration: none;
   }
   .text-link:hover {
@@ -325,7 +339,10 @@
     margin: 1rem auto 0;
     max-width: 42ch;
     color: #de350b;
-    font-size: 0.9rem;
+    font-size: var(--type-body-medium-size);
+    line-height: var(--type-body-medium-line-height);
+    font-weight: var(--type-body-medium-weight);
+    letter-spacing: var(--type-body-medium-tracking);
   }
 
   .features {
@@ -347,7 +364,8 @@
   }
   .tag {
     display: inline-block;
-    font-size: 0.65rem;
+    font-size: var(--type-label-small-size);
+    line-height: var(--type-label-small-line-height);
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -363,12 +381,17 @@
   }
   .tile h3 {
     margin: 0 0 0.35rem;
-    font-size: 1.02rem;
+    font-size: var(--type-title-medium-size);
+    line-height: var(--type-title-medium-line-height);
+    font-weight: var(--type-title-medium-weight);
     letter-spacing: -0.01em;
   }
   .tile p {
     margin: 0;
-    font-size: 0.9rem;
+    font-size: var(--type-body-medium-size);
+    line-height: var(--type-body-medium-line-height);
+    font-weight: var(--type-body-medium-weight);
+    letter-spacing: var(--type-body-medium-tracking);
     color: var(--muted);
   }
 
@@ -377,7 +400,10 @@
     border-top: 1px solid var(--line);
     padding: 1.25rem 1.5rem;
     text-align: center;
-    font-size: 0.83rem;
+    font-size: var(--type-body-small-size);
+    line-height: var(--type-body-small-line-height);
+    font-weight: var(--type-body-small-weight);
+    letter-spacing: var(--type-body-small-tracking);
     color: var(--muted);
   }
   footer a {

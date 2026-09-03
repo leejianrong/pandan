@@ -252,13 +252,17 @@
     display: flex;
     align-items: baseline;
     gap: 0.45rem;
-    font-size: 0.9rem;
+    font-size: var(--type-title-small-size);
+    font-weight: var(--type-title-small-weight);
+    letter-spacing: var(--type-title-small-tracking);
     line-height: 1.4;
     color: var(--text);
     min-width: 0;
   }
   .trash-title .ticket {
-    font-size: 0.72rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
+    letter-spacing: var(--type-label-medium-tracking);
     font-weight: 700;
     color: var(--muted);
     flex: none;
@@ -273,13 +277,17 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.78rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
+    font-weight: var(--type-label-medium-weight);
+    letter-spacing: var(--type-label-medium-tracking);
     color: var(--muted);
   }
   .kind-tag {
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 0.66rem;
+    font-size: var(--type-label-small-size);
+    line-height: var(--type-label-small-line-height);
     font-weight: 700;
     color: var(--muted);
   }
@@ -296,7 +304,10 @@
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    font-size: 0.8rem;
+    font-size: var(--type-label-large-size);
+    line-height: var(--type-label-large-line-height);
+    font-weight: var(--type-label-large-weight);
+    letter-spacing: var(--type-label-large-tracking);
   }
   .confirm-actions {
     display: flex;
@@ -305,7 +316,10 @@
     flex: none;
   }
   .confirm-actions .confirm-msg {
-    font-size: 0.8rem;
+    font-size: var(--type-body-medium-size);
+    line-height: var(--type-body-medium-line-height);
+    font-weight: var(--type-body-medium-weight);
+    letter-spacing: var(--type-body-medium-tracking);
     color: var(--muted);
   }
 </style>

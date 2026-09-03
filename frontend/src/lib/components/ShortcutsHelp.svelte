@@ -95,13 +95,19 @@
   }
   .shortcuts-head h2 {
     margin: 0;
-    font-size: 1.05rem;
+    font-size: var(--type-title-small-size);
+    line-height: var(--type-title-small-line-height);
+    font-weight: var(--type-title-small-weight);
+    letter-spacing: var(--type-title-small-tracking);
     color: var(--text);
   }
   .shortcuts-head .hint {
     margin: 0.15rem 0 0.9rem;
     color: var(--muted);
-    font-size: 0.85rem;
+    font-size: var(--type-body-small-size);
+    line-height: var(--type-body-small-line-height);
+    font-weight: var(--type-body-small-weight);
+    letter-spacing: var(--type-body-small-tracking);
   }
   .shortcuts-grid {
     display: grid;
@@ -115,7 +121,9 @@
   }
   .shortcuts-section h3 {
     margin: 0 0 0.4rem;
-    font-size: 0.72rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
+    font-weight: var(--type-label-medium-weight);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--muted);
@@ -141,17 +149,25 @@
   dd {
     margin: 0;
     color: var(--text);
-    font-size: 0.85rem;
+    font-size: var(--type-body-medium-size);
+    line-height: var(--type-body-medium-line-height);
+    font-weight: var(--type-body-medium-weight);
+    letter-spacing: var(--type-body-medium-tracking);
     text-align: right;
   }
   .sep {
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: var(--type-label-medium-size);
+    line-height: var(--type-label-medium-line-height);
+    font-weight: var(--type-label-medium-weight);
+    letter-spacing: var(--type-label-medium-tracking);
     margin: 0 0.05rem;
   }
   kbd {
     font-family: var(--mono);
-    font-size: 0.72rem;
+    font-size: var(--type-label-small-size);
+    font-weight: var(--type-label-small-weight);
+    letter-spacing: var(--type-label-small-tracking);
     line-height: 1;
     min-width: 1.4rem;
     text-align: center;
