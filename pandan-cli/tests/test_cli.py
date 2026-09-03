@@ -1848,6 +1848,7 @@ def test_missing_token_is_config_error(monkeypatch, capsys):
         (403, cli.EXIT_FORBIDDEN),
         (404, cli.EXIT_NOT_FOUND),
         (409, cli.EXIT_CONFLICT),
+        (422, cli.EXIT_ERROR),
         (500, cli.EXIT_ERROR),
     ],
 )
@@ -1863,6 +1864,25 @@ def test_api_error_maps_to_exit_code(monkeypatch, env, capsys, status, expected)
         409: "conflict",
     }.get(status, "api_error")
     assert "boom" in err.message
+
+
+def test_422_validation_error_prints_readable_message_not_raw_list(
+    monkeypatch, env, capsys
+):
+    """KAN-1000: pandan-client's ``_detail`` now formats a FastAPI/Pydantic 422
+    list into one readable clause (see pandan-client's own tests for that fix).
+    This pins that the CLI's own error row rendering (``_error_row``/``_flatten``)
+    passes such a message through untouched — no raw list-of-dicts repr, no
+    re-mangling of the already-readable clause."""
+    readable = "story_points: Value error, story_points must be one of {1, 2, 3, 5, 8, 13} or null"
+    patch_client(monkeypatch, FakeClient(error=PandanApiError(422, readable)))
+    code = cli.run(["get", "1"])
+    assert code == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "api_error"
+    assert "story_points" in err.message
+    assert "{'loc'" not in err.message
+    assert "'type':" not in err.message
 
 
 def test_unexpected_error_is_general(monkeypatch, env, capsys):

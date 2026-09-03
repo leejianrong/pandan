@@ -1077,6 +1077,79 @@ def test_error_without_json_body_falls_back_to_status():
     assert excinfo.value.status_code == 500
 
 
+def test_422_pydantic_error_list_is_formatted_readably():
+    """KAN-1000: FastAPI/Pydantic v2's default 422 shape is a *list* of error
+    dicts, not a string — before this fix that fell through to ``str(detail)``,
+    Python's raw repr of the list, which leaked straight to the CLI/agent."""
+    handler, _ = capture(
+        httpx.Response(
+            422,
+            json={
+                "detail": [
+                    {
+                        "type": "value_error",
+                        "loc": ["body", "story_points"],
+                        "msg": (
+                            "Value error, story_points must be one of "
+                            "{1, 2, 3, 5, 8, 13} or null"
+                        ),
+                        "input": 999,
+                        "ctx": {"error": {}},
+                        "url": "https://errors.pydantic.dev/2/v/value_error",
+                    }
+                ]
+            },
+        )
+    )
+    with pytest.raises(PandanApiError) as excinfo:
+        make_client(handler).update_card(1, story_points=999)
+    assert excinfo.value.status_code == 422
+    assert excinfo.value.detail == (
+        "story_points: Value error, story_points must be one of "
+        "{1, 2, 3, 5, 8, 13} or null"
+    )
+    # No raw list repr (brackets/quotes from a dict's own repr) reaches the message.
+    assert "{'type'" not in str(excinfo.value)
+    assert "'loc'" not in str(excinfo.value)
+
+
+def test_422_multiple_pydantic_errors_join_with_semicolon():
+    handler, _ = capture(
+        httpx.Response(
+            422,
+            json={
+                "detail": [
+                    {"loc": ["body", "title"], "msg": "field required"},
+                    {"loc": ["body", "story_points"], "msg": "not a valid integer"},
+                ]
+            },
+        )
+    )
+    with pytest.raises(PandanApiError) as excinfo:
+        make_client(handler).create_card("")
+    assert excinfo.value.detail == (
+        "title: field required; story_points: not a valid integer"
+    )
+
+
+def test_detail_list_of_non_dicts_falls_back_to_str():
+    """A differently-shaped list body (not FastAPI/Pydantic's) must never crash the
+    formatter — it falls back to the old ``str(detail)`` behavior."""
+    handler, _ = capture(httpx.Response(422, json={"detail": ["just", "strings"]}))
+    with pytest.raises(PandanApiError) as excinfo:
+        make_client(handler).get_card(1)
+    assert excinfo.value.detail == "['just', 'strings']"
+
+
+def test_plain_string_detail_is_unchanged():
+    """Pin the unchanged case: a plain-string ``detail`` (401/403/404/409 today)
+    still passes through untouched."""
+    handler, _ = capture(httpx.Response(404, json={"detail": "card not found"}))
+    with pytest.raises(PandanApiError) as excinfo:
+        make_client(handler).get_card(1)
+    assert excinfo.value.detail == "card not found"
+
+
 # --- cold-start timeout + single retry (KAN-25) ----------------------------
 
 
