@@ -563,6 +563,7 @@ main {
 }
 
 .column {
+  position: relative;
   background: var(--col-bg);
   border-radius: var(--shape-large);
   padding: 0.75rem;

@@ -7,6 +7,7 @@
   import { kbd } from "../keyboard.svelte";
   import Card from "./Card.svelte";
   import CardForm from "./CardForm.svelte";
+  import Confetti from "./Confetti.svelte";
 
   let {
     column,
@@ -15,6 +16,7 @@
   }: { column: Column; label: string; cards: CardType[] } = $props();
 
   let adding = $state(false);
+  let celebrating = $state(false);
 
   // The `n`/`c` keyboard shortcut (V36, KAN-300) targets a column via a one-shot
   // signal on the shared keyboard store; the matching column opens its add-card
@@ -44,7 +46,14 @@
     if (e.detail.info.trigger === TRIGGERS.DROPPED_INTO_ZONE) {
       const id = Number(e.detail.info.id);
       const position = items.findIndex((c) => c.id === id);
-      if (position >= 0) moveCard(id, { column, position });
+      if (position >= 0) {
+        // The moved item still carries its pre-drop column until refetch, so
+        // this is a genuine arrival from elsewhere, not a same-column reorder.
+        if (column === "done" && items[position].column !== "done") {
+          celebrating = true;
+        }
+        moveCard(id, { column, position });
+      }
     }
   }
 
@@ -88,6 +97,10 @@
 
   {#if items.length === 0}
     <p class="empty">No cards yet</p>
+  {/if}
+
+  {#if celebrating}
+    <Confetti onend={() => (celebrating = false)} />
   {/if}
 
   {#if adding}
