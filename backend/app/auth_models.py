@@ -247,3 +247,48 @@ class PersonalAccessTokenBoard(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class OAuthClient(Base):
+    """An OAuth client registered via RFC 7591 Dynamic Client Registration
+    (ADR 0025/0026, KAN-1734) — ``POST /auth/register``.
+
+    **DCR-registered clients only.** A client identifying itself via a Client ID
+    Metadata Document (CIMD, the other mechanism KAN-1734 adds) is never a row
+    here: its "registration" is just a URL it already hosts, fetched fresh (with
+    a short in-memory cache) each time a request needs it — see
+    ``app.oauth_client.resolve_client``, the one function both mechanisms funnel
+    through so KAN-1735's authorize/token endpoints don't care which produced the
+    client they're looking at. Storing a row per DCR registration is also
+    *why* CIMD matters for a hosted, publicly-connectable MCP endpoint: DCR
+    mints a fresh, permanent row for every distinct connecting app+deployment
+    (Claude's own docs warn this can accumulate "very large numbers of
+    registered clients" for a high-traffic connector), while CIMD needs none at
+    all.
+
+    **Public clients only, on purpose.** ``token_endpoint_auth_method`` is
+    always ``"none"`` — this table has no secret-hash column — matching ADR
+    0026's model of MCP/CLI clients as PKCE public clients, exactly like the
+    existing device-flow PAT issuance. A confidential-client registration
+    (``client_secret_post``/``basic``) is out of scope until a real use case
+    asks for one.
+
+    ``client_id`` is the opaque, DCR-minted identifier a client presents on
+    every subsequent ``/auth/authorize``/``/auth/device/token`` call — random,
+    not guessable, but **not itself a secret** (public clients have none): the
+    security boundary is PKCE + exact ``redirect_uri`` matching, not the
+    client_id's obscurity.
+    """
+
+    __tablename__ = "oauth_client"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    client_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # RFC 7591 requires at least one; MCP spec requires each be either localhost
+    # or HTTPS (app.oauth_client.validate_redirect_uris enforces this at
+    # registration time, not here — a CHECK can't express "every array element").
+    redirect_uris: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

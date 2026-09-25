@@ -1603,3 +1603,35 @@ class DeviceApproveRequest(BaseModel):
 
     scope: TokenScope = TokenScope.write
     board_ids: list[int] | None = None
+
+
+class ClientRegistrationRequest(BaseModel):
+    """``POST /auth/register`` (RFC 7591 §2, ADR 0025/0026, KAN-1734). Only the
+    fields this backend actually acts on — an unrecognized field in the request
+    body is silently ignored per RFC 7591's own extensibility model, rather than
+    rejected, so a client sending ``scope``/``contacts``/etc. isn't punished for
+    spec-completeness this backend doesn't need yet.
+
+    ``token_endpoint_auth_method``, when given, must be ``"none"`` — this
+    backend registers public clients only (see ``app.oauth_client``'s module
+    docstring); any other value is a ``400 invalid_client_metadata``.
+    """
+
+    redirect_uris: list[str]
+    client_name: str | None = None
+    token_endpoint_auth_method: str | None = None
+
+
+class ClientRegistrationResponse(BaseModel):
+    """The RFC 7591 §3.2.1 response shape, verbatim field names. No
+    ``registration_access_token``/``registration_client_uri`` — this backend
+    doesn't implement the optional RFC 7592 client-management protocol (read/
+    update/delete a registration after the fact)."""
+
+    client_id: str
+    client_id_issued_at: int
+    redirect_uris: list[str]
+    client_name: str | None
+    token_endpoint_auth_method: Literal["none"] = "none"
+    grant_types: list[str] = ["authorization_code"]
+    response_types: list[str] = ["code"]

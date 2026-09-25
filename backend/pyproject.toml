@@ -28,6 +28,11 @@ dependencies = [
     # can't take a per-route slowapi decorator.
     "slowapi>=0.1.9",
     "regex>=2026.9.3",
+    # OAuth Client ID Metadata Document fetches (KAN-1734, ADR 0025): resolving a
+    # CIMD `client_id` (an HTTPS URL) means the backend itself makes an outbound
+    # HTTP call at runtime — previously httpx was only a dev-group test-client
+    # dependency here. See app/oauth_client.py.
+    "httpx>=0.28",
     # Hosted Streamable HTTP MCP transport (KAN-1732, ADR 0025): the backend
     # mounts the exact same tool registry the stdio `pandan-mcp` server exposes
     # (`backend/app/mcp_host.py` wraps `pandan_mcp.server.mcp.streamable_http_app()`
@@ -41,7 +46,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3",
-    "httpx>=0.28",
+    # httpx moved to the main [project.dependencies] list above (KAN-1734) — it's
+    # a runtime dependency now, not just the test client's.
     "testcontainers[postgres]>=4.15.0",
     "ruff>=0.16.0",
 ]

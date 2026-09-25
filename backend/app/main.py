@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import oauth_metadata
+from . import oauth_metadata, oauth_server_metadata
 from .db import get_db
 from .mcp_host import hosted_mcp_app, hosted_mcp_lifespan
 from .observability import add_request_logging, configure_logging, init_error_tracking
@@ -36,6 +36,7 @@ from .routers import (
     me,
     members,
     notifications,
+    oauth_register,
     planning_intervals,
     templates,
     tokens,
@@ -232,6 +233,14 @@ app.include_router(device_auth.router)
 # to learn which authorization server protects /mcp — no auth on this route
 # either, matching every other discovery/bootstrap endpoint above.
 app.include_router(oauth_metadata.router)
+# RFC 8414 authorization server metadata (ADR 0025, KAN-1734): where THIS AS's
+# own endpoints live and what it supports (PKCE S256, CIMD) — the document the
+# client fetches next, once RFC 9728 above has told it which AS to ask.
+app.include_router(oauth_server_metadata.router)
+# RFC 7591 Dynamic Client Registration (ADR 0025/0026, KAN-1734): /auth/register,
+# no auth — obtaining a first client identity, the same asymmetry as the device
+# flow above.
+app.include_router(oauth_register.router)
 
 # Hosted Streamable HTTP MCP transport (ADR 0025, KAN-1732): the exact same
 # tool registry the stdio `pandan-mcp` server exposes, reachable without a
