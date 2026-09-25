@@ -53,10 +53,16 @@ from pandan_mcp.server import mcp
 #: the one write op in this batch, unlike ``update_cycle``/planning-interval
 #: setup: ending a cycle and rolling over unfinished work is exactly the loop a
 #: short, agent-paced cycle needs to run on its own.
+#: **Amended again 2026-09-25 (ADR 0023, KAN-1723)**: the 5 tools from the M9 V69
+#: amendment above **renamed**, not added — ``list_teams``/``create_team``/
+#: ``get_team``/``update_team``/``delete_team`` -> ``list_workspaces``/
+#: ``create_workspace``/``get_workspace``/``update_workspace``/``delete_workspace``,
+#: the M9 Team tier's end-to-end rename to Workspace. Count unchanged at 57.
 FROZEN_TOOLS = frozenset(
     {
         "list_boards", "create_board", "get_board", "update_board", "delete_board",
-        "list_teams", "create_team", "get_team", "update_team", "delete_team",
+        "list_workspaces", "create_workspace", "get_workspace", "update_workspace",
+        "delete_workspace",
         "list_cards", "get_card", "create_card", "create_cards", "update_card",
         "update_cards", "move_card", "claim_card", "delete_card",
         "list_epics", "get_epic", "create_epic", "update_epic", "delete_epic",

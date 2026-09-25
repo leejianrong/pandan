@@ -504,9 +504,9 @@ def test_update_board_advertises_every_boardupdate_field():
 
     The set is pinned **by name, never by a count**, which this test has now been
     right about three times: KAN-529 took it to six, V51 (KAN-972) added ``key``
-    for seven, and V67 (KAN-1056) added ``team_id`` for eight. Every time the
-    assertion was what noticed, which is why the name of this test no longer
-    contains a number."""
+    for seven, and V67 (KAN-1056) added ``team_id`` (renamed ``workspace_id`` by
+    ADR 0023, KAN-1723) for eight. Every time the assertion was what noticed, which
+    is why the name of this test no longer contains a number."""
     update_board = next(t for t in _tools() if t.name == "update_board")
     assert set(update_board.input_schema["properties"]) == {
         "board_id",
@@ -517,7 +517,7 @@ def test_update_board_advertises_every_boardupdate_field():
         "outbound_webhook_url",
         "outbound_webhook_secret",
         "outbound_webhook_enabled",
-        "team_id",
+        "workspace_id",
     }
 
 
@@ -551,78 +551,78 @@ def test_update_board_rename_carries_no_autosync_opinion(monkeypatch):
     assert json.loads(seen["content"]) == {"name": "Pandan Roadmap"}
 
 
-def test_create_board_sends_team_id_when_given(monkeypatch):
-    """V67's team_id argument, wired through to the wire (V69) as workspace_id
-    (KAN-1721/1722 renamed the backend field + pandan_client kwarg; this tool's
-    own argument name stays team_id until KAN-1723)."""
+def test_create_board_sends_workspace_id_when_given(monkeypatch):
+    """V67's team_id argument (renamed workspace_id by ADR 0023, KAN-1723), wired
+    through to the wire (V69)."""
     seen = _capture_client(monkeypatch, httpx.Response(201, json=_BOARD_READ))
-    server.create_board("Roadmap", team_id=9)
+    server.create_board("Roadmap", workspace_id=9)
     assert json.loads(seen["content"]) == {"name": "Roadmap", "workspace_id": 9}
 
 
-def test_create_board_omits_team_id_when_not_given(monkeypatch):
+def test_create_board_omits_workspace_id_when_not_given(monkeypatch):
     seen = _capture_client(monkeypatch, httpx.Response(201, json=_BOARD_READ))
     server.create_board("Roadmap")
     assert json.loads(seen["content"]) == {"name": "Roadmap"}
 
 
-def test_update_board_sends_team_id_when_given(monkeypatch):
+def test_update_board_sends_workspace_id_when_given(monkeypatch):
     seen = _capture_client(monkeypatch, httpx.Response(200, json=_BOARD_READ))
-    server.update_board(5, team_id=9)
+    server.update_board(5, workspace_id=9)
     assert json.loads(seen["content"]) == {"workspace_id": 9}
 
 
-# --- teams (M9 V69, KAN-1058; ADR 0021, ADR 0019 amendment) -----------------
+# --- workspaces (M9 V69, KAN-1058; ADR 0021, ADR 0019 amendment; renamed from
+# "teams" by ADR 0023, KAN-1723) ---------------------------------------------
 
 
-def test_list_teams_reads_teams(monkeypatch):
+def test_list_workspaces_reads_workspaces(monkeypatch):
     seen = _capture_client(
         monkeypatch, httpx.Response(200, json=[{"id": 1, "name": "Platform"}])
     )
-    server.list_teams()
+    server.list_workspaces()
     assert seen["method"] == "GET"
     assert seen["path"] == "/api/v1/workspaces"
 
 
-def test_create_team_posts_name(monkeypatch):
+def test_create_workspace_posts_name(monkeypatch):
     seen = _capture_client(
         monkeypatch, httpx.Response(201, json={"id": 1, "name": "Platform"})
     )
-    server.create_team("Platform")
+    server.create_workspace("Platform")
     assert seen["method"] == "POST"
     assert seen["path"] == "/api/v1/workspaces"
     assert json.loads(seen["content"]) == {"name": "Platform"}
 
 
-def test_get_team_hits_the_id_path(monkeypatch):
+def test_get_workspace_hits_the_id_path(monkeypatch):
     seen = _capture_client(
         monkeypatch, httpx.Response(200, json={"id": 4, "name": "Platform"})
     )
-    server.get_team(4)
+    server.get_workspace(4)
     assert seen["method"] == "GET"
     assert seen["path"] == "/api/v1/workspaces/4"
 
 
-def test_update_team_patches_name(monkeypatch):
+def test_update_workspace_patches_name(monkeypatch):
     seen = _capture_client(
         monkeypatch, httpx.Response(200, json={"id": 4, "name": "Renamed"})
     )
-    server.update_team(4, name="Renamed")
+    server.update_workspace(4, name="Renamed")
     assert seen["method"] == "PATCH"
     assert seen["path"] == "/api/v1/workspaces/4"
     assert json.loads(seen["content"]) == {"name": "Renamed"}
 
 
-def test_delete_team_sends_delete(monkeypatch):
+def test_delete_workspace_sends_delete(monkeypatch):
     seen = _capture_client(monkeypatch, httpx.Response(204))
-    result = server.delete_team(4)
+    result = server.delete_workspace(4)
     assert seen["method"] == "DELETE"
     assert seen["path"] == "/api/v1/workspaces/4"
     assert result == {"deleted": 4}
 
 
-def test_list_teams_schema_takes_fields(monkeypatch):
-    """list_teams is shaped like list_boards (KAN-501's `fields` pattern), not a
-    raw passthrough — a discovery call should be narrowable the same way."""
-    list_teams = next(t for t in _tools() if t.name == "list_teams")
-    assert "fields" in list_teams.input_schema["properties"]
+def test_list_workspaces_schema_takes_fields(monkeypatch):
+    """list_workspaces is shaped like list_boards (KAN-501's `fields` pattern), not
+    a raw passthrough — a discovery call should be narrowable the same way."""
+    list_workspaces = next(t for t in _tools() if t.name == "list_workspaces")
+    assert "fields" in list_workspaces.input_schema["properties"]
