@@ -4,40 +4,40 @@
   import { ApiError, type Role } from "../api";
   import { boardStore } from "../board.svelte";
   import {
-    changeTeamMemberRole,
-    editTeam,
-    inviteTeamMember,
-    kickTeamMember,
-    refetchTeamMembers,
-    removeTeam,
-    teamMemberStore,
-    teamStore,
-  } from "../teams.svelte";
+    changeWorkspaceMemberRole,
+    editWorkspace,
+    inviteWorkspaceMember,
+    kickWorkspaceMember,
+    refetchWorkspaceMembers,
+    removeWorkspace,
+    workspaceMemberStore,
+    workspaceStore,
+  } from "../workspaces.svelte";
   import Modal from "./Modal.svelte";
 
-  // Team detail: rename/delete + full member management (add/re-role/remove),
-  // plus a read-only list of the team's boards. Mirrors EpicModal's shape (name
+  // Workspace detail: rename/delete + full member management (add/re-role/remove),
+  // plus a read-only list of the workspace's boards. Mirrors EpicModal's shape (name
   // edit + rollup) crossed with Members.svelte's inline management UI, since a
-  // team's membership — unlike an epic's stories — is mutable from right here.
-  let { teamId, onclose }: { teamId: number; onclose: () => void } = $props();
+  // workspace's membership — unlike an epic's stories — is mutable from right here.
+  let { workspaceId, onclose }: { workspaceId: number; onclose: () => void } = $props();
 
-  const team = $derived(teamStore.teams.find((t) => t.id === teamId));
+  const workspace = $derived(workspaceStore.workspaces.find((t) => t.id === workspaceId));
   $effect(() => {
-    if (team == null) onclose();
+    if (workspace == null) onclose();
   });
-  const isOwner = $derived(team?.role === "owner");
+  const isOwner = $derived(workspace?.role === "owner");
 
   // Members are loaded fresh every time the modal opens — the grid's preview
   // list is best-effort, this is the authoritative one the mutations act on.
   $effect(() => {
-    refetchTeamMembers(teamId);
+    refetchWorkspaceMembers(workspaceId);
   });
 
-  const boards = $derived(boardStore.boards.filter((b) => b.team_id === teamId));
+  const boards = $derived(boardStore.boards.filter((b) => b.workspace_id === workspaceId));
 
   const ROLES: Role[] = ["viewer", "editor", "owner"];
 
-  const initialName = untrack(() => team?.name ?? "");
+  const initialName = untrack(() => workspace?.name ?? "");
   let name = $state(initialName);
   let submitting = $state(false);
   let renameError = $state<string | null>(null);
@@ -46,13 +46,13 @@
 
   async function submitRename(e: SubmitEvent) {
     e.preventDefault();
-    if (!canSubmit || !team) return;
+    if (!canSubmit || !workspace) return;
     submitting = true;
     renameError = null;
     try {
-      await editTeam(team.id, name.trim());
+      await editWorkspace(workspace.id, name.trim());
     } catch (e) {
-      renameError = e instanceof Error ? e.message : "Failed to rename team";
+      renameError = e instanceof Error ? e.message : "Failed to rename workspace";
     } finally {
       submitting = false;
     }
@@ -62,14 +62,14 @@
   let deleting = $state(false);
   let deleteError = $state<string | null>(null);
   async function confirmDelete() {
-    if (!team) return;
+    if (!workspace) return;
     deleting = true;
     deleteError = null;
     try {
-      await removeTeam(team.id);
+      await removeWorkspace(workspace.id);
       onclose();
     } catch (e) {
-      deleteError = e instanceof Error ? e.message : "Failed to delete team";
+      deleteError = e instanceof Error ? e.message : "Failed to delete workspace";
       deleting = false;
     }
   }
@@ -87,7 +87,7 @@
     memberBusy = true;
     memberError = null;
     try {
-      await inviteTeamMember(teamId, trimmed, memberRole);
+      await inviteWorkspaceMember(workspaceId, trimmed, memberRole);
       memberEmail = "";
       memberRole = "viewer";
       addingMember = false;
@@ -103,10 +103,10 @@
     memberBusy = true;
     memberError = null;
     try {
-      await changeTeamMemberRole(teamId, memberId, next);
+      await changeWorkspaceMemberRole(workspaceId, memberId, next);
     } catch (e) {
       memberError = e instanceof ApiError ? e.message : "Failed to change role";
-      await refetchTeamMembers(teamId); // snap back on failure (e.g. last-owner 409)
+      await refetchWorkspaceMembers(workspaceId); // snap back on failure (e.g. last-owner 409)
     } finally {
       memberBusy = false;
     }
@@ -117,7 +117,7 @@
     memberBusy = true;
     memberError = null;
     try {
-      await kickTeamMember(teamId, memberId);
+      await kickWorkspaceMember(workspaceId, memberId);
       confirmingRemoveId = null;
     } catch (e) {
       memberError = e instanceof ApiError ? e.message : "Failed to remove member";
@@ -127,11 +127,11 @@
   }
 </script>
 
-{#if team}
-  <Modal label="Team: {team.name}" {onclose}>
+{#if workspace}
+  <Modal label="Workspace: {workspace.name}" {onclose}>
     <form class="card-form card-modal" onsubmit={submitRename}>
       <header class="modal-head">
-        <span class="ticket">Team</span>
+        <span class="ticket">Workspace</span>
         <span class="epic-count">
           {boards.length} {boards.length === 1 ? "board" : "boards"}
         </span>
@@ -151,14 +151,14 @@
           <input
             class="modal-title-input"
             type="text"
-            placeholder="Team name (required)"
-            aria-label="Team name"
+            placeholder="Workspace name (required)"
+            aria-label="Workspace name"
             bind:value={name}
             disabled={!isOwner}
           />
           {#if renameError}<p class="form-error" role="alert">{renameError}</p>{/if}
           {#if !isOwner}
-            <p class="page-intro">Only an owner-role member can rename or delete this team.</p>
+            <p class="page-intro">Only an owner-role member can rename or delete this workspace.</p>
           {/if}
 
           <div class="epic-rollup-block">
@@ -212,13 +212,13 @@
               {/if}
             {/if}
 
-            {#if teamMemberStore.loading && teamMemberStore.members.length === 0}
+            {#if workspaceMemberStore.loading && workspaceMemberStore.members.length === 0}
               <p class="hint">Loading…</p>
-            {:else if teamMemberStore.members.length === 0}
+            {:else if workspaceMemberStore.members.length === 0}
               <p class="comment-empty">No members yet.</p>
             {:else}
               <ul class="epic-stories">
-                {#each teamMemberStore.members as member (member.id)}
+                {#each workspaceMemberStore.members as member (member.id)}
                   <li class="member-row-modal">
                     <span class="stitle">{member.email ?? member.user_id}</span>
                     {#if isOwner}
@@ -271,7 +271,7 @@
           <div class="epic-rollup-block">
             <span class="field-label">Boards</span>
             {#if boards.length === 0}
-              <p class="comment-empty">No boards linked yet. Link one from the board switcher's Team picker.</p>
+              <p class="comment-empty">No boards linked yet. Link one from the board switcher's Workspace picker.</p>
             {:else}
               <ul class="epic-stories">
                 {#each boards as board (board.id)}
@@ -290,7 +290,7 @@
         <footer class="modal-foot">
           {#if confirmingDelete}
             <span class="confirm-msg">
-              Delete "{team.name}"? Its members lose access, and its
+              Delete "{workspace.name}"? Its members lose access, and its
               {boards.length} {boards.length === 1 ? "board" : "boards"} become unclaimed
               (not deleted).
             </span>

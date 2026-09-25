@@ -1,20 +1,20 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { Team } from "../api";
-  import { addTeam, editTeam } from "../teams.svelte";
+  import type { Workspace } from "../api";
+  import { addWorkspace, editWorkspace } from "../workspaces.svelte";
 
-  // Create mode: no `team`. Edit mode: pass `team`. Mirrors EpicForm (ADR 0009).
+  // Create mode: no `workspace`. Edit mode: pass `workspace`. Mirrors EpicForm (ADR 0009).
   let {
-    team,
+    workspace,
     onclose,
   }: {
-    team?: Team;
+    workspace?: Workspace;
     onclose: () => void;
   } = $props();
 
   const { isEdit, iName } = untrack(() => ({
-    isEdit: !!team,
-    iName: team?.name ?? "",
+    isEdit: !!workspace,
+    iName: workspace?.name ?? "",
   }));
 
   let name = $state(iName);
@@ -31,13 +31,13 @@
     error = null;
     try {
       if (isEdit) {
-        await editTeam(team!.id, name.trim());
+        await editWorkspace(workspace!.id, name.trim());
       } else {
-        await addTeam(name.trim());
+        await addWorkspace(name.trim());
       }
       onclose();
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to save team";
+      error = e instanceof Error ? e.message : "Failed to save workspace";
     } finally {
       submitting = false;
     }
@@ -46,7 +46,7 @@
 
 <form class="card-form" onsubmit={submit}>
   <!-- svelte-ignore a11y_autofocus -->
-  <input type="text" placeholder="Team name (required)" bind:value={name} autofocus />
+  <input type="text" placeholder="Workspace name (required)" bind:value={name} autofocus />
 
   {#if error}
     <p class="form-error" role="alert">{error}</p>

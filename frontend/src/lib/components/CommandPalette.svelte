@@ -56,7 +56,7 @@
   let moveCardLabel = $state("");
 
   // Navigable views (mirrors App.svelte's `view` union / NavRail's items + the
-  // avatar menu's Tokens/Teams — this palette entry is unaffected by which
+  // avatar menu's Tokens/Workspaces — this palette entry is unaffected by which
   // chrome renders a view, so NR-1..NR-4's nav-rail redesign never touched it).
   const VIEWS: { id: string; label: string }[] = [
     { id: "board", label: "Board" },
@@ -67,7 +67,7 @@
     { id: "activity", label: "Activity" },
     { id: "tokens", label: "Tokens" },
     { id: "members", label: "Members" },
-    { id: "teams", label: "Teams" },
+    { id: "workspaces", label: "Workspaces" },
     { id: "trash", label: "Trash" },
     { id: "settings", label: "Settings" },
   ];

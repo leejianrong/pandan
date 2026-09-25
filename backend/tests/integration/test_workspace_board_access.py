@@ -1,18 +1,18 @@
-"""Team-default board access integration tests (M9 V68, KAN-1057; ADR 0021).
+"""Workspace-default board access integration tests (M9 V68, KAN-1057; ADR 0021).
 
 The full 401/403/200 matrix the SLICES.md testing notes call for: owner /
-explicit-``BoardMember``-override / team-default / neither, crossed with
-viewer/editor/owner at each layer, plus the "removed from team loses the default
+explicit-``BoardMember``-override / workspace-default / neither, crossed with
+viewer/editor/owner at each layer, plus the "removed from workspace loses the default
 but keeps an explicit share" case named directly in ADR 0021. Written as its own
 suite (not folded into ``test_role_enforcement.py``) so a future change to
 ``_effective_access`` can't silently drop a case.
 
-A team-default grant behaves exactly like a ``board_member`` row of the same role
+A workspace-default grant behaves exactly like a ``board_member`` row of the same role
 (``test_role_enforcement.py`` covers that read/write/manage shape in full) — the
 new thing this suite proves is the *precedence*: an explicit ``board_member`` row
-always wins over the team default, in **both** directions (a lower explicit role
-does not get boosted by a higher team default, and vice versa), and the default
-disappears the moment team membership does while an explicit share does not.
+always wins over the workspace default, in **both** directions (a lower explicit role
+does not get boosted by a higher workspace default, and vice versa), and the default
+disappears the moment workspace membership does while an explicit share does not.
 
 Two+ distinct human sessions come from the ``login_as`` factory (see conftest).
 Per the suite convention, app imports live inside the test bodies (none needed
@@ -23,7 +23,7 @@ from __future__ import annotations
 BOARDS = "/api/v1/boards"
 CARDS = "/api/v1/cards"
 EPICS = "/api/v1/epics"
-TEAMS = "/api/v1/teams"
+WORKSPACES = "/api/v1/workspaces"
 
 ALICE = ("alice@example.com", "gh-alice")
 BOB = ("bob@example.com", "gh-bob")
@@ -34,36 +34,41 @@ def _members_url(board_id: int) -> str:
     return f"{BOARDS}/{board_id}/members"
 
 
-def _team_members_url(team_id: int) -> str:
-    return f"{TEAMS}/{team_id}/members"
+def _workspace_members_url(workspace_id: int) -> str:
+    return f"{WORKSPACES}/{workspace_id}/members"
 
 
-def _setup_team_default(login_as, role: str):
-    """Alice owns the default board and links it to a team; Bob joins the team
+def _setup_workspace_default(login_as, role: str):
+    """Alice owns the default board and links it to a workspace; Bob joins the workspace
     with ``role`` and gets **no explicit** ``board_member`` row — his access flows
-    purely through the V68 team-default rung.
+    purely through the V68 workspace-default rung.
 
-    Returns ``(alice, bob, board_id, a_card, a_epic, team_id)``.
+    Returns ``(alice, bob, board_id, a_card, a_epic, workspace_id)``.
     """
     alice = login_as(*ALICE)  # first login claims the default board
     board_id = alice.get(BOARDS).json()[0]["id"]
-    team_id = alice.post(TEAMS, json={"name": "Platform"}).json()["id"]
-    assert alice.patch(f"{BOARDS}/{board_id}", json={"team_id": team_id}).status_code == 200
+    workspace_id = alice.post(WORKSPACES, json={"name": "Platform"}).json()["id"]
+    assert (
+        alice.patch(f"{BOARDS}/{board_id}", json={"workspace_id": workspace_id}).status_code
+        == 200
+    )
     a_card = alice.post(CARDS, json={"title": "seed", "board_id": board_id}).json()
     a_epic = alice.post(EPICS, json={"name": "seed-epic", "board_id": board_id}).json()
 
     bob = login_as(*BOB)
     bob_id = bob.get("/users/me").json()["id"]
-    added = alice.post(_team_members_url(team_id), json={"user_id": bob_id, "role": role})
+    added = alice.post(_workspace_members_url(workspace_id), json={"user_id": bob_id, "role": role})
     assert added.status_code == 201
-    return alice, bob, board_id, a_card, a_epic, team_id
+    return alice, bob, board_id, a_card, a_epic, workspace_id
 
 
-# --- team-default viewer: read yes, write no ----------------------------------
+# --- workspace-default viewer: read yes, write no ----------------------------------
 
 
-def test_team_viewer_can_read(login_as):
-    _alice, bob, board_id, a_card, a_epic, _team_id = _setup_team_default(login_as, "viewer")
+def test_workspace_viewer_can_read(login_as):
+    _alice, bob, board_id, a_card, a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "viewer"
+    )
 
     assert bob.get(f"{BOARDS}/{board_id}").status_code == 200
     assert bob.get(f"{CARDS}/{a_card['id']}").status_code == 200
@@ -72,26 +77,32 @@ def test_team_viewer_can_read(login_as):
     assert bob.get(EPICS, params={"board_id": board_id}).status_code == 200
 
 
-def test_team_viewer_cannot_write(login_as):
-    _alice, bob, board_id, a_card, _a_epic, _team_id = _setup_team_default(login_as, "viewer")
+def test_workspace_viewer_cannot_write(login_as):
+    _alice, bob, board_id, a_card, _a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "viewer"
+    )
 
     assert bob.post(CARDS, json={"title": "x", "board_id": board_id}).status_code == 403
     assert bob.patch(f"{CARDS}/{a_card['id']}", json={"title": "x"}).status_code == 403
     assert bob.delete(f"{CARDS}/{a_card['id']}").status_code == 403
 
 
-def test_team_viewer_cannot_manage(login_as):
-    _alice, bob, board_id, _a_card, _a_epic, _team_id = _setup_team_default(login_as, "viewer")
+def test_workspace_viewer_cannot_manage(login_as):
+    _alice, bob, board_id, _a_card, _a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "viewer"
+    )
 
     assert bob.patch(f"{BOARDS}/{board_id}", json={"name": "x"}).status_code == 403
     assert bob.delete(f"{BOARDS}/{board_id}").status_code == 403
 
 
-# --- team-default editor: read + write yes, manage no -------------------------
+# --- workspace-default editor: read + write yes, manage no -------------------------
 
 
-def test_team_editor_can_read_and_write(login_as):
-    _alice, bob, board_id, a_card, a_epic, _team_id = _setup_team_default(login_as, "editor")
+def test_workspace_editor_can_read_and_write(login_as):
+    _alice, bob, board_id, a_card, a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "editor"
+    )
 
     made = bob.post(CARDS, json={"title": "by-editor", "board_id": board_id})
     assert made.status_code == 201
@@ -103,19 +114,23 @@ def test_team_editor_can_read_and_write(login_as):
     assert bob.patch(f"{EPICS}/{a_epic['id']}", json={"name": "e2"}).status_code == 200
 
 
-def test_team_editor_cannot_manage(login_as):
-    _alice, bob, board_id, _a_card, _a_epic, _team_id = _setup_team_default(login_as, "editor")
+def test_workspace_editor_cannot_manage(login_as):
+    _alice, bob, board_id, _a_card, _a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "editor"
+    )
 
     assert bob.patch(f"{BOARDS}/{board_id}", json={"name": "x"}).status_code == 403
     assert bob.delete(f"{BOARDS}/{board_id}").status_code == 403
     assert bob.post(_members_url(board_id), json={"email": CAROL[0]}).status_code == 403
 
 
-# --- team-default owner: full access, like a board_member owner row -----------
+# --- workspace-default owner: full access, like a board_member owner row -----------
 
 
-def test_team_owner_role_member_can_manage(login_as):
-    alice, bob, board_id, _a_card, _a_epic, _team_id = _setup_team_default(login_as, "owner")
+def test_workspace_owner_role_member_can_manage(login_as):
+    alice, bob, board_id, _a_card, _a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "owner"
+    )
 
     assert bob.patch(f"{BOARDS}/{board_id}", json={"name": "renamed"}).status_code == 200
     carol = login_as(*CAROL)
@@ -129,11 +144,13 @@ def test_team_owner_role_member_can_manage(login_as):
 # --- precedence: an explicit board_member row always wins ---------------------
 
 
-def test_explicit_share_overrides_a_lower_team_default(login_as):
-    """Bob's team role is editor, but an explicit *viewer* board_member row on this
+def test_explicit_share_overrides_a_lower_workspace_default(login_as):
+    """Bob's workspace role is editor, but an explicit *viewer* board_member row on this
     board caps him at READ — an explicit share wins on presence, not on being the
     higher grant (ADR 0021 §Interaction, SHAPING D2)."""
-    alice, bob, board_id, a_card, _a_epic, _team_id = _setup_team_default(login_as, "editor")
+    alice, bob, board_id, a_card, _a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "editor"
+    )
     alice.post(_members_url(board_id), json={"email": BOB[0], "role": "viewer"})
 
     assert bob.get(f"{BOARDS}/{board_id}").status_code == 200
@@ -141,10 +158,12 @@ def test_explicit_share_overrides_a_lower_team_default(login_as):
     assert bob.patch(f"{CARDS}/{a_card['id']}", json={"title": "x"}).status_code == 403
 
 
-def test_explicit_share_overrides_a_higher_team_default(login_as):
-    """The flip side: Bob's team role is viewer, but an explicit *editor*
+def test_explicit_share_overrides_a_higher_workspace_default(login_as):
+    """The flip side: Bob's workspace role is viewer, but an explicit *editor*
     board_member row grants him WRITE — the override cuts both directions."""
-    alice, bob, board_id, a_card, _a_epic, _team_id = _setup_team_default(login_as, "viewer")
+    alice, bob, board_id, a_card, _a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "viewer"
+    )
     alice.post(_members_url(board_id), json={"email": BOB[0], "role": "editor"})
 
     assert bob.patch(f"{CARDS}/{a_card['id']}", json={"title": "edited"}).status_code == 200
@@ -153,32 +172,44 @@ def test_explicit_share_overrides_a_higher_team_default(login_as):
 # --- removal semantics ----------------------------------------------------
 
 
-def test_removing_from_team_removes_the_default(login_as):
-    alice, bob, board_id, _a_card, _a_epic, team_id = _setup_team_default(login_as, "editor")
+def test_removing_from_workspace_removes_the_default(login_as):
+    alice, bob, board_id, _a_card, _a_epic, workspace_id = _setup_workspace_default(
+        login_as, "editor"
+    )
     bob_member_id = next(
         m["id"]
-        for m in alice.get(_team_members_url(team_id)).json()
+        for m in alice.get(_workspace_members_url(workspace_id)).json()
         if m["email"] == BOB[0]
     )
 
-    assert alice.delete(f"{_team_members_url(team_id)}/{bob_member_id}").status_code == 204
+    assert (
+        alice.delete(f"{_workspace_members_url(workspace_id)}/{bob_member_id}").status_code
+        == 204
+    )
 
     assert bob.get(f"{BOARDS}/{board_id}").status_code == 403
 
 
-def test_removing_from_team_leaves_an_explicit_share_untouched(login_as):
-    """The case named directly in ADR 0021: removing team membership removes only
+def test_removing_from_workspace_leaves_an_explicit_share_untouched(login_as):
+    """The case named directly in ADR 0021: removing workspace membership removes only
     the *default*; a separately-granted explicit share survives, at its own
     (possibly lower) level."""
-    alice, bob, board_id, a_card, _a_epic, team_id = _setup_team_default(login_as, "editor")
+    alice, bob, board_id, a_card, _a_epic, workspace_id = _setup_workspace_default(
+        login_as, "editor"
+    )
     alice.post(_members_url(board_id), json={"email": BOB[0], "role": "viewer"})
-    bob_team_member_id = next(
+    bob_workspace_member_id = next(
         m["id"]
-        for m in alice.get(_team_members_url(team_id)).json()
+        for m in alice.get(_workspace_members_url(workspace_id)).json()
         if m["email"] == BOB[0]
     )
 
-    assert alice.delete(f"{_team_members_url(team_id)}/{bob_team_member_id}").status_code == 204
+    assert (
+        alice.delete(
+            f"{_workspace_members_url(workspace_id)}/{bob_workspace_member_id}"
+        ).status_code
+        == 204
+    )
 
     # The explicit viewer share still stands...
     assert bob.get(f"{BOARDS}/{board_id}").status_code == 200
@@ -187,33 +218,33 @@ def test_removing_from_team_leaves_an_explicit_share_untouched(login_as):
     assert bob.patch(f"{CARDS}/{a_card['id']}", json={"title": "x"}).status_code == 403
 
 
-# --- the default doesn't leak beyond its own team/board ------------------------
+# --- the default doesn't leak beyond its own workspace/board ------------------------
 
 
-def test_team_default_does_not_leak_to_an_unrelated_board(login_as):
-    """Bob is on Team A, which owns no board; Board X belongs to Team B instead.
-    Bob's Team-A membership must not grant him anything on Board X."""
+def test_workspace_default_does_not_leak_to_an_unrelated_board(login_as):
+    """Bob is on Workspace A, which owns no board; Board X belongs to Workspace B instead.
+    Bob's Workspace-A membership must not grant him anything on Board X."""
     alice = login_as(*ALICE)
     board_id = alice.get(BOARDS).json()[0]["id"]
-    team_b = alice.post(TEAMS, json={"name": "Team B"}).json()["id"]
-    alice.patch(f"{BOARDS}/{board_id}", json={"team_id": team_b})
+    workspace_b = alice.post(WORKSPACES, json={"name": "Workspace B"}).json()["id"]
+    alice.patch(f"{BOARDS}/{board_id}", json={"workspace_id": workspace_b})
 
     bob = login_as(*BOB)
     bob_id = bob.get("/users/me").json()["id"]
-    team_a = alice.post(TEAMS, json={"name": "Team A"}).json()["id"]
-    alice.post(_team_members_url(team_a), json={"user_id": bob_id, "role": "owner"})
+    workspace_a = alice.post(WORKSPACES, json={"name": "Workspace A"}).json()["id"]
+    alice.post(_workspace_members_url(workspace_a), json={"user_id": bob_id, "role": "owner"})
 
     assert bob.get(f"{BOARDS}/{board_id}").status_code == 403
 
 
-def test_team_membership_grants_nothing_on_a_teamless_board(login_as):
+def test_workspace_membership_grants_nothing_on_a_workspaceless_board(login_as):
     alice = login_as(*ALICE)
-    board_id = alice.get(BOARDS).json()[0]["id"]  # team_id stays NULL
-    team_id = alice.post(TEAMS, json={"name": "Platform"}).json()["id"]
+    board_id = alice.get(BOARDS).json()[0]["id"]  # workspace_id stays NULL
+    workspace_id = alice.post(WORKSPACES, json={"name": "Platform"}).json()["id"]
 
     bob = login_as(*BOB)
     bob_id = bob.get("/users/me").json()["id"]
-    alice.post(_team_members_url(team_id), json={"user_id": bob_id, "role": "owner"})
+    alice.post(_workspace_members_url(workspace_id), json={"user_id": bob_id, "role": "owner"})
 
     assert bob.get(f"{BOARDS}/{board_id}").status_code == 403
 
@@ -221,8 +252,10 @@ def test_team_membership_grants_nothing_on_a_teamless_board(login_as):
 # --- list visibility (KAN-15's OR, extended) -----------------------------------
 
 
-def test_team_default_board_appears_in_list(login_as):
-    _alice, bob, board_id, _a_card, _a_epic, _team_id = _setup_team_default(login_as, "viewer")
+def test_workspace_default_board_appears_in_list(login_as):
+    _alice, bob, board_id, _a_card, _a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "viewer"
+    )
 
     listed_ids = {b["id"] for b in bob.get(BOARDS).json()}
     assert board_id in listed_ids
@@ -231,10 +264,10 @@ def test_team_default_board_appears_in_list(login_as):
 def test_non_member_board_absent_from_list(login_as):
     alice = login_as(*ALICE)
     board_id = alice.get(BOARDS).json()[0]["id"]
-    team_id = alice.post(TEAMS, json={"name": "Platform"}).json()["id"]
-    alice.patch(f"{BOARDS}/{board_id}", json={"team_id": team_id})
+    workspace_id = alice.post(WORKSPACES, json={"name": "Platform"}).json()["id"]
+    alice.patch(f"{BOARDS}/{board_id}", json={"workspace_id": workspace_id})
 
-    bob = login_as(*BOB)  # never joins the team
+    bob = login_as(*BOB)  # never joins the workspace
     assert bob.get(BOARDS).json() == []
 
 
@@ -242,5 +275,7 @@ def test_non_member_board_absent_from_list(login_as):
 
 
 def test_unauthenticated_is_401(client, login_as):
-    _alice, _bob, board_id, _a_card, _a_epic, _team_id = _setup_team_default(login_as, "viewer")
+    _alice, _bob, board_id, _a_card, _a_epic, _workspace_id = _setup_workspace_default(
+        login_as, "viewer"
+    )
     assert client.get(f"{BOARDS}/{board_id}").status_code == 401

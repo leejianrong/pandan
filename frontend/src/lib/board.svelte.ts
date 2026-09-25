@@ -112,8 +112,8 @@ export async function setActiveBoard(id: number): Promise<void> {
   ]);
 }
 
-export async function addBoard(name: string, teamId?: number | null): Promise<void> {
-  const created = await createBoard({ name, team_id: teamId ?? undefined });
+export async function addBoard(name: string, workspaceId?: number | null): Promise<void> {
+  const created = await createBoard({ name, workspace_id: workspaceId ?? undefined });
   await refetchBoards();
   await setActiveBoard(created.id); // creating a board switches to it
 }
@@ -121,9 +121,9 @@ export async function addBoard(name: string, teamId?: number | null): Promise<vo
 export async function editBoard(
   id: number,
   name: string,
-  teamId?: number | null,
+  workspaceId?: number | null,
 ): Promise<void> {
-  await updateBoard(id, { name, team_id: teamId });
+  await updateBoard(id, { name, workspace_id: workspaceId });
   await refetchBoards();
 }
 

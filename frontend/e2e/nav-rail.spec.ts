@@ -82,17 +82,17 @@ test("the old top-bar Board pill is gone (NR-2 retired it atomically)", async ({
   await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveCount(1);
 });
 
-// NR-3 (KAN-1150): Tokens + Teams fold into the avatar menu.
-test("Tokens + Teams live in the avatar menu", async ({ page }) => {
+// NR-3 (KAN-1150): Tokens + Workspaces fold into the avatar menu.
+test("Tokens + Workspaces live in the avatar menu", async ({ page }) => {
   await openFreshBoard(page);
 
   await page.getByRole("button", { name: "Account menu" }).click();
   const avatarMenu = page.getByRole("menu");
   await expect(avatarMenu.getByRole("menuitem", { name: "Tokens" })).toBeVisible();
-  await expect(avatarMenu.getByRole("menuitem", { name: "Teams" })).toBeVisible();
+  await expect(avatarMenu.getByRole("menuitem", { name: "Workspaces" })).toBeVisible();
 });
 
-test("selecting Tokens/Teams from the avatar menu navigates there", async ({ page }) => {
+test("selecting Tokens/Workspaces from the avatar menu navigates there", async ({ page }) => {
   await openFreshBoard(page);
 
   await page.getByRole("button", { name: "Account menu" }).click();
@@ -100,8 +100,8 @@ test("selecting Tokens/Teams from the avatar menu navigates there", async ({ pag
   await expect(page.getByRole("heading", { name: "Agent tokens", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Account menu" }).click();
-  await page.getByRole("menuitem", { name: "Teams" }).click();
-  await expect(page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Workspaces" }).click();
+  await expect(page.getByRole("heading", { name: "Workspaces", exact: true })).toBeVisible();
 });
 
 // NR-4 (KAN-1151): the hamburger + SideNav.svelte drawer are gone entirely —

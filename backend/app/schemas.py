@@ -626,9 +626,9 @@ class BoardCreate(BaseModel):
     exact key, so it is the only path that can fail — a malformed or reserved key is
     a ``422`` here, and a key already used by this owner is a ``409`` in the router.
 
-    ``team_id`` (M9 V67, KAN-1056; ADR 0021) optionally links the new board to a
-    team. Omitted → ``team_id = NULL``, i.e. today's behavior, byte-for-byte. The
-    router 403s if the creating principal isn't a member of the named team (any
+    ``workspace_id`` (M9 V67, KAN-1056; ADR 0021) optionally links the new board to a
+    workspace. Omitted → ``workspace_id = NULL``, i.e. today's behavior, byte-for-byte. The
+    router 403s if the creating principal isn't a member of the named workspace (any
     role) — "you don't get to point a create at something you can't touch",
     mirroring ``_validate_epic``'s pattern but at 403 since the boundary here is
     membership, not shape.
@@ -636,7 +636,7 @@ class BoardCreate(BaseModel):
 
     name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
     key: Annotated[str | None, Field(max_length=MAX_BOARD_KEY_LEN)] = None
-    team_id: int | None = None
+    workspace_id: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -664,10 +664,10 @@ class BoardUpdate(BaseModel):
     HMAC-SHA256 signature and is **write-only** (accepted here, never echoed back in
     ``BoardRead``). Send ``null`` for the url/secret to clear it.
 
-    ``team_id`` (M9 V67, KAN-1056; ADR 0021) sets or clears the board's team link —
+    ``workspace_id`` (M9 V67, KAN-1056; ADR 0021) sets or clears the board's workspace link —
     unlike ``key``, ``null`` here is meaningful (clears the link back to a personal
     board) rather than rejected, mirroring the webhook fields above. Setting it to
-    a non-null value 403s if the caller isn't a member of that team (any role),
+    a non-null value 403s if the caller isn't a member of that workspace (any role),
     same as on create."""
 
     name: Annotated[str | None, Field(max_length=MAX_NAME_LEN)] = None
@@ -679,7 +679,7 @@ class BoardUpdate(BaseModel):
         str | None, Field(max_length=MAX_WEBHOOK_SECRET_LEN)
     ] = None
     outbound_webhook_enabled: bool | None = None
-    team_id: int | None = None
+    workspace_id: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -732,11 +732,11 @@ class BoardRead(BaseModel):
     # The owning user (UUID), or null for an unclaimed board (e.g. the migrated
     # default board). Server-enforced ownership checks arrive in V8.
     owner_id: uuid.UUID | None
-    # The linked team (M9 V67, KAN-1056; ADR 0021), or null for a personal board —
+    # The linked workspace (M9 V67, KAN-1056; ADR 0021), or null for a personal board —
     # every board's meaning before this slice, and still the default. A real ORM
     # column (unlike ``role``/``owner_email`` below), so this reads straight off
     # the model with no router-side attachment.
-    team_id: int | None
+    workspace_id: int | None
     # Auto-sync opt-ins (KAN-43); both default false.
     autosync_enabled: bool
     autosync_advance_to_done: bool
@@ -811,9 +811,9 @@ class MemberRead(BaseModel):
     updated_at: datetime
 
 
-class TeamCreate(BaseModel):
-    """Create a team (M9 V65, KAN-1054; ADR 0021). The creator is auto-added as an
-    owner-role team_member by the router — the same bootstrap
+class WorkspaceCreate(BaseModel):
+    """Create a workspace (M9 V65, KAN-1054; ADR 0021). The creator is auto-added as an
+    owner-role workspace_member by the router — the same bootstrap
     ``app.authz.authorize_board`` already gives a board's creator."""
 
     name: Annotated[str, Field(min_length=1, max_length=MAX_NAME_LEN)]
@@ -826,25 +826,25 @@ class TeamCreate(BaseModel):
         return v
 
 
-class TeamRead(BaseModel):
+class WorkspaceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
-    # The caller's effective role on this team (viewer/editor/owner), attached
+    # The caller's effective role on this workspace (viewer/editor/owner), attached
     # transiently by the router (not an ORM column) — mirrors BoardRead.role.
-    # Unlike a board a team has no owner analogue: every team a caller can see is
-    # one they're a member of (visible_team_ids IS membership), so this is never
+    # Unlike a board a workspace has no owner analogue: every workspace a caller can see is
+    # one they're a member of (visible_workspace_ids IS membership), so this is never
     # null on a list/get response reached through the router.
     role: RoleEnum | None = None
     created_at: datetime
     updated_at: datetime
 
 
-class TeamUpdate(BaseModel):
-    """Rename a team (M9 V66, KAN-1055). Owner-role members only. Renaming does not
-    touch any board's ``team_id`` — a team's boards are a separate pointer
-    (``board.team_id``) that this schema has no field for."""
+class WorkspaceUpdate(BaseModel):
+    """Rename a workspace (M9 V66, KAN-1055). Owner-role members only. Renaming does not
+    touch any board's ``workspace_id`` — a workspace's boards are a separate pointer
+    (``board.workspace_id``) that this schema has no field for."""
 
     name: Annotated[str | None, Field(max_length=MAX_NAME_LEN)] = None
 
@@ -856,8 +856,8 @@ class TeamUpdate(BaseModel):
         return v
 
 
-class TeamMemberCreate(BaseModel):
-    """Add a member to a team (M9 V66, KAN-1055): identify the user by **either**
+class WorkspaceMemberCreate(BaseModel):
+    """Add a member to a workspace (M9 V66, KAN-1055): identify the user by **either**
     ``user_id`` or ``email`` (exactly one), with a ``role`` (defaults to
     ``viewer``). Mirrors ``MemberCreate`` (board membership) exactly."""
 
@@ -873,26 +873,26 @@ class TeamMemberCreate(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def exactly_one_identity(self) -> TeamMemberCreate:
+    def exactly_one_identity(self) -> WorkspaceMemberCreate:
         if (self.user_id is None) == (self.email is None):
             raise ValueError("provide exactly one of user_id or email")
         return self
 
 
-class TeamMemberUpdate(BaseModel):
-    """Change a team member's role (M9 V66, KAN-1055)."""
+class WorkspaceMemberUpdate(BaseModel):
+    """Change a workspace member's role (M9 V66, KAN-1055)."""
 
     role: RoleEnum
 
 
-class TeamMemberRead(BaseModel):
+class WorkspaceMemberRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    team_id: int
+    workspace_id: int
     user_id: uuid.UUID
     # The member's email, populated by the router from the user table (not an ORM
-    # column on team_member) — mirrors MemberRead.email.
+    # column on workspace_member) — mirrors MemberRead.email.
     email: str | None = None
     role: RoleEnum
     created_at: datetime
