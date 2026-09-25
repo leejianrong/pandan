@@ -28,6 +28,14 @@ dependencies = [
     # can't take a per-route slowapi decorator.
     "slowapi>=0.1.9",
     "regex>=2026.9.3",
+    # Hosted Streamable HTTP MCP transport (KAN-1732, ADR 0025): the backend
+    # mounts the exact same tool registry the stdio `pandan-mcp` server exposes
+    # (`backend/app/mcp_host.py` wraps `pandan_mcp.server.mcp.streamable_http_app()`
+    # in our own bearer-auth middleware), depending on it by path — the same
+    # sibling-package pattern KAN-21 already uses for `mcp/`'s own `pandan-client`
+    # dependency (see `[tool.uv.sources]` below) — so both transports can never
+    # drift into two implementations of the same 57 tools.
+    "pandan-mcp",
 ]
 
 [dependency-groups]
@@ -40,6 +48,9 @@ dev = [
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+pandan-mcp = { path = "../mcp", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

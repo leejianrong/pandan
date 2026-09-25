@@ -42,8 +42,11 @@ AUTO_MERGE = WORKFLOWS / "dependabot-auto-merge.yml"
 
 # The single definition of "paths baked into the Fly image", hoisted to a
 # workflow-level env in deploy.yml so the deploy gate and the drift watcher
-# cannot disagree.
-IMAGE_PATHS_REGEX = r"^(backend/|frontend/|Dockerfile|fly\.toml|\.dockerignore)"
+# cannot disagree. `mcp/`/`pandan-client/` joined in KAN-1732 (the backend
+# image now bakes both sibling path deps for the hosted MCP transport) — see
+# the Dockerfile's own comment at the COPY step and deploy.yml's IMAGE_PATHS
+# comment for why.
+IMAGE_PATHS_REGEX = r"^(backend/|frontend/|mcp/|pandan-client/|Dockerfile|fly\.toml|\.dockerignore)"
 
 
 @pytest.fixture(scope="module")

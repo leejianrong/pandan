@@ -121,6 +121,20 @@ ENV UV_COMPILE_BYTECODE=1 \
     STATIC_DIR=/app/static \
     PATH="/app/.venv/bin:$PATH"
 
+# Sibling path deps (KAN-1732): the backend now hosts the MCP tool registry
+# over Streamable HTTP (backend/app/mcp_host.py), so it depends on `pandan-mcp`
+# by path — which itself depends on `pandan-client` by path — exactly the
+# pattern mcp/Dockerfile already uses for ITS OWN pandan-client dependency (see
+# the long comment there). Both are resolved at `uv sync` time via relative
+# `[tool.uv.sources]` entries, one level up from wherever the dependent
+# package's own pyproject.toml lives: backend/pyproject.toml's `../mcp` needs
+# `mcp/` at `/mcp` (backend sits at `/app`), and mcp/pyproject.toml's
+# `../pandan-client` needs `pandan-client/` at `/pandan-client` (mcp sits at
+# `/mcp`). Copied first, like the backend deps below — sibling packages change
+# far less often than backend/app/ itself, so this ordering caches well.
+COPY pandan-client/ /pandan-client/
+COPY mcp/ /mcp/
+
 # Install backend deps first (cached unless pyproject/lock change).
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev

@@ -225,6 +225,16 @@ jobs:
               - 'backend/uv.lock'
               - 'frontend/package.json'
               - 'frontend/package-lock.json'
+              # The backend image bakes two sibling path deps since KAN-1732
+              # (it hosts the MCP tool registry over Streamable HTTP, so it
+              # depends on pandan-mcp, which itself depends on pandan-client),
+              # so their manifests are build inputs too — the same reasoning
+              # `mcp_image` below already applies to mcp/Dockerfile's own
+              # pandan-client dependency.
+              - 'mcp/pyproject.toml'
+              - 'mcp/uv.lock'
+              - 'pandan-client/pyproject.toml'
+              - 'pandan-client/uv.lock'
             # mcp/Dockerfile has the SAME hole, checked rather than assumed:
             # publish-mcp-image.yml is the only workflow in this repo that builds
             # any image, and it triggers on `v*` tags only (KAN-452's finding), so
@@ -697,9 +707,16 @@ jobs:
       # --- Python dependency audit (pip-audit) ------------------------------
       # Audit the locked deps of every uv project against the PyPI advisory DB.
       # `--no-emit-project` drops the project itself; `--no-emit-package
-      # pandan-client` drops the local path dependency (an editable requirement
-      # pip-audit can't resolve — pandan-client is audited as its own project);
-      # `--no-hashes` because pip-audit only needs versions, not integrity hashes.
+      # pandan-client --no-emit-package pandan-mcp` drops the local path
+      # dependencies (editable requirements pip-audit can't resolve — each is
+      # audited as its own project via this same loop: pandan-client directly,
+      # pandan-mcp via the `mcp` iteration); `--no-hashes` because pip-audit only
+      # needs versions, not integrity hashes. `backend` now carries BOTH flags
+      # since KAN-1732 (it depends on pandan-mcp, which itself depends on
+      # pandan-client) — passing a package name a project doesn't actually
+      # depend on is a harmless no-op for `uv export`, so listing both
+      # unconditionally for every directory is simpler than a per-directory flag
+      # set and never wrong.
       # Threshold: pip-audit fails the step on ANY known vulnerability. That is
       # intentionally strict — the lockfiles are currently clean, and because this
       # job is non-required a finding surfaces loudly without blocking merge. If
@@ -711,8 +728,8 @@ jobs:
           for d in backend mcp pandan-client pandan-cli; do
             echo "::group::pip-audit $d"
             ( cd "$d" && uv export --frozen --no-emit-project \
-                --no-emit-package pandan-client --no-hashes \
-                --format requirements-txt > /tmp/req.txt )
+                --no-emit-package pandan-client --no-emit-package pandan-mcp \
+                --no-hashes --format requirements-txt > /tmp/req.txt )
             uvx pip-audit -r /tmp/req.txt
             echo "::endgroup::"
           done
