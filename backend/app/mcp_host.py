@@ -24,7 +24,11 @@ since an OAuth-issued token is a ``personal_access_token`` row too (ADR
 :mod:`pandan_mcp.request_auth`'s per-request contextvar rather than the
 stdio transport's process-wide singleton (see
 ``pandan_mcp.server._client_instance``'s own docstring for that half of the
-bridge).
+bridge). A missing/invalid bearer's ``401`` carries a RFC 9728-compliant
+``WWW-Authenticate: Bearer resource_metadata="..."`` header (KAN-1733), so a
+cold client discovers the authorization server without any out-of-band
+configuration — see ``app/oauth_metadata.py`` for the metadata document
+itself.
 
 **Lifespan.** ``mcp.streamable_http_app()`` returns a Starlette app whose own
 lifespan starts/stops the Streamable HTTP session manager
@@ -60,11 +64,13 @@ from typing import AsyncIterator
 from mcp.server.transport_security import TransportSecuritySettings
 from pandan_mcp.request_auth import clear_request_token, set_request_token
 from pandan_mcp.server import mcp
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .authz import _resolve_pat
 from .db import SessionLocal
+from .oauth_metadata import METADATA_PATH
 
 
 # `app/main.py` registers `hosted_mcp_app` as a plain `Route("/mcp", ...)`, NOT
@@ -118,10 +124,18 @@ def _bearer_token(scope: Scope) -> str | None:
 
 
 async def _unauthorized(scope: Scope, receive: Receive, send: Send, detail: str) -> None:
+    # RFC 9728 discovery: point a cold client at the metadata document for
+    # THIS request's own origin (dev/Fly-prod/self-hosted all differ, so this
+    # can't be a fixed string) — see `app/oauth_metadata.py`'s module
+    # docstring for why the origin is derived per request rather than baked
+    # in at import time, and why `METADATA_PATH` is shared rather than
+    # duplicated between the two modules.
+    origin = str(Request(scope).base_url).rstrip("/")
+    resource_metadata = f"{origin}{METADATA_PATH}"
     response = JSONResponse(
         {"detail": detail},
         status_code=401,
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={"WWW-Authenticate": f'Bearer resource_metadata="{resource_metadata}"'},
     )
     await response(scope, receive, send)
 
