@@ -23,7 +23,7 @@ positional arguments:
                   --action)
     notify        your notification inbox (list / read)
     board         manage boards (list / get / create / update / delete)
-    team          manage teams (list / get / create / update / delete /
+    workspace     manage workspaces (list / get / create / update / delete /
                   member)
     epic          manage epics (list / get / create / update / delete)
     label         manage labels (list / create / update / delete)

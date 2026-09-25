@@ -128,12 +128,18 @@ MCP_TO_CLI: dict[str, tuple[str, ...]] = {
     "get_board": ("board", "get"),        # KAN-502
     "update_board": ("board", "update"),  # KAN-502 — was MCP-only
     "delete_board": ("board", "delete"),  # KAN-502 — was MCP-only
-    # teams (M9 V69, KAN-1058 — the 5-tool group ADR 0019 was amended to admit)
-    "list_teams": ("team", "list"),
-    "create_team": ("team", "create"),
-    "get_team": ("team", "get"),
-    "update_team": ("team", "update"),
-    "delete_team": ("team", "delete"),
+    # workspaces (M9 V69, KAN-1058 — the 5-tool group ADR 0019 was amended to admit).
+    # The MCP tool names on the left are still "team"-spelled on purpose: KAN-1722
+    # (this CLI rename) lands before KAN-1723 (the MCP tool rename), so the real
+    # tools in mcp/pandan_mcp/server.py are still list_team/create_team/etc at this
+    # point in the branch sequence — only the CLI-side verb (the tuple) is renamed
+    # here. KAN-1723 flips these keys to list_workspace/etc in the same PR that
+    # renames the tools themselves.
+    "list_teams": ("workspace", "list"),
+    "create_team": ("workspace", "create"),
+    "get_team": ("workspace", "get"),
+    "update_team": ("workspace", "update"),
+    "delete_team": ("workspace", "delete"),
     # cards
     "list_cards": ("list",),
     "get_card": ("get",),
@@ -269,22 +275,24 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
         "and untouched. Re-opening this is an ADR 0019 amendment, not an edit "
         "here."
     ),
-    ("team", "member", "add"): (
-        "reason 2 (M9 V69, KAN-1058): `POST /teams/{id}/members` IS a board API "
+    ("workspace", "member", "add"): (
+        "reason 2 (M9 V69, KAN-1058): `POST /workspaces/{id}/members` IS a board API "
         "call, so this is a declined tool and not a missing one. ADR 0019 freezes "
-        "the MCP surface (amended to 54 in the same PR that added the 5 `team` "
+        "the MCP surface (amended to 54 in the same PR that added the 5 `workspace` "
         "entity tools above) and mirrors the existing precedent that "
         "`board_member` management has NO MCP presence at all despite a complete, "
         "tested REST + CLI surface — membership management is a human/CLI "
         "ergonomics affordance an agent's normal workflow does not need. "
         "Re-opening this is a further ADR 0019 amendment, not an edit here."
     ),
-    ("team", "member", "rm"): "reason 2 (M9 V69, KAN-1058) — see (\"team\", \"member\", \"add\")",
-    ("team", "member", "update-role"): (
-        "reason 2 (M9 V69, KAN-1058) — see (\"team\", \"member\", \"add\")"
+    ("workspace", "member", "rm"): (
+        "reason 2 (M9 V69, KAN-1058) — see (\"workspace\", \"member\", \"add\")"
     ),
-    ("team", "member", "list"): (
-        "reason 2 (M9 V69, KAN-1058) — see (\"team\", \"member\", \"add\")"
+    ("workspace", "member", "update-role"): (
+        "reason 2 (M9 V69, KAN-1058) — see (\"workspace\", \"member\", \"add\")"
+    ),
+    ("workspace", "member", "list"): (
+        "reason 2 (M9 V69, KAN-1058) — see (\"workspace\", \"member\", \"add\")"
     ),
     ("pi", "create"): (
         "reason 2 (M8 V57, KAN-978): `POST /boards/{b}/planning-intervals` IS a "

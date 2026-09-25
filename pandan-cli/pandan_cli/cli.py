@@ -680,9 +680,9 @@ def _humanize(
             if rows
             else "(no comments)"
         )
-    if envelope == "teams":  # list_teams
-        return "\n".join(_team_line(t) for t in rows) if rows else "(no teams)"
-    if envelope == "members":  # list_team_members
+    if envelope == "workspaces":  # list_workspaces
+        return "\n".join(_workspace_line(t) for t in rows) if rows else "(no workspaces)"
+    if envelope == "members":  # list_workspace_members
         return "\n".join(_member_line(m) for m in rows) if rows else "(no members)"
     # list_dependencies returns {"card_id", "blocked_by", "blocks"} — ``card_id``
     # is distinctive (a card carries ``id``, not ``card_id``).
@@ -706,12 +706,12 @@ def _humanize(
     # below key off `name`/`ticket_number`, neither of which a principal has, so it
     # would otherwise fall through to the `json.dumps` catch-all (the KAN-287/478/519
     # family).
-    # A single team member (add/update-role) carries `team_id` + `user_id`
+    # A single workspace member (add/update-role) carries `workspace_id` + `user_id`
     # (distinctive) AND `email` + `id` — so this MUST be matched before the `me`
     # check just below, which would otherwise claim it first and silently drop
-    # the team_id/role columns (KAN-287/478/519-family trap, caught here rather
+    # the workspace_id/role columns (KAN-287/478/519-family trap, caught here rather
     # than by an audit).
-    if isinstance(result, dict) and "team_id" in result and "user_id" in result:
+    if isinstance(result, dict) and "workspace_id" in result and "user_id" in result:
         return _member_line(result)
     if isinstance(result, dict) and "email" in result and "id" in result:
         return _me_line(result)
@@ -759,9 +759,9 @@ def _humanize(
     # generic name-without-title branch below, which would print it as a board line.
     if isinstance(result, dict) and "name" in result and isinstance(result.get("cards"), list):
         return _template_line(result)
-    # A single team carries ``name`` (no ``title``) like a board or epic does, but
+    # A single workspace carries ``name`` (no ``title``) like a board or epic does, but
     # never an ``owner_id`` key at all — a board always carries one (even ``null``
-    # for an unclaimed board), while a team has no owner (ADR 0021 §Shape: it is
+    # for an unclaimed board), while a workspace has no owner (ADR 0021 §Shape: it is
     # administered by whichever member holds the ``owner`` role, not by one
     # principal). ``owner_id``'s mere *presence* is the signal, not its value, so
     # this holds even for an unclaimed board. Also excludes ``ticket_number``
@@ -774,7 +774,7 @@ def _humanize(
         and "owner_id" not in result
         and "ticket_number" not in result
     ):
-        return _team_line(result)
+        return _workspace_line(result)
     # A single entity: epics/boards carry ``name`` (no ``title``); cards carry
     # ``title``. Epics additionally have a ``ticket_number`` (``EPIC-…``).
     if isinstance(result, dict) and "name" in result and "title" not in result:
@@ -949,21 +949,21 @@ def _board_line(board: dict[str, Any]) -> str:
     return "\t".join((str(board.get("id", "?")), _flatten(str(board.get("name", "")))))
 
 
-def _team_line(team: dict[str, Any]) -> str:
-    """One concise line for a team: id, name, role (tab-separated). ``role`` is the
-    caller's own role on the team (owner/editor/viewer) — never absent for a team
+def _workspace_line(workspace: dict[str, Any]) -> str:
+    """One concise line for a workspace: id, name, role (tab-separated). ``role`` is the
+    caller's own role on the workspace (owner/editor/viewer) — never absent for a workspace
     the caller can reach, since visibility IS membership (ADR 0021)."""
     return "\t".join(
         (
-            str(team.get("id", "?")),
-            _flatten(str(team.get("name", ""))),
-            str(team.get("role") or "-"),
+            str(workspace.get("id", "?")),
+            _flatten(str(workspace.get("name", ""))),
+            str(workspace.get("role") or "-"),
         )
     )
 
 
 def _member_line(member: dict[str, Any]) -> str:
-    """One concise line for a team member: id, email, role (tab-separated)."""
+    """One concise line for a workspace member: id, email, role (tab-separated)."""
     return "\t".join(
         (
             str(member.get("id", "?")),
@@ -1349,7 +1349,7 @@ _LIST_ENVELOPES = (
     "notifications",
     "activity",
     "comments",
-    "teams",
+    "workspaces",
     "members",
 )
 
@@ -1380,7 +1380,7 @@ _ROW_NOUN = {
     "notifications": "notification",
     "activity": "activity",
     "comments": "comment",
-    "teams": "team",
+    "workspaces": "workspace",
     "members": "member",
 }
 
@@ -1530,7 +1530,7 @@ _SUMMARY_NOUN: dict[str, tuple[str, str]] = {
     # "activity" is already a mass noun — "50 activitys" is not a sentence.
     "activity": ("activity row", "activity rows"),
     "comments": ("comment", "comments"),
-    "teams": ("team", "teams"),
+    "workspaces": ("workspace", "workspaces"),
     "members": ("member", "members"),
 }
 
@@ -2517,10 +2517,10 @@ def _cmd_board_list(client: PandanClient, config: Config, args: argparse.Namespa
 def _cmd_board_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     # --key is optional and usually omitted: the server derives one from the name and
     # suffixes on collision, so a create never fails on naming (V51, KAN-972).
-    # --team (M9 V67, KAN-1056) is a plain numeric team id — a team has no `key`/ref
+    # --workspace (M9 V67, KAN-1056) is a plain numeric workspace id — a workspace has no `key`/ref
     # namespace of its own (ADR 0021 §Consequences), so unlike --board there is no
-    # richer form to resolve; `pandan team list` is how you find the id.
-    return client.create_board(args.name, key=args.key, team_id=args.team)
+    # richer form to resolve; `pandan workspace list` is how you find the id.
+    return client.create_board(args.name, key=args.key, workspace_id=args.workspace)
 
 
 def _cmd_board_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -2537,8 +2537,8 @@ def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Names
     ``ENG-14``. Renaming it is safe: nothing about a card is stored per key, and the
     canonical ``KAN-…`` ticket is untouched forever (SHAPING D1).
 
-    ``--team`` (M9 V67, KAN-1056) links the board to a team you belong to (403
-    otherwise) — a plain numeric team id, since a team has no ``key``/ref namespace
+    ``--workspace`` (M9 V67, KAN-1056) links the board to a workspace you belong to (403
+    otherwise) — a plain numeric workspace id, since a workspace has no ``key``/ref namespace
     of its own; there is no way to *clear* the link from this verb (mirroring
     ``--key``'s own un-clearability and the webhook fields' stdin-only secret
     path — some ``BoardUpdate`` fields the CLI can only set, never null; the raw
@@ -2566,11 +2566,11 @@ def _cmd_board_update(client: PandanClient, config: Config, args: argparse.Names
         "outbound_webhook_url": args.outbound_webhook_url,
         "outbound_webhook_secret": secret,
         "outbound_webhook_enabled": args.outbound_webhook_enabled,
-        "team_id": args.team,
+        "workspace_id": args.workspace,
     }
     if all(value is None for value in fields.values()):
         raise CliError(
-            "nothing to update (pass --name / --key / --team / "
+            "nothing to update (pass --name / --key / --workspace / "
             "--autosync-enabled|-disabled / "
             "--autosync-advance-to-done|--no-autosync-advance-to-done / "
             "--outbound-webhook-url / --outbound-webhook-secret[-stdin] / "
@@ -2610,61 +2610,65 @@ def _cmd_board_delete(client: PandanClient, config: Config, args: argparse.Names
     return client.delete_board(args.board_id)
 
 
-# --- team handlers (M9 V69, KAN-1058) ----------------------------------------
+# --- workspace handlers (M9 V69, KAN-1058) ----------------------------------------
 # Full entity CRUD, mirroring the board handlers above 1:1, plus member
 # management the MCP surface deliberately declines (ADR 0019 amendment) — "new
-# capability goes in the CLI" (ADR 0019), and a team's membership is the one
+# capability goes in the CLI" (ADR 0019), and a workspace's membership is the one
 # thing this milestone's other slices made meaningful to manage.
 
 
-def _cmd_team_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.list_teams()
+def _cmd_workspace_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.list_workspaces()
 
 
-def _cmd_team_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.create_team(args.name)
+def _cmd_workspace_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.create_workspace(args.name)
 
 
-def _cmd_team_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.get_team(args.team_id)
+def _cmd_workspace_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.get_workspace(args.workspace_id)
 
 
-def _cmd_team_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_workspace_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if args.name is None:
         raise CliError("nothing to update (pass --name)", code="invalid_input")
-    return client.update_team(args.team_id, name=args.name)
+    return client.update_workspace(args.workspace_id, name=args.name)
 
 
-def _cmd_team_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_workspace_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     if not args.yes:
         raise CliError(
-            f"refusing to delete team {args.team_id} without confirmation; pass --yes",
+            f"refusing to delete workspace {args.workspace_id} without confirmation; pass --yes",
             code="confirmation_required",
             arg="--yes",
         )
-    return client.delete_team(args.team_id)
+    return client.delete_workspace(args.workspace_id)
 
 
-def _cmd_team_member_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.list_team_members(args.team_id)
+def _cmd_workspace_member_list(
+    client: PandanClient, config: Config, args: argparse.Namespace
+) -> Any:
+    return client.list_workspace_members(args.workspace_id)
 
 
-def _cmd_team_member_add(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+def _cmd_workspace_member_add(
+    client: PandanClient, config: Config, args: argparse.Namespace
+) -> Any:
     # --user-id / --email are a required mutually-exclusive pair (argparse), so
     # exactly one is always set here — no re-check needed.
-    return client.add_team_member(
-        args.team_id, user_id=args.user_id, email=args.email, role=args.role
+    return client.add_workspace_member(
+        args.workspace_id, user_id=args.user_id, email=args.email, role=args.role
     )
 
 
-def _cmd_team_member_update_role(
+def _cmd_workspace_member_update_role(
     client: PandanClient, config: Config, args: argparse.Namespace
 ) -> Any:
-    return client.update_team_member(args.team_id, args.member_id, role=args.role)
+    return client.update_workspace_member(args.workspace_id, args.member_id, role=args.role)
 
 
-def _cmd_team_member_rm(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.remove_team_member(args.team_id, args.member_id)
+def _cmd_workspace_member_rm(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.remove_workspace_member(args.workspace_id, args.member_id)
 
 
 # --- epic handlers ----------------------------------------------------------
@@ -3864,10 +3868,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_board_create.add_argument(
-        "--team",
+        "--workspace",
         type=int,
-        metavar="TEAM_ID",
-        help="link the new board to a team you belong to (M9 V67); see `pandan team list`",
+        metavar="WORKSPACE_ID",
+        help=(
+            "link the new board to a workspace you belong to (M9 V67); "
+            "see `pandan workspace list`"
+        ),
     )
     p_board_create.set_defaults(
         func=_cmd_board_create, noun="board", hints=_HINTS["board create"]
@@ -3884,11 +3891,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--key", help="change the board-local ref prefix, e.g. ENG (V51)"
     )
     p_board_update.add_argument(
-        "--team",
+        "--workspace",
         type=int,
-        metavar="TEAM_ID",
+        metavar="WORKSPACE_ID",
         help=(
-            "link the board to a team you belong to (M9 V67); see `pandan team "
+            "link the board to a workspace you belong to (M9 V67); see `pandan workspace "
             "list`. Sets the link only — there is no flag to clear it"
         ),
     )
@@ -3979,101 +3986,120 @@ def build_parser() -> argparse.ArgumentParser:
     p_board_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     p_board_delete.set_defaults(func=_cmd_board_delete, noun="board")
 
-    # --- team subcommands (M9 V69, KAN-1058; parity with /api/v1/teams) ------
+    # --- workspace subcommands (M9 V69, KAN-1058; parity with /api/v1/workspaces) ------
     # Entity CRUD (list/get/create/update/delete) mirrors `board` above 1:1 and has
-    # an MCP twin for each. `team member` (add/rm/list/update-role) does NOT — it
+    # an MCP twin for each. `workspace member` (add/rm/list/update-role) does NOT — it
     # is deliberately CLI-only (ADR 0019 amendment; see pandan-cli/tests/
     # test_parity.py's CLI_ONLY dict), the same way board membership has never had
     # one either.
-    p_team = sub.add_parser(
-        "team", help="manage teams (list / get / create / update / delete / member)"
+    p_workspace = sub.add_parser(
+        "workspace",
+        help="manage workspaces (list / get / create / update / delete / member)",
     )
-    team_sub = p_team.add_subparsers(dest="team_command", metavar="<subcommand>", required=True)
-
-    p_team_list = team_sub.add_parser("list", parents=[common], help="list your teams")
-    _add_fields_arg(p_team_list, "id,name,role")
-    p_team_list.set_defaults(func=_cmd_team_list, noun="team")
-
-    p_team_get = team_sub.add_parser(
-        "get", parents=[common], help="get a single team by id"
+    workspace_sub = p_workspace.add_subparsers(
+        dest="workspace_command", metavar="<subcommand>", required=True
     )
-    p_team_get.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
-    p_team_get.set_defaults(func=_cmd_team_get, noun="team")
 
-    p_team_create = team_sub.add_parser("create", parents=[common], help="create a team")
-    p_team_create.add_argument("name")
-    p_team_create.set_defaults(func=_cmd_team_create, noun="team")
-
-    p_team_update = team_sub.add_parser(
-        "update", parents=[common], help="rename a team"
+    p_workspace_list = workspace_sub.add_parser(
+        "list", parents=[common], help="list your workspaces"
     )
-    p_team_update.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
-    p_team_update.add_argument("--name", help="rename the team")
-    p_team_update.set_defaults(func=_cmd_team_update, noun="team")
+    _add_fields_arg(p_workspace_list, "id,name,role")
+    p_workspace_list.set_defaults(func=_cmd_workspace_list, noun="workspace")
 
-    p_team_delete = team_sub.add_parser(
+    p_workspace_get = workspace_sub.add_parser(
+        "get", parents=[common], help="get a single workspace by id"
+    )
+    p_workspace_get.add_argument(
+        "workspace_id", type=int, metavar="WORKSPACE", help="a workspace id"
+    )
+    p_workspace_get.set_defaults(func=_cmd_workspace_get, noun="workspace")
+
+    p_workspace_create = workspace_sub.add_parser(
+        "create", parents=[common], help="create a workspace"
+    )
+    p_workspace_create.add_argument("name")
+    p_workspace_create.set_defaults(func=_cmd_workspace_create, noun="workspace")
+
+    p_workspace_update = workspace_sub.add_parser(
+        "update", parents=[common], help="rename a workspace"
+    )
+    p_workspace_update.add_argument(
+        "workspace_id", type=int, metavar="WORKSPACE", help="a workspace id"
+    )
+    p_workspace_update.add_argument("--name", help="rename the workspace")
+    p_workspace_update.set_defaults(func=_cmd_workspace_update, noun="workspace")
+
+    p_workspace_delete = workspace_sub.add_parser(
         "delete",
         parents=[common],
-        help="delete a team (boards linked to it are unclaimed, not deleted)",
+        help="delete a workspace (boards linked to it are unclaimed, not deleted)",
     )
-    p_team_delete.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
-    p_team_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
-    p_team_delete.set_defaults(func=_cmd_team_delete, noun="team")
+    p_workspace_delete.add_argument(
+        "workspace_id", type=int, metavar="WORKSPACE", help="a workspace id"
+    )
+    p_workspace_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
+    p_workspace_delete.set_defaults(func=_cmd_workspace_delete, noun="workspace")
 
-    # --- team member subcommands (owner-role gated; no MCP twin) -------------
-    p_team_member = team_sub.add_parser(
-        "member", help="manage team membership (add / rm / list / update-role)"
+    # --- workspace member subcommands (owner-role gated; no MCP twin) -------------
+    p_workspace_member = workspace_sub.add_parser(
+        "member", help="manage workspace membership (add / rm / list / update-role)"
     )
-    team_member_sub = p_team_member.add_subparsers(
-        dest="team_member_command", metavar="<subcommand>", required=True
+    workspace_member_sub = p_workspace_member.add_subparsers(
+        dest="workspace_member_command", metavar="<subcommand>", required=True
     )
 
-    p_team_member_list = team_member_sub.add_parser(
-        "list", parents=[common], help="list a team's members"
+    p_workspace_member_list = workspace_member_sub.add_parser(
+        "list", parents=[common], help="list a workspace's members"
     )
-    p_team_member_list.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
-    _add_fields_arg(p_team_member_list, "id,email,role")
-    p_team_member_list.set_defaults(func=_cmd_team_member_list, noun="member")
+    p_workspace_member_list.add_argument(
+        "workspace_id", type=int, metavar="WORKSPACE", help="a workspace id"
+    )
+    _add_fields_arg(p_workspace_member_list, "id,email,role")
+    p_workspace_member_list.set_defaults(func=_cmd_workspace_member_list, noun="member")
 
-    p_team_member_add = team_member_sub.add_parser(
+    p_workspace_member_add = workspace_member_sub.add_parser(
         "add", parents=[common], help="add a member by user id or email"
     )
-    p_team_member_add.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
-    identity_group = p_team_member_add.add_mutually_exclusive_group(required=True)
+    p_workspace_member_add.add_argument(
+        "workspace_id", type=int, metavar="WORKSPACE", help="a workspace id"
+    )
+    identity_group = p_workspace_member_add.add_mutually_exclusive_group(required=True)
     identity_group.add_argument("--user-id", dest="user_id", help="the user's id (UUID)")
     identity_group.add_argument("--email", help="the user's email")
-    p_team_member_add.add_argument(
+    p_workspace_member_add.add_argument(
         "--role",
         choices=("viewer", "editor", "owner"),
         default="viewer",
         help="the member's role (default: viewer)",
     )
-    p_team_member_add.set_defaults(func=_cmd_team_member_add, noun="member")
+    p_workspace_member_add.set_defaults(func=_cmd_workspace_member_add, noun="member")
 
-    p_team_member_update_role = team_member_sub.add_parser(
+    p_workspace_member_update_role = workspace_member_sub.add_parser(
         "update-role", parents=[common], help="change a member's role"
     )
-    p_team_member_update_role.add_argument(
-        "team_id", type=int, metavar="TEAM", help="a team id"
+    p_workspace_member_update_role.add_argument(
+        "workspace_id", type=int, metavar="WORKSPACE", help="a workspace id"
     )
-    p_team_member_update_role.add_argument(
-        "member_id", type=int, metavar="MEMBER", help="the team_member row id"
+    p_workspace_member_update_role.add_argument(
+        "member_id", type=int, metavar="MEMBER", help="the workspace_member row id"
     )
-    p_team_member_update_role.add_argument(
+    p_workspace_member_update_role.add_argument(
         "--role", choices=("viewer", "editor", "owner"), required=True
     )
-    p_team_member_update_role.set_defaults(
-        func=_cmd_team_member_update_role, noun="member"
+    p_workspace_member_update_role.set_defaults(
+        func=_cmd_workspace_member_update_role, noun="member"
     )
 
-    p_team_member_rm = team_member_sub.add_parser(
+    p_workspace_member_rm = workspace_member_sub.add_parser(
         "rm", parents=[common], help="remove a member"
     )
-    p_team_member_rm.add_argument("team_id", type=int, metavar="TEAM", help="a team id")
-    p_team_member_rm.add_argument(
-        "member_id", type=int, metavar="MEMBER", help="the team_member row id"
+    p_workspace_member_rm.add_argument(
+        "workspace_id", type=int, metavar="WORKSPACE", help="a workspace id"
     )
-    p_team_member_rm.set_defaults(func=_cmd_team_member_rm, noun="member")
+    p_workspace_member_rm.add_argument(
+        "member_id", type=int, metavar="MEMBER", help="the workspace_member row id"
+    )
+    p_workspace_member_rm.set_defaults(func=_cmd_workspace_member_rm, noun="member")
 
     # --- epic subcommands (nested group; parity with /api/v1/epics) ----------
     p_epic = sub.add_parser(

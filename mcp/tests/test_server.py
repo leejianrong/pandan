@@ -552,10 +552,12 @@ def test_update_board_rename_carries_no_autosync_opinion(monkeypatch):
 
 
 def test_create_board_sends_team_id_when_given(monkeypatch):
-    """V67's team_id argument, wired through to the wire (V69)."""
+    """V67's team_id argument, wired through to the wire (V69) as workspace_id
+    (KAN-1721/1722 renamed the backend field + pandan_client kwarg; this tool's
+    own argument name stays team_id until KAN-1723)."""
     seen = _capture_client(monkeypatch, httpx.Response(201, json=_BOARD_READ))
     server.create_board("Roadmap", team_id=9)
-    assert json.loads(seen["content"]) == {"name": "Roadmap", "team_id": 9}
+    assert json.loads(seen["content"]) == {"name": "Roadmap", "workspace_id": 9}
 
 
 def test_create_board_omits_team_id_when_not_given(monkeypatch):
@@ -567,7 +569,7 @@ def test_create_board_omits_team_id_when_not_given(monkeypatch):
 def test_update_board_sends_team_id_when_given(monkeypatch):
     seen = _capture_client(monkeypatch, httpx.Response(200, json=_BOARD_READ))
     server.update_board(5, team_id=9)
-    assert json.loads(seen["content"]) == {"team_id": 9}
+    assert json.loads(seen["content"]) == {"workspace_id": 9}
 
 
 # --- teams (M9 V69, KAN-1058; ADR 0021, ADR 0019 amendment) -----------------
@@ -579,7 +581,7 @@ def test_list_teams_reads_teams(monkeypatch):
     )
     server.list_teams()
     assert seen["method"] == "GET"
-    assert seen["path"] == "/api/v1/teams"
+    assert seen["path"] == "/api/v1/workspaces"
 
 
 def test_create_team_posts_name(monkeypatch):
@@ -588,7 +590,7 @@ def test_create_team_posts_name(monkeypatch):
     )
     server.create_team("Platform")
     assert seen["method"] == "POST"
-    assert seen["path"] == "/api/v1/teams"
+    assert seen["path"] == "/api/v1/workspaces"
     assert json.loads(seen["content"]) == {"name": "Platform"}
 
 
@@ -598,7 +600,7 @@ def test_get_team_hits_the_id_path(monkeypatch):
     )
     server.get_team(4)
     assert seen["method"] == "GET"
-    assert seen["path"] == "/api/v1/teams/4"
+    assert seen["path"] == "/api/v1/workspaces/4"
 
 
 def test_update_team_patches_name(monkeypatch):
@@ -607,7 +609,7 @@ def test_update_team_patches_name(monkeypatch):
     )
     server.update_team(4, name="Renamed")
     assert seen["method"] == "PATCH"
-    assert seen["path"] == "/api/v1/teams/4"
+    assert seen["path"] == "/api/v1/workspaces/4"
     assert json.loads(seen["content"]) == {"name": "Renamed"}
 
 
@@ -615,7 +617,7 @@ def test_delete_team_sends_delete(monkeypatch):
     seen = _capture_client(monkeypatch, httpx.Response(204))
     result = server.delete_team(4)
     assert seen["method"] == "DELETE"
-    assert seen["path"] == "/api/v1/teams/4"
+    assert seen["path"] == "/api/v1/workspaces/4"
     assert result == {"deleted": 4}
 
 
