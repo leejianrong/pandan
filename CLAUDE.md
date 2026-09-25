@@ -89,19 +89,30 @@ cross-board addressing mode), and **board keys are unique per owner**, which is 
 board-local ref resolves only within a known board. Read
 [docs/milestone-8/SHAPING.md](docs/milestone-8/SHAPING.md) D1–D3 before touching identity.
 
-**Milestone 9** ("Teams", [docs/milestone-9/](docs/milestone-9/SLICES.md)) is **planned, not started** —
-V65–V70, one epic (EPIC-138), tracing to [issue #322](https://github.com/leejianrong/pandan/issues/322)
-and [ADR 0021](docs/adr/0021-organization-team-tier.md). Unlike every prior milestone, the design
+**Milestone 9** (originally "Teams", [docs/milestone-9/](docs/milestone-9/SLICES.md)) **has fully
+shipped** — V65–V70, one epic (EPIC-138), tracing to
+[issue #322](https://github.com/leejianrong/pandan/issues/322) and
+[ADR 0021](docs/adr/0021-organization-workspace-tier.md). Unlike every prior milestone, the design
 question was answered by a standalone ADR *before* this milestone's shaping pass existed, so
-`docs/milestone-9/SHAPING.md` mostly points at the ADR rather than re-deriving it. Runs independently of
-M8 (different schema surface, no shared code path) rather than waiting for M8 to finish. V65 is schema
-(`team`/`team_member` tables, a nullable `board.team_id`) and lands alone; V66–V68 are a strict
-membership → board-linking → authorization chain; V69 (CLI/MCP) and V70 (a Teams SPA view, which can
-slip to a later pass) both depend only on V68 and can ship in either order. **V65–V69 have shipped**:
-V69 (KAN-1058) added `pandan team` CLI verbs (list/get/create/update/delete + a CLI-only
-`member add/rm/list/update-role`, mirroring `board_member`'s own long-standing MCP absence) and grew
-the MCP surface by 5 tools (49 → 54, an ADR 0019 amendment — see below); only V70 (the Teams SPA view)
-remains.
+`docs/milestone-9/SHAPING.md` mostly points at the ADR rather than re-deriving it. Ran independently of
+M8 (different schema surface, no shared code path) rather than waiting for M8 to finish. V65 was schema
+(`team`/`team_member` tables, a nullable `board.team_id`, since renamed — see below) and landed alone;
+V66–V68 were a strict membership → board-linking → authorization chain; V69 (CLI/MCP) and V70 (the SPA
+view) both depended only on V68. V69 (KAN-1058) added `pandan team` CLI verbs (list/get/create/update/
+delete + a CLI-only `member add/rm/list/update-role`, mirroring `board_member`'s own long-standing MCP
+absence) and grew the MCP surface by 5 tools (49 → 54, an ADR 0019 amendment — see below); V70
+(KAN-1059) shipped the Teams SPA view (a Teams screen + a Team picker on board settings).
+**The whole tier was then renamed Team → Workspace** (ADR 0023, 2026-09-25, a same-session follow-up
+that predates any external client scripting against the "Team" names): schema
+(`team`/`team_member` → `workspace`/`workspace_member`, `board.team_id` → `board.workspace_id`,
+KAN-1721), the SPA view (`Teams.svelte` etc. → `Workspaces.svelte` etc., folded into the same PR as
+KAN-1721 to avoid deploying a backend that 404s the still-"Teams"-named live SPA — KAN-1725), and the
+CLI (`pandan team` → `pandan workspace`, KAN-1722) have shipped; the MCP tool rename
+(`list_team`/`create_team`/etc. → `list_workspace`/`create_workspace`/etc., a further ADR 0019
+amendment) is KAN-1723. `docs/milestone-9/SLICES.md`/`SHAPING.md` keep the original `team`/`Team`
+spelling as the historical record of what was actually built and filed under that name (ADR 0018's
+"ticket/planning history isn't rewritten for a rename" convention); ADR 0021 itself is the one
+exception, retitled/updated in place per ADR 0023's own instruction.
 
 The MCP surface was right-sized in V49 at **49 tools**: measured at 8,775 `o200k_base` tokens of resident
 schema per session, shipped at **7,388** (compact; 10,307 pretty-printed) after
@@ -119,10 +130,14 @@ twice more even before the count itself moved: on 2026-08-25 `main` measured **8
 while `main` measured 8,266. **The count itself then moved for the first time** (M9 V69, KAN-1058):
 **49 → 54 tools**, a `team` CRUD group (`list_teams`/`create_team`/`get_team`/`update_team`/
 `delete_team`, mirroring `board`'s own 5-tool shape) — an ADR 0019 *amendment*, not an argument addition,
-per [the amendment note](docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m9-team-tools-2026-09-01-kan-1058).
+per [the amendment note](docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m9-team-tools-2026-09-01-kan-1058)
+(named `team` there because that predates ADR 0023's 2026-09-25 Team → Workspace rename; KAN-1723
+renames these 5 tools to `list_workspace`/etc. as a further ADR 0019 amendment — see the M9 paragraph
+above).
 Team *membership* management (`add`/`remove`/list a member, change a role) deliberately got **no** MCP
 tool — mirroring `board_member`'s own long-standing absence from this surface — and lives CLI-only as
-`pandan team member add/rm/list/update-role`. Measured immediately before/after on the same commit
+`pandan workspace member add/rm/list/update-role` (renamed from `pandan team member ...` by KAN-1722).
+Measured immediately before/after on the same commit
 (tighter than comparing against a drifted headline): **8,951 → 9,505** compact (+554, +6.2%),
 `outputSchema` alone **836 → 922**. **The count moved again** (M8 V57, KAN-978): **54 → 56 tools**, a
 2-tool read pair (`list_planning_intervals`/`planning_interval_metrics`) for the grouping-above-the-cycle
@@ -150,7 +165,7 @@ Both measurements are re-runnable —
 `mcp/scripts/measure_tool_schema_tokens.py` for the resident schema,
 `mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The surface (57 tools as of M8
 V59) is pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit**
-(adding an *argument*, as KAN-501 and V67's `team_id` did, is not). **Per-slice status goes stale here
+(adding an *argument*, as KAN-501 and V67's `workspace_id` (originally `team_id`) did, is not). **Per-slice status goes stale here
 faster than anywhere else in this file; read [docs/milestone-8/SLICES.md](docs/milestone-8/SLICES.md)/
 [docs/milestone-9/SLICES.md](docs/milestone-9/SLICES.md) and the board, not this paragraph.**
 
@@ -807,10 +822,12 @@ intended behavior:
   (which is what lets a ref split on its first one); derived at create so creation never blocks on
   naming, and editable because nothing about a card is stored per key (0020, M8 V51). Newest are two
   design-only ADRs from a 2026-09-01 cross-repo planning batch kaya opened against this repo (issues
-  #322–#324): **team as the tenant tier above a user** — no separate `organization` entity yet, since
-  the target self-hosted-one-company-per-instance scope means one would always number exactly one; a
-  team role (reusing the existing viewer/editor/owner vocabulary) grants a *default* board access that
-  an explicit per-board `BoardMember` row still overrides, and PATs/`GET /api/v1/me` are unaffected
+  #322–#324): **workspace as the tenant tier above a user** (named `team` at the time this ADR was
+  written and while M9 built it; renamed by ADR 0023, 2026-09-25 — see the M9 paragraph above) — no
+  separate `organization` entity yet, since the target self-hosted-one-company-per-instance scope means
+  one would always number exactly one; a workspace role (reusing the existing viewer/editor/owner
+  vocabulary) grants a *default* board access that an explicit per-board `BoardMember` row still
+  overrides, and PATs/`GET /api/v1/me` are unaffected
   (0021, implementation shaped as **Milestone 9**, [docs/milestone-9/](docs/milestone-9/SLICES.md));
   and **the `/api/v1` stability policy** — formalizes an assertion already in the published guide (a
   breaking change goes to `/api/v2`, never rewriting `v1` underneath existing clients) into a

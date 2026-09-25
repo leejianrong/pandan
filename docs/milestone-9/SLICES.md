@@ -4,7 +4,7 @@ shaping: true
 
 # Milestone 9 — Slices ("Teams")
 
-Vertical increments of the [M9 shape](SHAPING.md), turning [ADR 0021](../adr/0021-organization-team-tier.md)
+Vertical increments of the [M9 shape](SHAPING.md), turning [ADR 0021](../adr/0021-organization-workspace-tier.md)
 into a working `/api/v1/teams`. Each ends in **observable behaviour** and ships as its own PR behind CI,
 matching the M1–M8 cadence.
 
@@ -48,7 +48,7 @@ did (+215 tokens for `board.key`), rather than treating "it's additive" as a fre
 
 ## What each slice does not do
 
-Carried over from [ADR 0021 §Alternatives rejected / §Open](../adr/0021-organization-team-tier.md) and
+Carried over from [ADR 0021 §Alternatives rejected / §Open](../adr/0021-organization-workspace-tier.md) and
 [SHAPING's Out of scope](SHAPING.md#out-of-scope-for-m9) — none of these are quietly reopened by a slice
 above:
 

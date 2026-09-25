@@ -503,7 +503,7 @@ library's internals, so it is pinned by a test rather than trusted.
 
 **The freeze's first actual growth.** Every prior slice that touched the surface (KAN-501, KAN-517,
 V51's `key` argument) added *arguments* to existing tools — the freeze's own text says that "is not"
-an amendment. Milestone 9 ("Teams", [ADR 0021](0021-organization-team-tier.md)) is the first to ask for
+an amendment. Milestone 9 ("Teams", [ADR 0021](0021-organization-workspace-tier.md)) is the first to ask for
 new *tools*, because a team is a new addressable entity (`/api/v1/teams`), not a new field on one that
 already has a tool.
 

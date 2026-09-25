@@ -7,7 +7,7 @@ shaping: true
 Traces to [EPIC-125](https://simple-kanban-jian.fly.dev) and
 [issue #322](https://github.com/leejianrong/pandan/issues/322). Unlike M2–M8, the design work here was
 already done as a standalone ADR before this shaping pass existed — kaya's 2026-09-01 roadmap session
-filed the issue as an ADR-level question ("before any code"), and [ADR 0021](../adr/0021-organization-team-tier.md)
+filed the issue as an ADR-level question ("before any code"), and [ADR 0021](../adr/0021-organization-workspace-tier.md)
 answered it. **This document does not re-derive that design; it translates an already-accepted decision
 into requirements and slices.** Where M8's SHAPING.md spends most of its length on *why*, this one
 mostly points at the ADR and spends its length on *order*.
@@ -73,7 +73,7 @@ but the membership CRUD in V65–V66 is itself demoable — unlike M8's ref-rend
 
 ## Out of scope for M9
 
-Named explicitly in [ADR 0021 §Alternatives rejected / §Open](../adr/0021-organization-team-tier.md) and
+Named explicitly in [ADR 0021 §Alternatives rejected / §Open](../adr/0021-organization-workspace-tier.md) and
 not reopened here:
 
 - An `organization` tier above `team`.
