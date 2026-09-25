@@ -1,26 +1,26 @@
 <script lang="ts">
   import { Pencil, SquareKanban, Trash2, Users } from "lucide-svelte";
-  import type { Team, TeamMember } from "../api";
+  import type { Workspace, WorkspaceMember } from "../api";
   import { boardStore } from "../board.svelte";
-  import { removeTeam } from "../teams.svelte";
-  import TeamModal from "./TeamModal.svelte";
+  import { removeWorkspace } from "../workspaces.svelte";
+  import WorkspaceModal from "./WorkspaceModal.svelte";
 
   let {
-    team,
+    workspace,
     members,
     membersLoading,
-  }: { team: Team; members: TeamMember[] | null; membersLoading: boolean } = $props();
+  }: { workspace: Workspace; members: WorkspaceMember[] | null; membersLoading: boolean } = $props();
 
   let mode = $state<"view" | "confirmDelete">("view");
   let showModal = $state(false);
   let deleting = $state(false);
   let deleteError = $state<string | null>(null);
 
-  // Boards linked to this team (M9 V67, KAN-1056) — already loaded in boardStore
+  // Boards linked to this workspace (M9 V67, KAN-1056) — already loaded in boardStore
   // (the caller's own boards), so no extra fetch, unlike the member preview.
-  const boards = $derived(boardStore.boards.filter((b) => b.team_id === team.id));
+  const boards = $derived(boardStore.boards.filter((b) => b.workspace_id === workspace.id));
 
-  const isOwner = $derived(team.role === "owner");
+  const isOwner = $derived(workspace.role === "owner");
 
   function isInteractive(t: EventTarget | null): boolean {
     return t instanceof Element && !!t.closest("button, a");
@@ -41,9 +41,9 @@
     deleting = true;
     deleteError = null;
     try {
-      await removeTeam(team.id);
+      await removeWorkspace(workspace.id);
     } catch (e) {
-      deleteError = e instanceof Error ? e.message : "Failed to delete team";
+      deleteError = e instanceof Error ? e.message : "Failed to delete workspace";
       deleting = false;
     }
   }
@@ -52,7 +52,7 @@
 {#if mode === "confirmDelete"}
   <div class="card confirm">
     <p class="confirm-msg">
-      Delete <strong>{team.name}</strong>? Its {members?.length ?? 0}
+      Delete <strong>{workspace.name}</strong>? Its {members?.length ?? 0}
       {(members?.length ?? 0) === 1 ? "member" : "members"} lose access, and its
       {boards.length} {boards.length === 1 ? "board" : "boards"} become unclaimed
       (not deleted).
@@ -67,17 +67,17 @@
   </div>
 {:else}
   <div
-    class="card team-card"
+    class="card workspace-card"
     role="button"
     tabindex="0"
-    aria-label="Open team {team.name}"
+    aria-label="Open workspace {workspace.name}"
     onclick={openFromClick}
     onkeydown={onKeydown}
   >
     <div class="card-top">
-      <span class="team-name">{team.name}</span>
-      {#if team.role}
-        <span class="role-pill" title="Your role: {team.role}">{team.role}</span>
+      <span class="workspace-name">{workspace.name}</span>
+      {#if workspace.role}
+        <span class="role-pill" title="Your role: {workspace.role}">{workspace.role}</span>
       {/if}
       {#if isOwner}
         <div class="card-actions">
@@ -96,8 +96,8 @@
       {/if}
     </div>
 
-    <div class="team-section">
-      <span class="team-section-label"><Users size={13} /> Members</span>
+    <div class="workspace-section">
+      <span class="workspace-section-label"><Users size={13} /> Members</span>
       {#if membersLoading && members == null}
         <p class="hint">Loading…</p>
       {:else if members == null}
@@ -105,7 +105,7 @@
       {:else if members.length === 0}
         <p class="empty-inline">No members.</p>
       {:else}
-        <ul class="team-list">
+        <ul class="workspace-list">
           {#each members as member (member.id)}
             <li>
               <span class="member-email">{member.email ?? member.user_id}</span>
@@ -116,12 +116,12 @@
       {/if}
     </div>
 
-    <div class="team-section">
-      <span class="team-section-label"><SquareKanban size={13} /> Boards</span>
+    <div class="workspace-section">
+      <span class="workspace-section-label"><SquareKanban size={13} /> Boards</span>
       {#if boards.length === 0}
         <p class="empty-inline">No boards linked yet.</p>
       {:else}
-        <ul class="team-list">
+        <ul class="workspace-list">
           {#each boards as board (board.id)}
             <li>
               <span class="board-key">{board.key}</span>
@@ -135,27 +135,27 @@
 {/if}
 
 {#if showModal}
-  <TeamModal teamId={team.id} onclose={() => (showModal = false)} />
+  <WorkspaceModal workspaceId={workspace.id} onclose={() => (showModal = false)} />
 {/if}
 
 <style>
-  .card.team-card {
+  .card.workspace-card {
     padding: 1rem 1.1rem;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
     cursor: pointer;
   }
-  .card.team-card:hover {
+  .card.workspace-card:hover {
     transform: none;
   }
-  .team-card .card-top {
+  .workspace-card .card-top {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 0;
   }
-  .team-name {
+  .workspace-name {
     font-size: var(--type-title-medium-size);
     line-height: var(--type-title-medium-line-height);
     font-weight: 650;
@@ -175,17 +175,17 @@
     color: var(--agent);
     background: var(--agent-soft);
   }
-  .team-card .card-actions {
+  .workspace-card .card-actions {
     margin-left: auto;
     display: flex;
     gap: 0.25rem;
   }
-  .team-section {
+  .workspace-section {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
   }
-  .team-section-label {
+  .workspace-section-label {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
@@ -196,7 +196,7 @@
     letter-spacing: 0.05em;
     color: var(--muted);
   }
-  .team-list {
+  .workspace-list {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -204,7 +204,7 @@
     flex-direction: column;
     gap: 0.3rem;
   }
-  .team-list li {
+  .workspace-list li {
     display: flex;
     align-items: center;
     justify-content: space-between;

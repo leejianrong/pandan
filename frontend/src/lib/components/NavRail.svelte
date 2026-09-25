@@ -14,7 +14,7 @@
   // hit all 7 of NR-1's items during the drawer/rail coexistence window,
   // fixed in frontend/e2e/helpers.ts's openView() rather than here).
   //
-  // Still excludes Tokens/Teams (account-scoped, D2) and Inbox (already has
+  // Still excludes Tokens/Workspaces (account-scoped, D2) and Inbox (already has
   // the bell, D3/crease 4) — those never appear in the rail at any point.
   import {
     Activity,

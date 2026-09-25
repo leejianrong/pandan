@@ -90,7 +90,7 @@ export async function pickSelect(
 // (NR-1..NR-4, KAN-1148..KAN-1151). Originally opened the hamburger side-nav
 // drawer (KAN-319/U4) first; the drawer is gone since NR-4, and every caller
 // of this helper (Activity/Backlog/Dashboard/Epics/Labels/Trash) moved to the
-// rail with it — Tokens/Teams callers already switched to
+// rail with it — Tokens/Workspaces callers already switched to
 // openAccountMenuView() in NR-3, since those live in the avatar menu instead.
 //
 // Scoped to the rail (role "navigation", aria-label "Views") rather than
@@ -103,7 +103,7 @@ export async function openView(page: Page, name: string): Promise<void> {
     .click();
 }
 
-// Navigate to Tokens/Teams via the avatar account menu (NR-3, KAN-1150) —
+// Navigate to Tokens/Workspaces via the avatar account menu (NR-3, KAN-1150) —
 // they're account-scoped, so they moved out of the drawer/rail entirely and
 // live only here now.
 export async function openAccountMenuView(page: Page, name: string): Promise<void> {
@@ -230,24 +230,24 @@ export async function cleanupE2eBoards(
   }
 }
 
-// Delete every e2e-prefixed team the given user(s) own (owner-role gated delete),
-// via the API. Teams are user-scoped (not board-scoped), so — unlike a board —
+// Delete every e2e-prefixed workspace the given user(s) own (owner-role gated delete),
+// via the API. Workspaces are user-scoped (not board-scoped), so — unlike a board —
 // nothing cascades them away when a board is deleted; the standing autouse fixture
-// only cleans up boards, so a team-touching spec must call this itself.
-export async function cleanupE2eTeams(emails: string[] = [E2E_USER.email]): Promise<void> {
+// only cleans up boards, so a workspace-touching spec must call this itself.
+export async function cleanupE2eWorkspaces(emails: string[] = [E2E_USER.email]): Promise<void> {
   for (const email of emails) {
     const ctx: APIRequestContext = await request.newContext({ baseURL: API_ORIGIN });
     try {
       await ctx.post("/auth/test-login", { data: { email }, maxRedirects: 0 });
-      const teams = await ctx.get("/api/v1/teams");
-      if (teams.ok()) {
-        for (const team of await teams.json()) {
+      const workspaces = await ctx.get("/api/v1/workspaces");
+      if (workspaces.ok()) {
+        for (const workspace of await workspaces.json()) {
           if (
-            typeof team.name === "string" &&
-            team.name.startsWith(E2E_PREFIX) &&
-            team.role === "owner"
+            typeof workspace.name === "string" &&
+            workspace.name.startsWith(E2E_PREFIX) &&
+            workspace.role === "owner"
           ) {
-            await ctx.delete(`/api/v1/teams/${team.id}`);
+            await ctx.delete(`/api/v1/workspaces/${workspace.id}`);
           }
         }
       }
@@ -257,18 +257,18 @@ export async function cleanupE2eTeams(emails: string[] = [E2E_USER.email]): Prom
   }
 }
 
-// The team card (in the Teams view) matched by its name.
-export function teamItem(page: Page, name: string): Locator {
-  return page.locator(".team-card", { has: page.getByText(name, { exact: true }) });
+// The workspace card (in the Workspaces view) matched by its name.
+export function workspaceItem(page: Page, name: string): Locator {
+  return page.locator(".workspace-card", { has: page.getByText(name, { exact: true }) });
 }
 
-// Create a team via the Teams view. Leaves the Teams view open.
-export async function createTeam(page: Page, name: string): Promise<void> {
-  await openAccountMenuView(page, "Teams");
-  await page.getByRole("button", { name: "New team" }).click();
-  await page.getByPlaceholder("Team name (required)").fill(name);
+// Create a workspace via the Workspaces view. Leaves the Workspaces view open.
+export async function createWorkspace(page: Page, name: string): Promise<void> {
+  await openAccountMenuView(page, "Workspaces");
+  await page.getByRole("button", { name: "New workspace" }).click();
+  await page.getByPlaceholder("Workspace name (required)").fill(name);
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  await expect(teamItem(page, name)).toBeVisible();
+  await expect(workspaceItem(page, name)).toBeVisible();
 }
 
 // --- documentation screenshots ---------------------------------------------

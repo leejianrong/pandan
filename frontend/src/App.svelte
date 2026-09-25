@@ -16,14 +16,14 @@
   import type { RailView } from "./lib/components/NavRail.svelte";
   import Tokens from "./lib/components/Tokens.svelte";
   import Members from "./lib/components/Members.svelte";
-  import Teams from "./lib/components/Teams.svelte";
+  import Workspaces from "./lib/components/Workspaces.svelte";
   import Trash from "./lib/components/Trash.svelte";
   import ShortcutsHelp from "./lib/components/ShortcutsHelp.svelte";
   import { DropdownMenu } from "./lib/components/ui";
   import type { MenuItem } from "./lib/components/ui";
   import { refetch, refetchBacklog, refetchBoards, refetchEpics, refetchLabels, refetchViews, setQuery } from "./lib/board.svelte";
   import { refetchTokens } from "./lib/tokens.svelte";
-  import { refetchTeams } from "./lib/teams.svelte";
+  import { refetchWorkspaces } from "./lib/workspaces.svelte";
   import { startNotificationPolling, stopNotificationPolling } from "./lib/notifications.svelte";
   import { setSessionUser } from "./lib/session.svelte";
   import { initTheme, themeStore, toggleTheme } from "./lib/theme.svelte";
@@ -32,7 +32,7 @@
 
   // Every board-scoped view is reachable from the persistent NavRail
   // (NR-1..NR-4, KAN-1148..KAN-1151 — replaced the old hamburger+SideNav
-  // drawer); Tokens/Teams live in the avatar menu (NR-3). Still no
+  // drawer); Tokens/Workspaces live in the avatar menu (NR-3). Still no
   // client-side router — a conditional render keyed on `view`.
   let view = $state<
     | "board"
@@ -43,7 +43,7 @@
     | "activity"
     | "tokens"
     | "members"
-    | "teams"
+    | "workspaces"
     | "trash"
     | "settings"
   >("board");
@@ -109,10 +109,10 @@
       refetchLabels();
       refetchViews();
       refetchBacklog();
-      // Teams are user-scoped, not board-scoped (M9 V70) — load once here, not
+      // Workspaces are user-scoped, not board-scoped (M9 V70) — load once here, not
       // per-board-switch, and eagerly (not lazily like Tokens) because the
-      // BoardSwitcher's Team picker needs the list too.
-      refetchTeams();
+      // BoardSwitcher's Workspace picker needs the list too.
+      refetchWorkspaces();
       // Start polling the notification inbox (V39, KAN-303) — user-scoped, so it
       // runs independent of the active board and keeps the top-bar badge fresh.
       startNotificationPolling();
@@ -128,13 +128,13 @@
   }
 
   // Avatar dropdown menu (KAN-319/U4): the signed-in email (as a heading/subtitle),
-  // Tokens + Teams (folded in here since NR-3, KAN-1150 — account-scoped per the
+  // Tokens + Workspaces (folded in here since NR-3, KAN-1150 — account-scoped per the
   // nav-ia-audit, never in the rail), a Settings entry (stub view), and Log out
   // (danger). Replaces the always-on inline email + logout icon that used to
   // crowd the top bar.
   const avatarMenuItems: MenuItem[] = [
     { label: "Tokens", icon: KeyRound, onSelect: () => show("tokens") },
-    { label: "Teams", icon: UsersRound, onSelect: () => show("teams") },
+    { label: "Workspaces", icon: UsersRound, onSelect: () => show("workspaces") },
     { label: "Settings", icon: Settings, onSelect: () => show("settings"), separatorBefore: true },
     {
       label: "Keyboard shortcuts",
@@ -240,8 +240,8 @@
         <Tokens />
       {:else if view === "members"}
         <Members />
-      {:else if view === "teams"}
-        <Teams />
+      {:else if view === "workspaces"}
+        <Workspaces />
       {:else if view === "settings"}
         <section class="settings-stub">
           <h2>Settings</h2>

@@ -228,9 +228,9 @@ export interface Board {
   // The caller's effective role on this board (KAN-15): "owner" if they own it,
   // else their membership role. Drives the switcher's shared-board badge.
   role?: Role | null;
-  // The team this board is linked to, or null for a personal board (M9 V67,
-  // KAN-1056; ADR 0021). At most one team — no join table.
-  team_id: number | null;
+  // The workspace this board is linked to, or null for a personal board (M9 V67,
+  // KAN-1056; ADR 0021). At most one workspace — no join table.
+  workspace_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -240,16 +240,16 @@ export interface BoardCreate {
   // Optional: omit and the server derives one from the name, suffixing on
   // collision, so a create never fails on naming.
   key?: string;
-  // Optional: link the new board to a team the caller is a member of (403 if
+  // Optional: link the new board to a workspace the caller is a member of (403 if
   // not). Omitted → NULL, a personal board (today's unchanged default).
-  team_id?: number | null;
+  workspace_id?: number | null;
 }
 
 export interface BoardUpdate {
   name?: string;
   key?: string;
-  // Set or clear (null) the board's team link. Omitted → unchanged.
-  team_id?: number | null;
+  // Set or clear (null) the board's workspace link. Omitted → unchanged.
+  workspace_id?: number | null;
 }
 
 export interface EpicUpdate {
@@ -668,40 +668,40 @@ export async function deleteBoard(id: number): Promise<void> {
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
 }
 
-// --- Teams (Milestone 9, ADR 0021) ------------------------------------------
-// A team is the tenant tier above a user: a group of members whose "owner" role
-// (a team may have several) manages membership, and to whose boards a team role
+// --- Workspaces (Milestone 9, ADR 0021) ------------------------------------------
+// A workspace is the tenant tier above a user: a group of members whose "owner" role
+// (a workspace may have several) manages membership, and to whose boards a workspace role
 // grants a default viewer/editor/owner access a board's own BoardMember rows can
-// still override (V68, KAN-1057). Teams are user-scoped, not board-scoped — a
-// user sees only the teams they belong to (membership IS the visibility rule).
+// still override (V68, KAN-1057). Workspaces are user-scoped, not board-scoped — a
+// user sees only the workspaces they belong to (membership IS the visibility rule).
 
-export interface Team {
+export interface Workspace {
   id: number;
   name: string;
-  // The caller's role on this team (viewer/editor/owner) — never null on a
-  // response reached through the router, since every visible team is one the
+  // The caller's role on this workspace (viewer/editor/owner) — never null on a
+  // response reached through the router, since every visible workspace is one the
   // caller is a member of.
   role: Role | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface TeamCreate {
+export interface WorkspaceCreate {
   name: string;
 }
 
-export interface TeamUpdate {
+export interface WorkspaceUpdate {
   name?: string;
 }
 
-export async function listTeams(): Promise<Team[]> {
-  const res = await fetch(`${API}/teams`);
+export async function listWorkspaces(): Promise<Workspace[]> {
+  const res = await fetch(`${API}/workspaces`);
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
 }
 
-export async function createTeam(payload: TeamCreate): Promise<Team> {
-  const res = await fetch(`${API}/teams`, {
+export async function createWorkspace(payload: WorkspaceCreate): Promise<Workspace> {
+  const res = await fetch(`${API}/workspaces`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -710,8 +710,8 @@ export async function createTeam(payload: TeamCreate): Promise<Team> {
   return res.json();
 }
 
-export async function updateTeam(id: number, payload: TeamUpdate): Promise<Team> {
-  const res = await fetch(`${API}/teams/${id}`, {
+export async function updateWorkspace(id: number, payload: WorkspaceUpdate): Promise<Workspace> {
+  const res = await fetch(`${API}/workspaces/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -720,17 +720,17 @@ export async function updateTeam(id: number, payload: TeamUpdate): Promise<Team>
   return res.json();
 }
 
-export async function deleteTeam(id: number): Promise<void> {
-  const res = await fetch(`${API}/teams/${id}`, { method: "DELETE" });
+export async function deleteWorkspace(id: number): Promise<void> {
+  const res = await fetch(`${API}/workspaces/${id}`, { method: "DELETE" });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
 }
 
-// Team membership (mirrors board Member exactly — add/remove/re-role, owner-role
-// gated). `team_id` lives in the path (mounted under /teams/{id}/members).
+// Workspace membership (mirrors board Member exactly — add/remove/re-role, owner-role
+// gated). `workspace_id` lives in the path (mounted under /workspaces/{id}/members).
 
-export interface TeamMember {
+export interface WorkspaceMember {
   id: number;
-  team_id: number;
+  workspace_id: number;
   user_id: string;
   email: string | null;
   role: Role;
@@ -738,27 +738,27 @@ export interface TeamMember {
   updated_at: string;
 }
 
-export interface TeamMemberCreate {
+export interface WorkspaceMemberCreate {
   email?: string;
   user_id?: string;
   role?: Role;
 }
 
-export interface TeamMemberUpdate {
+export interface WorkspaceMemberUpdate {
   role: Role;
 }
 
-export async function listTeamMembers(teamId: number): Promise<TeamMember[]> {
-  const res = await fetch(`${API}/teams/${teamId}/members`);
+export async function listWorkspaceMembers(workspaceId: number): Promise<WorkspaceMember[]> {
+  const res = await fetch(`${API}/workspaces/${workspaceId}/members`);
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
   return res.json();
 }
 
-export async function addTeamMember(
-  teamId: number,
-  payload: TeamMemberCreate,
-): Promise<TeamMember> {
-  const res = await fetch(`${API}/teams/${teamId}/members`, {
+export async function addWorkspaceMember(
+  workspaceId: number,
+  payload: WorkspaceMemberCreate,
+): Promise<WorkspaceMember> {
+  const res = await fetch(`${API}/workspaces/${workspaceId}/members`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -767,12 +767,12 @@ export async function addTeamMember(
   return res.json();
 }
 
-export async function updateTeamMember(
-  teamId: number,
+export async function updateWorkspaceMember(
+  workspaceId: number,
   memberId: number,
-  payload: TeamMemberUpdate,
-): Promise<TeamMember> {
-  const res = await fetch(`${API}/teams/${teamId}/members/${memberId}`, {
+  payload: WorkspaceMemberUpdate,
+): Promise<WorkspaceMember> {
+  const res = await fetch(`${API}/workspaces/${workspaceId}/members/${memberId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -781,8 +781,8 @@ export async function updateTeamMember(
   return res.json();
 }
 
-export async function removeTeamMember(teamId: number, memberId: number): Promise<void> {
-  const res = await fetch(`${API}/teams/${teamId}/members/${memberId}`, {
+export async function removeWorkspaceMember(workspaceId: number, memberId: number): Promise<void> {
+  const res = await fetch(`${API}/workspaces/${workspaceId}/members/${memberId}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
