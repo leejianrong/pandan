@@ -1,8 +1,8 @@
 """Workspace endpoints (M9 V65-V66, KAN-1054/1055; ADR 0021).
 
 A workspace is the tenant tier above a ``User`` — see
-[ADR 0021](../../../docs/adr/0021-organization-team-tier.md) (renamed Team -> Workspace by
-ADR 0023; the ADR 0021 file itself is retitled in place by KAN-1724). Optional ``workspace_id``
+[ADR 0021](../../../docs/adr/0021-organization-workspace-tier.md) (renamed Team -> Workspace by
+ADR 0023; the ADR 0021 file itself was retitled in place by KAN-1724). Optional ``workspace_id``
 on board create/update is V67 (KAN-1056); the workspace-default board-access authz rung
 is V68 (KAN-1057). Mounted by ``main.py`` under ``/api/v1`` (e.g. ``/api/v1/workspaces``):
 
