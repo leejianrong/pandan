@@ -81,11 +81,17 @@ def _reset_tables():
 
     with engine.begin() as conn:
         # Clear board + card + epic + the auth tables so each test starts clean;
-        # CASCADE drops dependents (a board's cards/epics, a user's oauth/tokens).
-        # "user" is quoted (reserved word). RESTART IDENTITY makes ids deterministic.
+        # CASCADE drops dependents (a board's cards/epics, a user's oauth/tokens,
+        # personal_access_token's own device_authorization/*_board rows via their
+        # FKs). "user" is quoted (reserved word). RESTART IDENTITY makes ids
+        # deterministic. oauth_client is named explicitly (not just left to
+        # CASCADE) because it has no FK to any of these tables — it is Pandan's
+        # own registered clients, independent of any one user (KAN-1734) — so
+        # CASCADE alone would never reach it and its rows would silently persist
+        # across tests otherwise.
         conn.execute(
             text('TRUNCATE board, card, epic, "user", oauth_account, access_token, '
-                 "personal_access_token RESTART IDENTITY CASCADE")
+                 "personal_access_token, oauth_client RESTART IDENTITY CASCADE")
         )
         conn.execute(text("ALTER SEQUENCE card_ticket_seq RESTART WITH 1"))
         conn.execute(text("ALTER SEQUENCE epic_ticket_seq RESTART WITH 1"))
