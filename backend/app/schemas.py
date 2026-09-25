@@ -1579,3 +1579,27 @@ class DeviceTokenRequest(BaseModel):
     :class:`DeviceCodeResponse`."""
 
     device_code: str
+
+
+class DeviceAuthorizationRead(BaseModel):
+    """``GET /auth/device/{user_code}`` (ADR 0024, KAN-1729) — what the consent
+    screen renders: the requested scope/board pre-fill and the code's current
+    status, so a re-visited link (already approved/denied) reads as that state
+    rather than a mysterious 404."""
+
+    user_code: str
+    status: Literal["pending", "approved", "denied"]
+    requested_scope: TokenScope
+    requested_board_ids: list[int] | None
+    expires_at: datetime
+
+
+class DeviceApproveRequest(BaseModel):
+    """``POST /auth/device/{user_code}/approve`` (ADR 0024, KAN-1729) — the
+    human's final choice, pre-filled by the consent screen from
+    :class:`DeviceAuthorizationRead` but editable before submitting. Replaces
+    (not merges with) the originally requested scope/board_ids — approving is a
+    fresh grant, not a diff against the request."""
+
+    scope: TokenScope = TokenScope.write
+    board_ids: list[int] | None = None
