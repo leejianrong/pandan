@@ -26,6 +26,7 @@ from .routers import (
     boards,
     cards,
     cycles,
+    device_auth,
     epics,
     labels,
     me,
@@ -210,6 +211,9 @@ app.include_router(webhooks.router, prefix="/api/v1")
 # (session/identity plumbing, not versioned API resources). The GitHub OAuth
 # routes register only when creds are set — see register_auth_routes.
 register_auth_routes(app)
+# RFC 8628 device flow (ADR 0024, KAN-1727): /auth/device/{code,token}, no auth
+# on either route — the whole point is obtaining a first credential.
+app.include_router(device_auth.router)
 
 
 @app.get("/api/health", tags=["meta"])
