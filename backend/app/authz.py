@@ -30,7 +30,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from .auth import bearer_scheme
-from .auth_models import PersonalAccessToken, User
+from .auth_models import PersonalAccessToken, PersonalAccessTokenBoard, User
 from .db import get_db
 from .models import Board, BoardMember, Workspace, WorkspaceMember
 from .tokens import ACCEPTED_TOKEN_PREFIXES, hash_token
@@ -79,6 +79,14 @@ def _resolve_pat(db: Session, raw: str) -> User | None:
     Stashes the PAT's ``scope`` (V18, KAN-251) on the returned user as a transient
     ``_pat_scope`` attribute so :func:`get_principal` can enforce observer/operator
     access — a human cookie principal has no such attribute (→ full access).
+
+    Also stashes the PAT's board allow-list (ADR 0024, KAN-1726/1728) as a transient
+    ``_pat_board_ids`` attribute — a ``frozenset`` of board ids **only when the PAT
+    has at least one** :class:`PersonalAccessTokenBoard` **row**. No rows is
+    unrestricted (today's behaviour, and every PAT minted before this slice or via
+    the existing Tokens UI), so the attribute is simply absent then, mirroring how
+    ``_pat_scope`` is absent for a cookie principal — ``getattr(..., None)`` reads
+    as "no restriction" in both cases.
     """
     # Fast-path skip: only strings minted by us can match, so a stray bearer never
     # triggers a DB round-trip. The tuple includes prefixes retired by a rebrand
@@ -98,11 +106,20 @@ def _resolve_pat(db: Session, raw: str) -> User | None:
         return None
     pat.last_used_at = func.now()  # server-clock stamp; committed below
     scope = pat.scope
+    board_ids = set(
+        db.scalars(
+            select(PersonalAccessTokenBoard.board_id).where(
+                PersonalAccessTokenBoard.personal_access_token_id == pat.id
+            )
+        ).all()
+    )
     db.commit()
     user = db.get(User, pat.user_id)
     if user is not None:
-        # Non-mapped transient attribute; never flushed, carried per-request only.
+        # Non-mapped transient attributes; never flushed, carried per-request only.
         user._pat_scope = scope
+        if board_ids:
+            user._pat_board_ids = frozenset(board_ids)
     return user
 
 
@@ -178,7 +195,27 @@ def _effective_access(db: Session, principal: User, board: Board) -> Access | No
        and vice versa — "explicit" wins on *presence*, not on being the higher
        grant.
     4. None of the above → ``None`` (→ 403).
+
+    **Then, a PAT board allow-list (ADR 0024, KAN-1728) narrows whatever the above
+    computed.** If the resolved principal is a PAT carrying a non-empty allow-list
+    (``_pat_board_ids``, stashed by :func:`_resolve_pat`) and ``board.id`` isn't in
+    it, the result is forced to ``None`` regardless of steps 1-4 — a *scope*
+    restriction on the credential, not a grant, so it can only take access away,
+    never add it, and it applies even to a board the PAT's own user owns. A human
+    cookie principal, and a PAT with zero allow-list rows (every PAT minted before
+    this slice, and every one minted via the Tokens UI after it), have no such
+    attribute and are completely unaffected.
     """
+    access = _board_role_access(db, principal, board)
+    board_ids = getattr(principal, "_pat_board_ids", None)
+    if board_ids is not None and board.id not in board_ids:
+        return None
+    return access
+
+
+def _board_role_access(db: Session, principal: User, board: Board) -> Access | None:
+    """Steps 1-4 of :func:`_effective_access`, unaffected by PAT scoping — the
+    plain owner/board_member/workspace-default resolution."""
     if board.owner_id == principal.id:
         return Access.MANAGE
     role = db.scalar(
@@ -236,20 +273,28 @@ def visible_board_ids(principal: User) -> Select:
     KAN-1057; ADR 0021 — the matching ``OR`` clause for :func:`_effective_access`'s
     new workspace-default rung) — the same set of boards :func:`authorize_board` grants
     at least ``READ`` on. Kept as a ``Select`` so callers can use it as an ``IN``
-    subquery unchanged."""
-    return select(Board.id).where(
-        or_(
-            Board.owner_id == principal.id,
-            Board.id.in_(
-                select(BoardMember.board_id).where(BoardMember.user_id == principal.id)
-            ),
-            Board.id.in_(
-                select(Board.id)
-                .join(WorkspaceMember, WorkspaceMember.workspace_id == Board.workspace_id)
-                .where(WorkspaceMember.user_id == principal.id)
-            ),
-        )
+    subquery unchanged.
+
+    **Then narrowed by a PAT board allow-list**, exactly like :func:`_effective_access`
+    (ADR 0024, KAN-1728) — a scoped PAT's ``list_boards`` must not name a board a
+    direct ``GET`` on it would 403 for. No-op for a human cookie principal or a PAT
+    with zero allow-list rows.
+    """
+    base = or_(
+        Board.owner_id == principal.id,
+        Board.id.in_(
+            select(BoardMember.board_id).where(BoardMember.user_id == principal.id)
+        ),
+        Board.id.in_(
+            select(Board.id)
+            .join(WorkspaceMember, WorkspaceMember.workspace_id == Board.workspace_id)
+            .where(WorkspaceMember.user_id == principal.id)
+        ),
     )
+    board_ids = getattr(principal, "_pat_board_ids", None)
+    if board_ids is not None:
+        return select(Board.id).where(base, Board.id.in_(board_ids))
+    return select(Board.id).where(base)
 
 
 # --- workspaces (M9 V65-V66, KAN-1054/1055; ADR 0021) ----------------------------
