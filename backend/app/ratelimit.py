@@ -101,6 +101,11 @@ def classify(request: Request) -> str | None:
         return "auth"
     if path == "/auth/github/callback":
         return "auth"
+    # Device flow (ADR 0024, KAN-1727): both routes are unauthenticated by design
+    # (obtaining a first credential is the whole point), so they get the same
+    # brute-force-adjacent tier as login/callback rather than no limit at all.
+    if method == "POST" and path in ("/auth/device/code", "/auth/device/token"):
+        return "auth"
 
     return None
 

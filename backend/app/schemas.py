@@ -1549,3 +1549,33 @@ class PlanningIntervalMetricsRead(BaseModel):
     completed: WorkTotals
     velocity: int
     unit: str
+
+
+class DeviceCodeRequest(BaseModel):
+    """``POST /auth/device/code`` (ADR 0024, KAN-1727) — what the CLI asks for
+    before a human has done anything. Both fields are pre-fills the consent
+    screen (KAN-1729) shows and a human may change before approving; neither is
+    binding until approval."""
+
+    scope: TokenScope = TokenScope.write
+    board_ids: list[int] | None = None
+
+
+class DeviceCodeResponse(BaseModel):
+    """The RFC 8628 §3.2 response shape, verbatim field names so a spec-aware
+    client needs no translation layer."""
+
+    device_code: str
+    user_code: str
+    verification_uri: str
+    verification_uri_complete: str
+    expires_in: int
+    interval: int
+
+
+class DeviceTokenRequest(BaseModel):
+    """``POST /auth/device/token`` (ADR 0024, KAN-1727) — polled by the CLI at
+    ``interval``-second intervals with the ``device_code`` from
+    :class:`DeviceCodeResponse`."""
+
+    device_code: str
