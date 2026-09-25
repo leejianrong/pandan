@@ -6,6 +6,8 @@ can assert the client's return shape and error mapping.
 """
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -1439,3 +1441,84 @@ def test_mark_notification_read_patches_by_id():
     assert seen["method"] == "PATCH"
     assert seen["path"] == "/api/v1/notifications/5"
     assert out["read_at"] == "2026-01-01T00:00:00Z"
+
+
+# --- device flow (ADR 0024, KAN-1727/1730) -----------------------------------
+
+
+def test_create_device_code_hits_the_unversioned_auth_path():
+    """Neither device-flow route is under /api/v1, unlike every other method —
+    the absolute leading-slash path resets to the origin's root."""
+    handler, seen = capture(
+        httpx.Response(
+            200,
+            json={
+                "device_code": "raw-secret",
+                "user_code": "WDJB-MJHT",
+                "verification_uri": "http://test/device",
+                "verification_uri_complete": "http://test/device?user_code=WDJB-MJHT",
+                "expires_in": 900,
+                "interval": 5,
+            },
+        )
+    )
+    out = make_client(handler).create_device_code()
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/auth/device/code"
+    assert "authorization" not in seen["headers"]  # no token exists yet to send
+    assert out["user_code"] == "WDJB-MJHT"
+
+
+def test_create_device_code_sends_scope_and_board_ids_when_given():
+    handler, seen = capture(httpx.Response(200, json={"device_code": "x", "user_code": "y"}))
+    make_client(handler).create_device_code(scope="read", board_ids=[1, 2])
+    assert json.loads(seen["content"]) == {"scope": "read", "board_ids": [1, 2]}
+
+
+def test_create_device_code_omits_unset_fields():
+    handler, seen = capture(httpx.Response(200, json={"device_code": "x", "user_code": "y"}))
+    make_client(handler).create_device_code()
+    assert json.loads(seen["content"]) == {"scope": "write"}
+
+
+def test_create_device_code_maps_a_failure_to_the_shared_api_error():
+    handler, _ = capture(httpx.Response(500, json={"detail": "boom"}))
+    with pytest.raises(PandanApiError) as excinfo:
+        make_client(handler).create_device_code()
+    assert excinfo.value.status_code == 500
+
+
+def test_poll_device_token_hits_the_unversioned_auth_path():
+    handler, seen = capture(httpx.Response(400, json={"error": "authorization_pending"}))
+    out = make_client(handler).poll_device_token("raw-secret")
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/auth/device/token"
+    assert json.loads(seen["content"]) == {"device_code": "raw-secret"}
+    assert out == {"error": "authorization_pending"}
+
+
+def test_poll_device_token_never_raises_on_a_known_polling_state():
+    """The whole reason this method returns the raw body instead of using the
+    shared ``_request`` path: a 400 authorization_pending is not exceptional."""
+    for state in ("authorization_pending", "slow_down", "access_denied", "expired_token"):
+        handler, _ = capture(httpx.Response(400, json={"error": state}))
+        out = make_client(handler).poll_device_token("raw-secret")
+        assert out == {"error": state}
+
+
+def test_poll_device_token_returns_the_success_body_unchanged():
+    handler, _ = capture(
+        httpx.Response(
+            200,
+            json={
+                "token": "pandan_pat_abc123",
+                "id": 4,
+                "name": "Device flow login",
+                "token_prefix": "pandan_pat_abc1",
+                "scope": "write",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        )
+    )
+    out = make_client(handler).poll_device_token("raw-secret")
+    assert out["token"] == "pandan_pat_abc123"

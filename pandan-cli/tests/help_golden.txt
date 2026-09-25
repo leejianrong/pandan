@@ -41,6 +41,7 @@ positional arguments:
                   doesn't)
     login         save your PAT to the config file (prompts; never on the
                   command line)
+    auth          device-flow login (browser click, no copy-pasted token)
     config        inspect / set the config file (set / unset / show / path)
     context       ambient board context for an agent session (install /
                   uninstall / show / status)

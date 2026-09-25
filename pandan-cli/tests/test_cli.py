@@ -323,6 +323,12 @@ class FakeClient:
     def me(self):
         return self._call("me")
 
+    def create_device_code(self, **kw):
+        return self._call("create_device_code", **kw)
+
+    def poll_device_token(self, device_code):
+        return self._call("poll_device_token", device_code=device_code)
+
 
 @pytest.fixture(autouse=True)
 def isolate_config(monkeypatch, tmp_path):
@@ -4818,6 +4824,8 @@ def test_error_code_vocabulary_is_pinned():
         "unknown_field": 1,
         "no_token": 1,
         "nothing_to_update": 1,
+        "access_denied": 1,
+        "expired_token": 1,
         "unauthorized": 3,
         "forbidden": 4,
         "not_found": 5,
@@ -5102,6 +5110,177 @@ def test_token_stdin_never_prompts_even_on_a_tty(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO("pandan_pat_explicit\n"))
     assert cli.run(["login", "--token-stdin"]) == cli.EXIT_OK
     assert "saved token" in capsys.readouterr().out
+
+
+# --- auth login/logout/status (device flow, ADR 0024, KAN-1727/1730) --------
+
+_DEVICE_CODE_RESPONSE = {
+    "device_code": "raw-device-secret",
+    "user_code": "WDJB-MJHT",
+    "verification_uri": "http://test/device",
+    "verification_uri_complete": "http://test/device?user_code=WDJB-MJHT",
+    "expires_in": 900,
+    "interval": 5,
+}
+
+
+def _no_sleep(monkeypatch):
+    """Every auth-login test polls in a real loop; never actually wait."""
+    monkeypatch.setattr(cli.time, "sleep", lambda seconds: None)
+
+
+def _no_browser(monkeypatch):
+    monkeypatch.setattr("webbrowser.open", lambda url: False)
+
+
+def test_auth_login_succeeds_on_the_first_poll(monkeypatch, capsys):
+    _no_sleep(monkeypatch)
+    _no_browser(monkeypatch)
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "create_device_code": _DEVICE_CODE_RESPONSE,
+                "poll_device_token": {
+                    "token": "pandan_pat_minted",
+                    "id": 4,
+                    "name": "Device flow login",
+                    "token_prefix": "pandan_pat_mint",
+                    "scope": "write",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+        ),
+    )
+    assert cli.run(["auth", "login"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "WDJB-MJHT" in out
+    assert "logged in" in out
+    assert config.load_config().token == "pandan_pat_minted"
+    assert ("create_device_code", {"scope": "write", "board_ids": None}) in fake.calls
+
+
+def test_auth_login_polls_through_authorization_pending(monkeypatch, capsys):
+    _no_sleep(monkeypatch)
+    _no_browser(monkeypatch)
+    patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "create_device_code": _DEVICE_CODE_RESPONSE,
+                "poll_device_token": Queue(
+                    [
+                        {"error": "authorization_pending"},
+                        {"error": "authorization_pending"},
+                        {"token": "pandan_pat_minted"},
+                    ]
+                ),
+            }
+        ),
+    )
+    assert cli.run(["auth", "login"]) == cli.EXIT_OK
+    assert config.load_config().token == "pandan_pat_minted"
+
+
+def test_auth_login_backs_off_on_slow_down(monkeypatch, capsys):
+    _no_sleep(monkeypatch)
+    _no_browser(monkeypatch)
+    patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "create_device_code": _DEVICE_CODE_RESPONSE,
+                "poll_device_token": Queue(
+                    [{"error": "slow_down"}, {"token": "pandan_pat_minted"}]
+                ),
+            }
+        ),
+    )
+    assert cli.run(["auth", "login"]) == cli.EXIT_OK
+
+
+def test_auth_login_denied_is_a_clean_error(monkeypatch, capsys):
+    _no_sleep(monkeypatch)
+    _no_browser(monkeypatch)
+    patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "create_device_code": _DEVICE_CODE_RESPONSE,
+                "poll_device_token": {"error": "access_denied"},
+            }
+        ),
+    )
+    assert cli.run(["auth", "login"]) == cli.EXIT_ERROR
+    err = read_error(capsys)
+    assert err.code == "access_denied"
+    assert not config.load_config(require_token=False).token
+
+
+def test_auth_login_expired_is_a_clean_error(monkeypatch, capsys):
+    _no_sleep(monkeypatch)
+    _no_browser(monkeypatch)
+    patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "create_device_code": _DEVICE_CODE_RESPONSE,
+                "poll_device_token": {"error": "expired_token"},
+            }
+        ),
+    )
+    assert cli.run(["auth", "login"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "expired_token"
+
+
+def test_auth_login_passes_scope_and_board_flags(monkeypatch, capsys):
+    _no_sleep(monkeypatch)
+    _no_browser(monkeypatch)
+    fake = patch_client(
+        monkeypatch,
+        FakeClient(
+            results={
+                "create_device_code": _DEVICE_CODE_RESPONSE,
+                "poll_device_token": {"token": "pandan_pat_minted"},
+            }
+        ),
+    )
+    assert (
+        cli.run(["auth", "login", "--scope", "read", "--board", "5", "--board", "7"])
+        == cli.EXIT_OK
+    )
+    assert (
+        "create_device_code",
+        {"scope": "read", "board_ids": [5, 7]},
+    ) in fake.calls
+
+
+def test_auth_logout_clears_a_saved_token(monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO("pandan_pat_x\n"))
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
+    cli.run(["login"])
+    assert config.load_config().token == "pandan_pat_x"
+
+    assert cli.run(["auth", "logout"]) == cli.EXIT_OK
+    assert "logged out" in capsys.readouterr().out
+    assert not config.load_config(require_token=False).token
+
+
+def test_auth_logout_is_a_no_op_when_nothing_was_saved(capsys):
+    assert cli.run(["auth", "logout"]) == cli.EXIT_OK
+    assert "not logged in" in capsys.readouterr().out
+
+
+def test_auth_status_reports_identity_like_me(monkeypatch, capsys):
+    monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_test")
+    patch_client(monkeypatch, FakeClient(result={"id": "u1", "email": "you@example.test"}))
+    assert cli.run(["auth", "status"]) == cli.EXIT_OK
+    assert "you@example.test" in capsys.readouterr().out
+
+
+def test_auth_status_without_a_token_is_a_clean_unauthorized(capsys):
+    assert cli.run(["auth", "status"]) == cli.EXIT_AUTH
+    assert read_error(capsys).code == "unauthorized"
 
 
 def test_stdin_is_tty_is_false_for_a_detached_stdin(monkeypatch):

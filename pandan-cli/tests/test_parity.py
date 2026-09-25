@@ -227,6 +227,14 @@ MCP_ONLY: dict[str, str] = {}
 CLI_ONLY: dict[tuple[str, ...], str] = {
     ("overview",): "the CLI's content-first bare invocation (V46) — board state, no new capability",
     ("login",): "writes the local config file; a PAT never travels over MCP",
+    # ADR 0024 / KAN-1730: `auth login`/`auth logout` are the device-flow analogue
+    # of `login` above — they write/clear the local config file. `auth login`
+    # additionally talks to `/auth/device/*`, but those routes aren't board-API
+    # calls (an MCP tool would gain a credential-minting capability an agent
+    # session has no use for — the agent already has whatever credential it was
+    # launched with), so this is reason 1, not reason 2.
+    ("auth", "login"): "writes the local config file (device-flow analogue of `login`)",
+    ("auth", "logout"): "clears the local config file; mirrors `auth login`",
     # Reason 2 — declined tools, not missing ones. Three instances.
     ("me",): (
         "reason 2 (KAN-614): `GET /api/v1/me` IS a board API call, so this is a "
@@ -236,6 +244,7 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
         "question is asked (a human or an agent checking `did my token work?`). "
         "Re-opening this is an ADR 0019 amendment, not an edit here."
     ),
+    ("auth", "status"): "reason 2 (ADR 0024/KAN-1730) — see (\"me\",); auth status just wraps it",
     ("label", "update"): (
         "reason 2 (KAN-982): `PATCH /labels/{id}` IS a board API call, so this is a "
         "declined tool and not a missing one. ADR 0019 freezes the MCP surface at 49, "

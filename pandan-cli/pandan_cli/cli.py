@@ -122,6 +122,7 @@ import json
 import re
 import shlex
 import sys
+import time
 from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any, NamedTuple
@@ -174,6 +175,10 @@ ERROR_CODES: dict[str, int] = {
     "unknown_field": EXIT_ERROR,          # --fields named a field the row doesn't have
     "no_token": EXIT_ERROR,               # login/config set got no token to save
     "nothing_to_update": EXIT_ERROR,      # a patch verb given no field to change
+    # RFC 8628 device flow (`auth login`, ADR 0024/KAN-1730) — wire error values
+    # used verbatim as CLI codes, no translation layer.
+    "access_denied": EXIT_ERROR,          # the human declined the consent screen
+    "expired_token": EXIT_ERROR,          # the device/user code expired unused
     # API-mapped.
     "unauthorized": EXIT_AUTH,            # 401
     "forbidden": EXIT_FORBIDDEN,          # 403
@@ -3338,6 +3343,102 @@ def _cmd_login(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# --- device-flow auth (ADR 0024, KAN-1727/1730) ------------------------------
+# `pandan login` (above) pastes an already-minted secret and stays exactly as it
+# is — CI/headless environments have no browser to send a human to. `auth login`
+# is the browser-click alternative: obtain a PAT with zero copy-pasting, via the
+# RFC 8628 device flow. Deliberately `local_func`, like `login` itself: it needs
+# no *existing* token (there is none yet), so it builds its own short-lived
+# client rather than going through `run()`'s standard token-requiring path, and
+# it does its own interactive printing rather than rendering a single row via
+# `_emit` — a multi-step "wait for a human" flow doesn't fit that shape.
+
+
+def _cmd_auth_login(args: argparse.Namespace) -> int:
+    """Device-flow login: print a code + link, best-effort open a browser, poll
+    until a human approves (or denies, or the code expires), then save the
+    minted PAT exactly like `pandan login` does."""
+    config = load_config(require_token=False)
+    with PandanClient(config.api_url) as client:
+        code = client.create_device_code(
+            scope=args.scope, board_ids=args.board or None
+        )
+        print(f"First copy your code: {code['user_code']}")
+        print(f"Then visit: {code['verification_uri']}")
+        opened = False
+        try:
+            import webbrowser
+
+            opened = webbrowser.open(code["verification_uri_complete"])
+        except Exception:
+            opened = False
+        if opened:
+            print("(opened in your browser)")
+        else:
+            print(f"Or open this link directly: {code['verification_uri_complete']}")
+        print("Waiting for approval…")
+
+        interval = code["interval"]
+        deadline = time.monotonic() + code["expires_in"]
+        try:
+            while time.monotonic() < deadline:
+                time.sleep(interval)
+                result = client.poll_device_token(code["device_code"])
+                error = result.get("error")
+                if error is None:
+                    path = write_config_file(api_url=config.api_url, token=result["token"])
+                    print(f"logged in — token saved to {path} (mode 0600)")
+                    return EXIT_OK
+                if error == "authorization_pending":
+                    continue
+                if error == "slow_down":
+                    # RFC 8628 §3.5: back off rather than keep polling at the same
+                    # cadence — the server is telling us it's too fast.
+                    interval += 5
+                    continue
+                if error == "access_denied":
+                    raise CliError("login was denied", code="access_denied")
+                if error == "expired_token":
+                    raise CliError(
+                        "the login code expired before it was approved; "
+                        "run `pandan auth login` again",
+                        code="expired_token",
+                    )
+                raise CliError(
+                    f"unexpected device-flow response: {error!r}", code="unexpected"
+                )
+        except KeyboardInterrupt:
+            raise CliError("login cancelled", code="unexpected") from None
+    raise CliError(
+        "login timed out waiting for approval; run `pandan auth login` again",
+        code="expired_token",
+    )
+
+
+def _cmd_auth_logout(args: argparse.Namespace) -> int:
+    """Clear the locally saved token. Purely local (mirrors `config unset
+    token`) — there is no API surface yet to also revoke the token server-side;
+    do that from the Tokens UI (or `DELETE /api/v1/tokens/{id}`) if needed."""
+    path, removed = unset_config_keys(("token",))
+    if removed:
+        print(f"logged out — cleared the saved token in {path}")
+    else:
+        print("not logged in (no token was saved)")
+    return EXIT_OK
+
+
+def _cmd_auth_status(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    """`GET /api/v1/me`, wrapped with a clean "not logged in" case (ADR 0024)
+    instead of the config-loading error a bare `pandan me` would raise when no
+    token is configured at all."""
+    if not config.token:
+        raise CliError(
+            "not logged in — run `pandan auth login` (or `pandan login`)",
+            code="unauthorized",
+        )
+    return client.me()
+
+
 # --- argument parser --------------------------------------------------------
 
 
@@ -4603,6 +4704,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="read the token from stdin instead of prompting (`… | pandan login --token-stdin`)",
     )
     p_login.set_defaults(local_func=_cmd_login)
+
+    # --- auth (device flow, ADR 0024, KAN-1727/1730) --------------------------
+    # `pandan login` (above) stays the paste-a-token path for CI/headless use;
+    # `auth login/logout/status` is the browser-click alternative.
+    p_auth = sub.add_parser(
+        "auth", help="device-flow login (browser click, no copy-pasted token)"
+    )
+    auth_sub = p_auth.add_subparsers(dest="auth_command", metavar="<subcommand>", required=True)
+
+    p_auth_login = auth_sub.add_parser(
+        "login", parents=[common], help="log in via a browser (RFC 8628 device flow)"
+    )
+    p_auth_login.add_argument(
+        "--scope",
+        choices=("read", "write"),
+        default="write",
+        help="the PAT's capability (default: write)",
+    )
+    p_auth_login.add_argument(
+        "--board",
+        type=int,
+        action="append",
+        metavar="BOARD_ID",
+        help=(
+            "restrict the minted PAT to this board (repeatable). Pre-fills the "
+            "consent screen; a human may still change the selection there before "
+            "approving. Omit to request every board you own, unrestricted."
+        ),
+    )
+    p_auth_login.set_defaults(local_func=_cmd_auth_login)
+
+    p_auth_logout = auth_sub.add_parser(
+        "logout", parents=[common], help="clear the locally saved token"
+    )
+    p_auth_logout.set_defaults(local_func=_cmd_auth_logout)
+
+    p_auth_status = auth_sub.add_parser(
+        "status", parents=[common], help="who your token authenticates as (like `pandan me`)"
+    )
+    p_auth_status.set_defaults(func=_cmd_auth_status, require_token=False)
 
     p_config = sub.add_parser(
         "config", help="inspect / set the config file (set / unset / show / path)"

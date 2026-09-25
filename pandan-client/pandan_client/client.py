@@ -216,6 +216,46 @@ class PandanClient:
         """
         return self._request("GET", "/me").json()
 
+    # --- device flow (ADR 0024, KAN-1727/1730) -------------------------------
+    #
+    # Neither call is under ``/api/v1`` (the base_url this client is built with
+    # already includes). Mirrors ``health()``'s own fix for the identical problem:
+    # ``base_url.join(...)`` performs a real RFC 3986 join (a leading ``/`` resets
+    # to the origin's root), producing a fully-qualified URL that httpx then sends
+    # as-is — passing the plain string path straight to ``.request()`` instead
+    # would have httpx *merge* it onto ``base_url``'s own ``/api/v1`` path rather
+    # than reset it, landing on ``/api/v1/auth/device/...`` instead. Both routes
+    # are unauthenticated by design (a CLI with no credential yet is the whole
+    # point), so neither call sends the bearer this client otherwise always
+    # attaches — there is none yet to send.
+
+    def create_device_code(
+        self, *, scope: str = "write", board_ids: list[int] | None = None
+    ) -> dict[str, Any]:
+        """``POST /auth/device/code`` — start a device-flow login. A genuine
+        failure here (network, 5xx) is exceptional and raises, unlike
+        :meth:`poll_device_token`'s expected polling states."""
+        payload = _clean({"scope": scope, "board_ids": board_ids})
+        url = self._client.base_url.join("/auth/device/code")
+        response = self._client.request("POST", str(url), json=payload)
+        if not response.is_success:
+            raise PandanApiError(response.status_code, _detail(response))
+        return response.json()
+
+    def poll_device_token(self, device_code: str) -> dict[str, Any]:
+        """``POST /auth/device/token`` — poll once. Returns the parsed JSON body
+        **regardless of status code**, unlike every other method here: RFC 8628's
+        ``authorization_pending``/``slow_down``/``access_denied``/``expired_token``
+        are normal, expected outcomes of one poll in a loop, not exceptional
+        failures — raising and immediately catching an exception for each one
+        would just be control flow wearing a costume. The caller distinguishes
+        success (a ``token`` key) from a polling state (an ``error`` key) by
+        inspecting the dict; a genuine transport failure still raises (httpx's own
+        exception), since that really is exceptional."""
+        url = self._client.base_url.join("/auth/device/token")
+        response = self._client.request("POST", str(url), json={"device_code": device_code})
+        return response.json()
+
     # --- boards (discovery — V10) -------------------------------------------
 
     def list_boards(self) -> dict[str, Any]:
