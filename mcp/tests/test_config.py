@@ -16,11 +16,22 @@ from pandan_mcp.config import DEFAULT_API_URL, load_config
 
 
 @pytest.fixture(autouse=True)
-def clean_env(monkeypatch):
-    """No config from the developer's shell, and a fresh notice memo per test."""
+def clean_env(monkeypatch, tmp_path):
+    """No config from the developer's shell or their real config file, and a
+    fresh notice memo per test.
+
+    ``XDG_CONFIG_HOME`` is redirected to an empty ``tmp_path`` — without this,
+    a machine that has ever run ``pandan login``/``pandan auth login`` has a
+    real ``~/.config/pandan/config.toml`` carrying a real token, and KAN-1731's
+    file fallback would read it straight into these tests (this bit exactly
+    that way in development: the fallback's own tests passed by accident
+    against a *legacy*-format file that used the ``[kan]`` table instead of
+    ``[pandan]``, and would have started leaking a real secret the moment that
+    file was migrated to the current format)."""
     for names in config_mod._ENV_NAMES.values():
         for name in names:
             monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     config_mod._warned.clear()
 
 
@@ -94,3 +105,80 @@ def test_non_integer_board_id_names_the_current_env_var(monkeypatch):
     with pytest.raises(ValueError) as excinfo:
         load_config()
     assert "PANDAN_BOARD_ID" in str(excinfo.value)
+
+
+# --- the config-file fallback (ADR 0024, KAN-1731) ---------------------------
+
+
+def _write_config_file(tmp_path, body: str) -> None:
+    config_dir = tmp_path / "pandan"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.toml").write_text(body, encoding="utf-8")
+
+
+def test_falls_back_to_the_cli_config_file_when_no_env_is_set(tmp_path):
+    """``XDG_CONFIG_HOME`` is already redirected to ``tmp_path`` by the
+    autouse ``clean_env`` fixture."""
+    _write_config_file(
+        tmp_path,
+        '[pandan]\napi_url = "https://file.example"\ntoken = "pandan_pat_fromfile"\nboard_id = 7\n',
+    )
+    cfg = load_config()
+    assert cfg.api_url == "https://file.example"
+    assert cfg.token == "pandan_pat_fromfile"
+    assert cfg.board_id == 7
+
+
+def test_env_wins_over_the_config_file_per_value(tmp_path, monkeypatch):
+    """Precedence is per value, mirroring the CLI's own ``KANBAN_*``/``PANDAN_*``
+    resolution: an env var set for *one* key must not make the file's other
+    values disappear."""
+    _write_config_file(
+        tmp_path,
+        '[pandan]\napi_url = "https://file.example"\ntoken = "pandan_pat_fromfile"\nboard_id = 7\n',
+    )
+    monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_fromenv")
+
+    cfg = load_config()
+    assert cfg.token == "pandan_pat_fromenv"  # env wins
+    assert cfg.api_url == "https://file.example"  # file still supplies the rest
+    assert cfg.board_id == 7
+
+
+def test_a_deprecated_env_spelling_still_beats_the_config_file(tmp_path, monkeypatch):
+    """The file fallback sits *behind* the whole PANDAN_*/KANBAN_* chain, not
+    just PANDAN_* — an already-configured .mcp.json (even on the old spelling)
+    must not be silently overridden by a file most .mcp.json users never
+    wrote."""
+    _write_config_file(tmp_path, '[pandan]\ntoken = "pandan_pat_fromfile"\n')
+    monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_fromenv")
+
+    assert load_config().token == "kanban_pat_fromenv"
+
+
+def test_no_config_file_at_all_is_not_an_error(tmp_path):
+    """``tmp_path`` exists but has no ``pandan/config.toml`` in it — the common
+    case for anyone who has never run ``pandan login``."""
+    cfg = load_config()
+    assert cfg.token is None
+
+
+def test_a_malformed_config_file_is_not_fatal(tmp_path):
+    _write_config_file(tmp_path, "this is not [valid toml")
+    cfg = load_config()
+    assert cfg.token is None
+
+
+def test_a_legacy_kan_table_is_not_read_by_this_fallback(tmp_path):
+    """Deliberately narrower than the CLI's own file handling (see the module
+    docstring): only the current ``[pandan]`` table is read here, not the
+    legacy ``[kan]`` one a not-yet-migrated CLI config file might still use."""
+    _write_config_file(tmp_path, '[kan]\ntoken = "kanban_pat_legacy"\n')
+    assert load_config().token is None
+
+
+def test_a_bare_top_level_table_is_still_tolerated(tmp_path):
+    """Mirrors ``pandan_cli.config``'s own tolerance for a config file with no
+    table header at all — keys directly at the document root."""
+    _write_config_file(tmp_path, 'token = "pandan_pat_bare"\n')
+    assert load_config().token == "pandan_pat_bare"
