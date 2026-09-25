@@ -75,6 +75,53 @@ def test_no_board_id_and_no_default_sends_none(monkeypatch):
     assert seen["params"] == {}
 
 
+# --- per-request client override for the hosted transport (KAN-1732) -------
+#
+# `_client_instance()` has two callers to satisfy from one function body: the
+# stdio transport (`main()`), which wants the process-wide singleton it built
+# from `PANDAN_TOKEN` once, and the hosted Streamable HTTP transport
+# (`backend/app/mcp_host.py`), which must build a *fresh* client from
+# whichever caller's own bearer `pandan_mcp.request_auth.set_request_token`
+# stashed for this one request. These tests are the one place that contract
+# is pinned from the MCP-server side (the request/response round trip through
+# the actual bearer-auth middleware is covered in
+# `backend/tests/integration/test_mcp_host.py`).
+
+
+def test_client_instance_uses_the_per_request_override_when_present(monkeypatch):
+    from pandan_mcp.config import Config
+    from pandan_mcp.request_auth import clear_request_token, set_request_token
+
+    # A pre-existing stdio singleton must NOT be reused once a hosted override
+    # is present — reusing it would leak the stdio user's own token into a
+    # completely different hosted caller's request.
+    singleton = PandanClient("http://singleton-must-not-be-used")
+    monkeypatch.setattr(server, "_client", singleton)
+    monkeypatch.setattr(
+        server, "load_config", lambda: Config(api_url="http://hosted", token=None, board_id=None)
+    )
+
+    set_request_token("pandan_pat_hosted_caller")
+    try:
+        client = server._client_instance()
+    finally:
+        clear_request_token()
+
+    assert client is not singleton
+    assert str(client._client.base_url) == "http://hosted/api/v1/"
+    assert client._client.headers["Authorization"] == "Bearer pandan_pat_hosted_caller"
+
+
+def test_client_instance_falls_back_to_the_stdio_singleton_with_no_override(monkeypatch):
+    from pandan_mcp.request_auth import get_request_token
+
+    singleton = PandanClient("http://singleton")
+    monkeypatch.setattr(server, "_client", singleton)
+
+    assert get_request_token() is None  # sanity: no leakage from a prior test
+    assert server._client_instance() is singleton
+
+
 # --- dependency tools (KAN-31) ---------------------------------------------
 
 

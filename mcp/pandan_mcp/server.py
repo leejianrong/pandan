@@ -1,12 +1,25 @@
-"""MCP server exposing the Pandan API as agent tools (stdio transport).
+"""MCP server exposing the Pandan API as agent tools.
+
+**Two transports share this one tool registry.** stdio (the original, and still
+the self-hosting fallback per ADR 0025) is one process per user: `main()` below
+runs it, reading `PANDAN_TOKEN` once from the environment for the whole process
+lifetime. Since KAN-1732, the **hosted Streamable HTTP transport** — one
+always-on process serving every caller — is `backend/app/mcp_host.py` mounting
+this same `mcp` object's `.streamable_http_app()` on Pandan's own backend; its
+auth middleware validates each request's own bearer token and hands it to
+`_client_instance()` via :mod:`pandan_mcp.request_auth`'s per-request override,
+so the exact same tool functions serve both transports unchanged.
 
 Each tool is a thin wrapper over one ``/api/v1`` endpoint via ``PandanClient``.
 Type hints + docstrings here become the tool schema + description the agent sees
 (the SDK's high-level decorator layer — ``MCPServer``, which is what v1's
 ``FastMCP`` was renamed to in **SDK 2.0.0**; see ``pyproject.toml`` for the bound
-and KAN-585). Since M3 V8 (ADR 0013) ``/api/v1`` is auth-required, so
-``PANDAN_TOKEN`` must be a valid personal access token (V9/ADR 0014); it
-authenticates as its owning user and can only reach boards that user owns.
+and KAN-585). Since M3 V8 (ADR 0013) ``/api/v1`` is auth-required, so a valid
+personal access token (V9/ADR 0014) is required either way — ``PANDAN_TOKEN``
+for stdio, the hosted transport's own ``Authorization: Bearer`` header
+otherwise; it authenticates as its owning user and can only reach boards that
+user owns (or, per ADR 0024, whatever narrower board allow-list that specific
+token carries).
 
 **Board scoping (V10, ADR 0015):** the agent works across multiple boards
 dynamically. ``list_boards``/``create_board`` discover and make boards; the
@@ -52,6 +65,7 @@ from mcp.server import MCPServer
 from pandan_client import PandanClient, split_card_selectors
 
 from .config import load_config
+from .request_auth import get_request_token
 from .schema import compact_advertised_schemas
 from .shaping import shape
 
@@ -71,7 +85,24 @@ _default_board_id: int | None = None
 
 
 def _client_instance() -> PandanClient:
-    """Lazily build the API client from the environment on first tool use."""
+    """Build the API client — the stdio singleton, or (hosted transport) a
+    fresh per-request client from the caller's own bearer.
+
+    The hosted Streamable HTTP transport serves every caller from one
+    process, so it cannot rely on the module-level singleton below (that
+    would leak one user's token to another's request). Instead the hosted
+    auth middleware (`backend/app/mcp_host.py`) stashes the validated
+    caller's bearer in a per-request contextvar
+    (`pandan_mcp.request_auth`) before invoking the tool; when present, we
+    build a brand-new `PandanClient` from it and skip the singleton
+    entirely. The stdio transport never sets this override, so it always
+    falls through to the original one-process-per-user singleton.
+    """
+    token_override = get_request_token()
+    if token_override is not None:
+        config = load_config()
+        return PandanClient(config.api_url, token_override)
+
     global _client, _default_board_id
     if _client is None:
         config = load_config()

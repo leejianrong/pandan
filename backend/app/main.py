@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
@@ -20,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db import get_db
+from .mcp_host import hosted_mcp_app, hosted_mcp_lifespan
 from .observability import add_request_logging, configure_logging, init_error_tracking
 from .ratelimit import install_rate_limiting
 from .routers import (
@@ -153,7 +156,16 @@ def install_security_headers(app: FastAPI) -> None:
         return response
 
 
-app = FastAPI(title="Pandan API", version="0.1.0")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Top-level app lifespan. Its one job today is entering the hosted MCP
+    app's own lifespan (KAN-1732) — see `mcp_host.hosted_mcp_lifespan`'s
+    docstring for why a mounted sub-app can't just start that on its own."""
+    async with hosted_mcp_lifespan():
+        yield
+
+
+app = FastAPI(title="Pandan API", version="0.1.0", lifespan=_lifespan)
 
 # Middleware registration order matters: Starlette runs the *last-registered*
 # middleware outermost. We want security headers outermost (they must decorate every
@@ -214,6 +226,16 @@ register_auth_routes(app)
 # RFC 8628 device flow (ADR 0024, KAN-1727): /auth/device/{code,token}, no auth
 # on either route — the whole point is obtaining a first credential.
 app.include_router(device_auth.router)
+
+# Hosted Streamable HTTP MCP transport (ADR 0025, KAN-1732): the exact same
+# tool registry the stdio `pandan-mcp` server exposes, reachable without a
+# local subprocess. A plain route (not a `Mount` — see `app/mcp_host.py`'s
+# module docstring for why: a `Mount` here would 405 a bare `POST /mcp`
+# instead of serving it), registered before the SPA catch-all below so `/mcp`
+# never falls through to `index.html`. Its own bearer-auth middleware
+# (`app/mcp_host.py`) is the authorization chokepoint; nothing else in this
+# app authorizes these requests.
+app.add_route("/mcp", hosted_mcp_app, include_in_schema=False)
 
 
 @app.get("/api/health", tags=["meta"])
