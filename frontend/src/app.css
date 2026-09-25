@@ -153,7 +153,7 @@
   --label-fuchsia: #c026d3;
   --label-mulberry: #9d174d;
   --label-pink: #db2777;
-  --label-ink: #334155;
+  --label-ink: #1e293b;
 
   /* Tell the UA to paint native controls/popups/date-pickers/scrollbars light. */
   color-scheme: light;
@@ -230,7 +230,7 @@
     --label-fuchsia: #e879f9;
     --label-mulberry: #fda4d4;
     --label-pink: #f472b6;
-    --label-ink: #cbd5e1;
+    --label-ink: #949494;
   }
 }
 :root[data-theme="dark"] {
@@ -291,7 +291,7 @@
   --label-fuchsia: #e879f9;
   --label-mulberry: #fda4d4;
   --label-pink: #f472b6;
-  --label-ink: #cbd5e1;
+  --label-ink: #949494;
 }
 
 /* M3 type scale (M8... M3-2, KAN-1091) — the 15-role scale from

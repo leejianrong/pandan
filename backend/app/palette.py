@@ -87,11 +87,25 @@ PALETTE_HEX: dict[str, tuple[str, str]] = {
     "fuchsia": ("#c026d3", "#e879f9"),
     "mulberry": ("#9d174d", "#fda4d4"),
     "pink": ("#db2777", "#f472b6"),
-    # The neutral, and the default. Deliberately slate-800/slate-300 rather than the
-    # mid-grey `slate` first proposed: that one measured 6.9 ΔE from --muted, which
-    # priority "low" paints as a dot. This one clears it by 18.6 on a large lightness
-    # gap, which is what makes a grey-ish label distinguishable from a grey signal.
-    "ink": ("#334155", "#cbd5e1"),
+    # The neutral, and the default — originally shipped as slate-800/slate-300 (the
+    # light value was actually slate-700, #334155, a doc/code mismatch from day
+    # one; see below), chosen because the mid-grey `slate` first proposed measured
+    # only 6.9 ΔE from --muted, which priority "low" paints as a dot.
+    #
+    # **Both values were revised 2026-09-25** after the M3 role-palette
+    # regeneration (M8 M3-1, KAN-1090) changed --agent (light: violet -> #46617a)
+    # and --muted (dark: -> #bec9c6) out from under this token — a frontend-only
+    # PR, so the backend unit-test job's path filter never ran the very test that
+    # cross-cuts both files, and the collision (light: ΔE 13.7 vs --agent; dark:
+    # ΔE 9.3 vs --muted, once the light fix exposed it) sat undetected for three
+    # weeks until the next backend-touching change hit it. Light moved to
+    # slate-800 (#1e293b, the shade this comment always claimed) for a clean 19.6.
+    # Dark moved off the slate family entirely to a true achromatic grey
+    # (#949494, L≈61) — no blue- or green-tinted grey in the readable-on-dark
+    # lightness band clears 18.0 against both the new --agent (#aecae6) and
+    # --muted (#bec9c6) at once, since both are themselves light, low-chroma
+    # blue/green greys; going fully neutral is what buys the separation.
+    "ink": ("#1e293b", "#949494"),
 }
 
 #: The palette token a colour defaults to when none is given. Shared by the SPA's
