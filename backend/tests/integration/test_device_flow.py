@@ -18,6 +18,7 @@ DEVICE_TOKEN = "/auth/device/token"
 BOARDS = "/api/v1/boards"
 
 ALICE = ("alice@example.com", "gh-alice")
+BOB = ("bob@example.com", "gh-bob")
 
 
 def _resolve(client, user_id: str | None, status_: str, **fields):
@@ -218,3 +219,123 @@ def test_approved_poll_materialises_the_requested_board_scope(login_as, client):
     h = {"Authorization": f"Bearer {body['token']}"}
     assert client.get(f"{BOARDS}/{board_a}", headers=h).status_code == 200
     assert client.get(f"{BOARDS}/{board_b}", headers=h).status_code == 403
+
+
+# --- consent screen backend: GET / approve / deny (ADR 0024, KAN-1729) -------
+
+
+def test_get_device_authorization_requires_auth(client):
+    user_code = client.post(DEVICE_CODE, json={}).json()["user_code"]
+    r = client.get(f"/auth/device/{user_code}")
+    assert r.status_code == 401
+
+
+def test_get_unknown_user_code_is_404(login_as):
+    alice = login_as(*ALICE)
+    assert alice.get("/auth/device/NOPE-NOPE").status_code == 404
+
+
+def test_get_expired_user_code_is_404(login_as, client):
+    alice = login_as(*ALICE)
+    code = client.post(DEVICE_CODE, json={}).json()
+    _expire(code["device_code"])
+    assert alice.get(f"/auth/device/{code['user_code']}").status_code == 404
+
+
+def test_get_shows_the_requested_scope_and_pending_status(login_as, client):
+    alice = login_as(*ALICE)
+    code = client.post(DEVICE_CODE, json={"scope": "read"}).json()
+    r = alice.get(f"/auth/device/{code['user_code']}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "pending"
+    assert body["requested_scope"] == "read"
+    assert body["user_code"] == code["user_code"]
+
+
+def test_get_reflects_status_after_approval(login_as, client):
+    alice = login_as(*ALICE)
+    code = client.post(DEVICE_CODE, json={}).json()
+    alice.post(f"/auth/device/{code['user_code']}/approve", json={"scope": "write"})
+    assert alice.get(f"/auth/device/{code['user_code']}").json()["status"] == "approved"
+
+
+def test_approve_requires_auth(client):
+    user_code = client.post(DEVICE_CODE, json={}).json()["user_code"]
+    r = client.post(f"/auth/device/{user_code}/approve", json={"scope": "write"})
+    assert r.status_code == 401
+
+
+def test_approve_unknown_user_code_is_404(login_as):
+    alice = login_as(*ALICE)
+    r = alice.post("/auth/device/NOPE-NOPE/approve", json={"scope": "write"})
+    assert r.status_code == 404
+
+
+def test_approve_then_poll_mints_with_the_approved_choice(login_as, client):
+    alice = login_as(*ALICE)
+    board_a = alice.get(BOARDS).json()[0]["id"]
+    code = client.post(DEVICE_CODE, json={}).json()  # requested unscoped/write
+
+    # The human changes the pre-fill before approving: read-only, one board.
+    r = alice.post(
+        f"/auth/device/{code['user_code']}/approve",
+        json={"scope": "read", "board_ids": [board_a]},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "approved"
+
+    body = client.post(DEVICE_TOKEN, json={"device_code": code["device_code"]}).json()
+    assert body["scope"] == "read"
+    h = {"Authorization": f"Bearer {body['token']}"}
+    assert client.get(f"{BOARDS}/{board_a}", headers=h).status_code == 200
+
+
+def test_approve_rejects_a_board_the_approver_does_not_own(login_as, client):
+    alice = login_as(*ALICE)
+    bob = login_as(*BOB)
+    bob_board = bob.post(BOARDS, json={"name": "Bob's"}).json()["id"]
+    code = client.post(DEVICE_CODE, json={}).json()
+
+    r = alice.post(
+        f"/auth/device/{code['user_code']}/approve",
+        json={"scope": "write", "board_ids": [bob_board]},
+    )
+    assert r.status_code == 403
+    # And the code is untouched — still pending, approvable for real afterwards.
+    assert alice.get(f"/auth/device/{code['user_code']}").json()["status"] == "pending"
+
+
+def test_approve_an_already_resolved_code_is_409(login_as, client):
+    alice = login_as(*ALICE)
+    code = client.post(DEVICE_CODE, json={}).json()
+    alice.post(f"/auth/device/{code['user_code']}/approve", json={"scope": "write"})
+
+    r = alice.post(f"/auth/device/{code['user_code']}/approve", json={"scope": "write"})
+    assert r.status_code == 409
+
+
+def test_deny_requires_auth(client):
+    user_code = client.post(DEVICE_CODE, json={}).json()["user_code"]
+    assert client.post(f"/auth/device/{user_code}/deny").status_code == 401
+
+
+def test_deny_then_poll_is_access_denied(login_as, client):
+    alice = login_as(*ALICE)
+    code = client.post(DEVICE_CODE, json={}).json()
+
+    r = alice.post(f"/auth/device/{code['user_code']}/deny")
+    assert r.status_code == 204
+    assert alice.get(f"/auth/device/{code['user_code']}").json()["status"] == "denied"
+
+    poll = client.post(DEVICE_TOKEN, json={"device_code": code["device_code"]})
+    assert poll.json() == {"error": "access_denied"}
+
+
+def test_deny_an_already_resolved_code_is_409(login_as, client):
+    alice = login_as(*ALICE)
+    code = client.post(DEVICE_CODE, json={}).json()
+    alice.post(f"/auth/device/{code['user_code']}/deny")
+
+    r = alice.post(f"/auth/device/{code['user_code']}/deny")
+    assert r.status_code == 409

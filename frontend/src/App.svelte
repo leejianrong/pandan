@@ -12,6 +12,7 @@
   import Landing from "./lib/components/Landing.svelte";
   import BoardSwitcher from "./lib/components/BoardSwitcher.svelte";
   import CommandPalette from "./lib/components/CommandPalette.svelte";
+  import DeviceApproval from "./lib/components/DeviceApproval.svelte";
   import NavRail from "./lib/components/NavRail.svelte";
   import type { RailView } from "./lib/components/NavRail.svelte";
   import Tokens from "./lib/components/Tokens.svelte";
@@ -90,8 +91,24 @@
   // a snippet closure, where the `{:else user}` template narrowing doesn't reach.
   const avatarInitial = $derived((user?.email ?? "?").charAt(0).toUpperCase());
 
+  // Device-flow consent screen (ADR 0024, KAN-1729): reached via a deep link
+  // (`?user_code=…`) `pandan auth login` prints/opens, never through normal
+  // in-app navigation — there is deliberately no NavRail/palette entry for it.
+  // Read once at mount (no client-side router to react to later changes) and
+  // rendered in place of the normal main content while set, so signing out and
+  // back in (or a stray reload) doesn't lose the pending approval mid-flow.
+  let deviceUserCode = $state<string | null>(null);
+
+  function clearDeviceLink() {
+    deviceUserCode = null;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("user_code");
+    window.history.replaceState({}, "", url);
+  }
+
   onMount(async () => {
     initTheme();
+    deviceUserCode = new URLSearchParams(window.location.search).get("user_code");
     try {
       user = await getCurrentUser();
     } catch {
@@ -224,7 +241,9 @@
   <div class="app-shell">
     <NavRail {view} onNavigate={navigateFromRail} />
     <main>
-      {#if view === "board"}
+      {#if deviceUserCode}
+        <DeviceApproval userCode={deviceUserCode} onDone={clearDeviceLink} />
+      {:else if view === "board"}
         <Board />
       {:else if view === "dashboard"}
         <Dashboard navigate={() => show("board")} />

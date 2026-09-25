@@ -838,6 +838,43 @@ export async function deleteToken(id: number): Promise<void> {
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
 }
 
+// --- Device-flow consent screen (ADR 0024, KAN-1729) -------------------------
+// Unversioned, like /auth/github/* above — these are NOT under /api/v1.
+
+export interface DeviceAuthorization {
+  user_code: string;
+  status: "pending" | "approved" | "denied";
+  requested_scope: TokenScope;
+  requested_board_ids: number[] | null;
+  expires_at: string;
+}
+
+export async function getDeviceAuthorization(userCode: string): Promise<DeviceAuthorization> {
+  const res = await fetch(`/auth/device/${encodeURIComponent(userCode)}`);
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function approveDeviceAuthorization(
+  userCode: string,
+  payload: { scope: TokenScope; board_ids: number[] | null },
+): Promise<DeviceAuthorization> {
+  const res = await fetch(`/auth/device/${encodeURIComponent(userCode)}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function denyDeviceAuthorization(userCode: string): Promise<void> {
+  const res = await fetch(`/auth/device/${encodeURIComponent(userCode)}/deny`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+}
+
 // --- Board members (KAN-12 API, surfaced in the UI by KAN-14) --------------
 // A board can have members (users other than the owner) with a role. The
 // management API is owner-gated (403 for non-owners). Members are scoped to a
