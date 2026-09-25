@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from .auth import bearer_scheme
 from .auth_models import PersonalAccessToken, User
 from .db import get_db
-from .models import Board, BoardMember, Team, TeamMember
+from .models import Board, BoardMember, Workspace, WorkspaceMember
 from .tokens import ACCEPTED_TOKEN_PREFIXES, hash_token
 from .users import current_optional_user
 
@@ -169,12 +169,12 @@ def _effective_access(db: Session, principal: User, board: Board) -> Access | No
     1. The board **OWNER** always has ``MANAGE`` (full access), regardless of any
        membership row (KAN-13).
     2. An explicit ``board_member`` row, if any — **the override**. Checked before
-       the team default so an explicit share always wins, per D2.
-    3. The board's **team default** (new): if ``board.team_id`` is set and the
-       principal is a ``team_member`` of it, that membership's role maps through
+       the workspace default so an explicit share always wins, per D2.
+    3. The board's **workspace default** (new): if ``board.workspace_id`` is set and the
+       principal is a ``workspace_member`` of it, that membership's role maps through
        the *same* ``_ROLE_ACCESS`` table — one vocabulary, two places it can be
        granted (ADR 0021 §Shape). Only consulted when step 2 found nothing, so an
-       explicit ``viewer`` share on a board still beats an ``editor`` team default,
+       explicit ``viewer`` share on a board still beats an ``editor`` workspace default,
        and vice versa — "explicit" wins on *presence*, not on being the higher
        grant.
     4. None of the above → ``None`` (→ 403).
@@ -190,11 +190,11 @@ def _effective_access(db: Session, principal: User, board: Board) -> Access | No
     if role is not None:
         # An unknown role (should never happen — CHECK-constrained) grants nothing.
         return _ROLE_ACCESS.get(role)
-    if board.team_id is not None:
+    if board.workspace_id is not None:
         role = db.scalar(
-            select(TeamMember.role).where(
-                TeamMember.team_id == board.team_id,
-                TeamMember.user_id == principal.id,
+            select(WorkspaceMember.role).where(
+                WorkspaceMember.workspace_id == board.workspace_id,
+                WorkspaceMember.user_id == principal.id,
             )
         )
         if role is not None:
@@ -232,9 +232,9 @@ def visible_board_ids(principal: User) -> Select:
     list endpoints so a caller only ever sees boards they have access to.
 
     A board is visible if the principal **owns** it, *or* is a ``board_member`` of
-    it (KAN-15), *or* is a ``team_member`` of the team it belongs to (M9 V68,
+    it (KAN-15), *or* is a ``workspace_member`` of the workspace it belongs to (M9 V68,
     KAN-1057; ADR 0021 — the matching ``OR`` clause for :func:`_effective_access`'s
-    new team-default rung) — the same set of boards :func:`authorize_board` grants
+    new workspace-default rung) — the same set of boards :func:`authorize_board` grants
     at least ``READ`` on. Kept as a ``Select`` so callers can use it as an ``IN``
     subquery unchanged."""
     return select(Board.id).where(
@@ -245,63 +245,63 @@ def visible_board_ids(principal: User) -> Select:
             ),
             Board.id.in_(
                 select(Board.id)
-                .join(TeamMember, TeamMember.team_id == Board.team_id)
-                .where(TeamMember.user_id == principal.id)
+                .join(WorkspaceMember, WorkspaceMember.workspace_id == Board.workspace_id)
+                .where(WorkspaceMember.user_id == principal.id)
             ),
         )
     )
 
 
-# --- teams (M9 V65-V66, KAN-1054/1055; ADR 0021) ----------------------------
+# --- workspaces (M9 V65-V66, KAN-1054/1055; ADR 0021) ----------------------------
 #
-# A team has no owner_id (ADR 0021 §Shape — administered by whichever member holds
+# A workspace has no owner_id (ADR 0021 §Shape — administered by whichever member holds
 # the `owner` role, not by one person by default), so unlike a board there is no
 # owner-always-MANAGE rung: membership itself is the whole visibility rule, and
-# holding the `owner` role (not "being *the* owner" — a team may have several) is
-# the whole management rule. (The team-default-board-*access* rung — a team role
+# holding the `owner` role (not "being *the* owner" — a workspace may have several) is
+# the whole management rule. (The workspace-default-board-*access* rung — a workspace role
 # granting access to a *board* — is `_effective_access` step 3 / `visible_board_ids`
-# above, V68; what follows here gates the team's own membership, V66.)
+# above, V68; what follows here gates the workspace's own membership, V66.)
 
 
-def visible_team_ids(principal: User) -> Select:
-    """A scalar subquery of the team ids this principal is a member of. Mirrors
-    :func:`visible_board_ids`, but simpler: a team has no owner analogue, so
+def visible_workspace_ids(principal: User) -> Select:
+    """A scalar subquery of the workspace ids this principal is a member of. Mirrors
+    :func:`visible_board_ids`, but simpler: a workspace has no owner analogue, so
     membership is the entire rule."""
-    return select(TeamMember.team_id).where(TeamMember.user_id == principal.id)
+    return select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == principal.id)
 
 
-def authorize_team(
-    db: Session, principal: User, team_id: int, *, require_owner: bool = False
-) -> Team:
-    """Load ``team_id`` and assert the principal is a member of it, else raise.
-    Returns the loaded team with the principal's role attached transiently as
-    ``team.role`` (mirrors ``BoardRead.role``'s attachment pattern), so callers
+def authorize_workspace(
+    db: Session, principal: User, workspace_id: int, *, require_owner: bool = False
+) -> Workspace:
+    """Load ``workspace_id`` and assert the principal is a member of it, else raise.
+    Returns the loaded workspace with the principal's role attached transiently as
+    ``workspace.role`` (mirrors ``BoardRead.role``'s attachment pattern), so callers
     don't need a second query to answer "what's my role here".
 
-    - **404** if the team doesn't exist.
+    - **404** if the workspace doesn't exist.
     - **403** if the principal is not a member of it (any role).
     - **403** if ``require_owner`` and the principal's role isn't ``owner`` (V66,
-      KAN-1055) — team-member management + rename/delete are owner-role gated,
+      KAN-1055) — workspace-member management + rename/delete are owner-role gated,
       mirroring ``Access.MANAGE`` for a board, but checked against the
-      ``team_member`` role directly since a team has no ``owner_id`` to compare.
+      ``workspace_member`` role directly since a workspace has no ``owner_id`` to compare.
     """
-    team = db.get(Team, team_id)
-    if team is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    workspace = db.get(Workspace, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
     role = db.scalar(
-        select(TeamMember.role).where(
-            TeamMember.team_id == team_id, TeamMember.user_id == principal.id
+        select(WorkspaceMember.role).where(
+            WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.user_id == principal.id
         )
     )
     if role is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="you do not have access to this team",
+            detail="you do not have access to this workspace",
         )
     if require_owner and role != "owner":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="only a team owner can do this",
+            detail="only a workspace owner can do this",
         )
-    team.role = role
-    return team
+    workspace.role = role
+    return workspace
