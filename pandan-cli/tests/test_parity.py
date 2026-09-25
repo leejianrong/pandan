@@ -128,18 +128,14 @@ MCP_TO_CLI: dict[str, tuple[str, ...]] = {
     "get_board": ("board", "get"),        # KAN-502
     "update_board": ("board", "update"),  # KAN-502 — was MCP-only
     "delete_board": ("board", "delete"),  # KAN-502 — was MCP-only
-    # workspaces (M9 V69, KAN-1058 — the 5-tool group ADR 0019 was amended to admit).
-    # The MCP tool names on the left are still "team"-spelled on purpose: KAN-1722
-    # (this CLI rename) lands before KAN-1723 (the MCP tool rename), so the real
-    # tools in mcp/pandan_mcp/server.py are still list_team/create_team/etc at this
-    # point in the branch sequence — only the CLI-side verb (the tuple) is renamed
-    # here. KAN-1723 flips these keys to list_workspace/etc in the same PR that
-    # renames the tools themselves.
-    "list_teams": ("workspace", "list"),
-    "create_team": ("workspace", "create"),
-    "get_team": ("workspace", "get"),
-    "update_team": ("workspace", "update"),
-    "delete_team": ("workspace", "delete"),
+    # workspaces (M9 V69, KAN-1058 — the 5-tool group ADR 0019 was amended to admit;
+    # renamed from "team" to "workspace" by ADR 0023, KAN-1723 — a further ADR 0019
+    # amendment, a rename of the frozen surface rather than growth).
+    "list_workspaces": ("workspace", "list"),
+    "create_workspace": ("workspace", "create"),
+    "get_workspace": ("workspace", "get"),
+    "update_workspace": ("workspace", "update"),
+    "delete_workspace": ("workspace", "delete"),
     # cards
     "list_cards": ("list",),
     "get_card": ("get",),

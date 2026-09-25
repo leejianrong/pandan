@@ -1,7 +1,8 @@
 # ADR 0019 — MCP surface right-sizing: keep the breadth, freeze its growth
 
 - **Status:** Accepted — and **executed**. Phase 1 (measure + decide) and Phase 2 (freeze + compact +
-  document) have both landed. Nothing was removed and no tool was renamed.
+  document) have both landed. Nothing was removed; the M9 team-tool group was later **renamed**, not
+  added to or taken away from, by the 2026-09-25 amendment below.
 - **Date:** 2026-07-31 · **amended 2026-08-01 (KAN-518)** — the resident measurement omitted
   `outputSchema` silently; it is now measured as its own bracketed row, deliberately kept out of the
   headline, and deliberately **not** compacted. See [*The fourth field*](#the-fourth-field-outputschema-kan-518).
@@ -15,7 +16,11 @@
   KAN-980)** — **+1 tool** (56 → 57), `close_cycle`: the one **write** op in this batch, unlike the two
   preceding amendments' reads. See
   [*Amendment: the M8 V59 close_cycle tool*](#amendment-the-m8-v59-close_cycle-tool-2026-09-02-kan-980)
-  for the measured delta and why it crosses the read/write line the M8 V57 amendment drew.
+  for the measured delta and why it crosses the read/write line the M8 V57 amendment drew. ·
+  **amended 2026-09-25 (ADR 0023, KAN-1723)** — the first amendment that is a **rename**, not growth:
+  the M9 team-tool group above becomes `list_workspace`/`create_workspace`/`get_workspace`/
+  `update_workspace`/`delete_workspace`; count unchanged at 57. See
+  [*Amendment: the workspace rename*](#amendment-the-workspace-rename-2026-09-25-kan-1723).
 - **Context source:** Milestone 7 ("Name & Sharpen the Tools"), slice **V49** / **KAN-432**, shaped
   requirement **R3.1** (measure the schema token cost of the tool surface and of each alternative) and
   Shape A part **A8**. Builds on ADR 0005 (API-first — the CLI and MCP server are both thin adapters,
@@ -694,3 +699,53 @@ one that isn't a read — which is exactly the case the freeze's own default (ne
 CLI unless there is a specific agent workflow that needs it on MCP) exists to let through when the
 argument is actually made, rather than assumed. The bar stays the same: name the tool, measure the
 delta, say why the CLI alone doesn't serve the specific workflow. It did here.
+
+## Amendment: the workspace rename (2026-09-25, KAN-1723)
+
+**The freeze's first rename, not growth.** Every prior amendment (M9 team tools, M8 V57
+planning-interval pair, M8 V59 `close_cycle`) added tools. This one adds none: [ADR 0023](0023-workspace-rename.md)
+renames the M9 Team tier to Workspace end to end — schema (KAN-1721), the SPA view (KAN-1725), the CLI
+(KAN-1722) — and the MCP tool group from the M9 V69 amendment above is the last piece.
+
+**Decision: rename `list_teams`/`create_team`/`get_team`/`update_team`/`delete_team` to
+`list_workspaces`/`create_workspace`/`get_workspace`/`update_workspace`/`delete_workspace`. Count
+unchanged at 57.** `create_board`/`update_board`'s `team_id` argument is renamed `workspace_id` to
+match — an argument rename on existing tools, not itself a fresh amendment (renaming an argument was
+never distinguished from adding one by this ADR's own freeze rule, and neither changes the *tool
+count* the freeze actually pins).
+
+**Why this needs an amendment at all, when a rename changes nothing about capability.** `FROZEN_TOOLS`
+in [`mcp/tests/test_schema.py`](../../mcp/tests/test_schema.py) pins the surface **by name**, not only
+by count — the test's own failure message has always said "adding a tool is an ADR amendment, not a
+fixture edit," and a rename is exactly the shape of change that message exists to force through this
+door rather than a silent fixture edit, even though nothing about the surface's size or intent moved.
+Recording it here is also what lets a future reader distinguish "renamed, deliberately, with a reason"
+from "an inconsistency nobody explained."
+
+**Measurement**, via the same harness (`mcp/scripts/measure_tool_schema_tokens.py`), comparing
+immediately before and after this change on the same commit/interpreter:
+
+| surface | tools | compact | `indent=2` | `outputSchema` alone (compact) |
+|---|---:|---:|---:|---:|
+| before (team-named) | 57 | 10,325 | 14,072 | 977 |
+| **after (workspace-named)** | **57** | **10,359** | **14,106** | **977** |
+| **delta** | **+0** | **+34 (+0.3%)** | **+34** | **+0** |
+
+The tiny positive delta is exactly what a rename to longer names should cost: `list_teams` (10 chars)
+→ `list_workspaces` (15) and `create_team`/`get_team`/`update_team`/`delete_team` (11/8/11/11) →
+`create_workspace`/`get_workspace`/`update_workspace`/`delete_workspace` (16/13/16/16), plus the
+matching `workspace_id` argument name wherever `team_id` appeared — none of it schema *shape*, all of
+it tool/argument-name string length. `outputSchema` is unaffected because none of these tools' response
+shapes reference the renamed argument by name in a property key.
+
+**Both freeze pins were updated in the same PR, per this ADR's own requirement**: `FROZEN_TOOLS` (5
+names swapped, count unchanged at 57) in [`mcp/tests/test_schema.py`](../../mcp/tests/test_schema.py),
+and `pandan-cli/tests/test_parity.py`'s `MCP_TO_CLI` (the 5 keys swapped from `list_team`/etc to
+`list_workspace`/etc — the CLI-side verb tuples were already `("workspace", ...)` since KAN-1722, which
+landed first). `mcp/README.md`'s tool table and *"why the surface is frozen"* section were updated to
+match.
+
+**Consequence for the freeze's own framing.** The freeze has now been amended four times — three
+additions and one rename — and each time the mechanism worked exactly as designed: the failing pin
+test forced the change through this document rather than around it. A rename costing +0.3% is the
+cheapest amendment yet, which is the expected shape of "we changed the name, not the thing."

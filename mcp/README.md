@@ -27,15 +27,15 @@ source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 |------|----------|--------------|
 | `warmup()` | `GET /api/health` (unversioned) | — (wakes a scaled-to-zero server; soft status) |
 | `list_boards()` | `GET /boards` | — (lists boards you own) |
-| `create_board(name, key?, team_id?)` | `POST /boards` | — (creates one you own) |
+| `create_board(name, key?, workspace_id?)` | `POST /boards` | — (creates one you own) |
 | `get_board(board_id)` | `GET /boards/{id}` | — (by id) |
 | `update_board(board_id, name?, ...)` | `PATCH /boards/{id}` | via the entity's own board |
 | `delete_board(board_id)` | `DELETE /boards/{id}` | via the entity's own board |
-| `list_teams(fields?)` | `GET /teams` | — (lists teams you're a member of; M9 V69) |
-| `create_team(name)` | `POST /teams` | — (creates one; you become its owner) |
-| `get_team(team_id)` | `GET /teams/{id}` | — (by id; any member) |
-| `update_team(team_id, name?)` | `PATCH /teams/{id}` | — (rename; owner-role members only) |
-| `delete_team(team_id)` | `DELETE /teams/{id}` | — (owner-role members only; linked boards are unclaimed) |
+| `list_workspaces(fields?)` | `GET /workspaces` | — (lists workspaces you're a member of; M9 V69) |
+| `create_workspace(name)` | `POST /workspaces` | — (creates one; you become its owner) |
+| `get_workspace(workspace_id)` | `GET /workspaces/{id}` | — (by id; any member) |
+| `update_workspace(workspace_id, name?)` | `PATCH /workspaces/{id}` | — (rename; owner-role members only) |
+| `delete_workspace(workspace_id)` | `DELETE /workspaces/{id}` | — (owner-role members only; linked boards are unclaimed) |
 | `list_cards(board_id?, column?, epic_id?, updated_since?, limit?, cursor?, fields?, full?)` | `GET /cards` (V3 query API) | `board_id` |
 | `list_epics(board_id?, fields?, full?)` | `GET /epics` | `board_id` |
 | `get_card(card_id, fields?, full?)` | `GET /cards/{id}` | — (by card id) |
@@ -162,7 +162,11 @@ tools*](../docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m8-v57-planni
 and **M8 V59 (KAN-980) added `close_cycle`, 56 → 57** — the first amendment that is a
 *write*, not a read (see [*Amendment: the M8 V59 close_cycle
 tool*](../docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m8-v59-close_cycle-tool-2026-09-02-kan-980)) —
-none of them a side effect of a CLI card. Recorded here because the resident-cost headline
+none of them a side effect of a CLI card. A fourth change, **ADR 0023 (KAN-1723,
+2026-09-25), renamed the 5 M9 team tools to `list_workspace`/etc. — count unchanged
+at 57** (a rename of the frozen surface, not growth; the amendment note above stays
+team-named as the historical record of what the count actually was on 2026-09-01).
+Recorded here because the resident-cost headline
 invites the wrong conclusion, and this decision should not be re-litigated from it.
 
 **What it costs.** Every one of these schemas loads into an agent's context before
