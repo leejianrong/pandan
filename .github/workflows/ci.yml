@@ -225,6 +225,16 @@ jobs:
               - 'backend/uv.lock'
               - 'frontend/package.json'
               - 'frontend/package-lock.json'
+              # The backend image bakes two sibling path deps since KAN-1732
+              # (it hosts the MCP tool registry over Streamable HTTP, so it
+              # depends on pandan-mcp, which itself depends on pandan-client),
+              # so their manifests are build inputs too — the same reasoning
+              # `mcp_image` below already applies to mcp/Dockerfile's own
+              # pandan-client dependency.
+              - 'mcp/pyproject.toml'
+              - 'mcp/uv.lock'
+              - 'pandan-client/pyproject.toml'
+              - 'pandan-client/uv.lock'
             # mcp/Dockerfile has the SAME hole, checked rather than assumed:
             # publish-mcp-image.yml is the only workflow in this repo that builds
             # any image, and it triggers on `v*` tags only (KAN-452's finding), so

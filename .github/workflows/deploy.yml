@@ -74,8 +74,14 @@ on:
 # the Dockerfile's COPY set — it matches, verified by building from a context
 # containing only those paths — and mcp/tests/test_image_build_inputs.py now reads
 # IMAGE_PATHS live out of this file and asserts it keeps matching.)
+#
+# `mcp/` and `pandan-client/` joined the set in KAN-1732: the backend image now
+# hosts the MCP tool registry over Streamable HTTP, so backend/pyproject.toml
+# depends on `pandan-mcp` by path (which itself depends on `pandan-client` by
+# path), and the root Dockerfile COPYs both into the image for `uv sync` to
+# resolve — see the Dockerfile's own comment at that COPY step.
 env:
-  IMAGE_PATHS: '^(backend/|frontend/|Dockerfile|fly\.toml|\.dockerignore)'
+  IMAGE_PATHS: '^(backend/|frontend/|mcp/|pandan-client/|Dockerfile|fly\.toml|\.dockerignore)'
 
 jobs:
   changes:
