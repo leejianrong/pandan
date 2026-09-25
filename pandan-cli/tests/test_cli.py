@@ -131,34 +131,34 @@ class FakeClient:
     def delete_board(self, board_id):
         return self._call("delete_board", board_id=board_id)
 
-    def list_teams(self):
-        return self._call("list_teams")
+    def list_workspaces(self):
+        return self._call("list_workspaces")
 
-    def create_team(self, name):
-        return self._call("create_team", name=name)
+    def create_workspace(self, name):
+        return self._call("create_workspace", name=name)
 
-    def get_team(self, team_id):
-        return self._call("get_team", team_id=team_id)
+    def get_workspace(self, workspace_id):
+        return self._call("get_workspace", workspace_id=workspace_id)
 
-    def update_team(self, team_id, **kw):
-        return self._call("update_team", team_id=team_id, **kw)
+    def update_workspace(self, workspace_id, **kw):
+        return self._call("update_workspace", workspace_id=workspace_id, **kw)
 
-    def delete_team(self, team_id):
-        return self._call("delete_team", team_id=team_id)
+    def delete_workspace(self, workspace_id):
+        return self._call("delete_workspace", workspace_id=workspace_id)
 
-    def list_team_members(self, team_id):
-        return self._call("list_team_members", team_id=team_id)
+    def list_workspace_members(self, workspace_id):
+        return self._call("list_workspace_members", workspace_id=workspace_id)
 
-    def add_team_member(self, team_id, **kw):
-        return self._call("add_team_member", team_id=team_id, **kw)
+    def add_workspace_member(self, workspace_id, **kw):
+        return self._call("add_workspace_member", workspace_id=workspace_id, **kw)
 
-    def update_team_member(self, team_id, member_id, **kw):
+    def update_workspace_member(self, workspace_id, member_id, **kw):
         return self._call(
-            "update_team_member", team_id=team_id, member_id=member_id, **kw
+            "update_workspace_member", workspace_id=workspace_id, member_id=member_id, **kw
         )
 
-    def remove_team_member(self, team_id, member_id):
-        return self._call("remove_team_member", team_id=team_id, member_id=member_id)
+    def remove_workspace_member(self, workspace_id, member_id):
+        return self._call("remove_workspace_member", workspace_id=workspace_id, member_id=member_id)
 
     def get_epic(self, epic_id):
         return self._call("get_epic", epic_id=epic_id)
@@ -1961,11 +1961,11 @@ def test_board_list_calls_client(monkeypatch, env):
 def test_board_create_passes_name(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result=BOARD))
     assert cli.run(["board", "create", "Roadmap"]) == 0
-    # ``key``/``team_id`` ride along as None (V51/V67): the server derives a key,
-    # and an omitted team keeps the board personal, so the normal create is still
+    # ``key``/``workspace_id`` ride along as None (V51/V67): the server derives a key,
+    # and an omitted workspace keeps the board personal, so the normal create is still
     # a one-argument call from the user's point of view.
     assert fake.calls == [
-        ("create_board", {"name": "Roadmap", "key": None, "team_id": None})
+        ("create_board", {"name": "Roadmap", "key": None, "workspace_id": None})
     ]
 
 
@@ -1975,17 +1975,17 @@ def test_board_create_passes_an_explicit_key(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result=BOARD))
     assert cli.run(["board", "create", "Engineering", "--key", "ENG"]) == 0
     assert fake.calls == [
-        ("create_board", {"name": "Engineering", "key": "ENG", "team_id": None})
+        ("create_board", {"name": "Engineering", "key": "ENG", "workspace_id": None})
     ]
 
 
-def test_board_create_passes_an_explicit_team(monkeypatch, env):
-    """M9 V67, KAN-1056. A plain numeric team id — a team has no key/ref namespace
+def test_board_create_passes_an_explicit_workspace(monkeypatch, env):
+    """M9 V67, KAN-1056. A plain numeric workspace id — a workspace has no key/ref namespace
     of its own, unlike a board."""
     fake = patch_client(monkeypatch, FakeClient(result=BOARD))
-    assert cli.run(["board", "create", "Roadmap", "--team", "9"]) == 0
+    assert cli.run(["board", "create", "Roadmap", "--workspace", "9"]) == 0
     assert fake.calls == [
-        ("create_board", {"name": "Roadmap", "key": None, "team_id": 9})
+        ("create_board", {"name": "Roadmap", "key": None, "workspace_id": 9})
     ]
 
 
@@ -2005,7 +2005,7 @@ def test_board_update_can_change_just_the_key(monkeypatch, env):
             "outbound_webhook_url",
             "outbound_webhook_secret",
             "outbound_webhook_enabled",
-            "team_id",
+            "workspace_id",
         )
     )
 
@@ -2131,7 +2131,7 @@ def test_board_update_sends_only_the_flags_passed(monkeypatch, env):
             "outbound_webhook_url": None,
             "outbound_webhook_secret": None,
             "outbound_webhook_enabled": None,
-            "team_id": None,
+            "workspace_id": None,
         }),
     ]
 
@@ -2155,7 +2155,7 @@ def test_board_update_carries_the_whole_outbound_webhook_trio(monkeypatch, env):
             "outbound_webhook_url": "https://hooks.example/pandan",
             "outbound_webhook_secret": FAKE_WEBHOOK_KEY,
             "outbound_webhook_enabled": True,
-            "team_id": None,
+            "workspace_id": None,
         }),
     ]
 
@@ -2232,7 +2232,7 @@ def test_board_update_autosync_does_not_disturb_the_webhook_trio(monkeypatch, en
             "outbound_webhook_url": None,
             "outbound_webhook_secret": None,
             "outbound_webhook_enabled": None,
-            "team_id": None,
+            "workspace_id": None,
         }),
     ]
 
@@ -2242,13 +2242,13 @@ def test_board_update_covers_every_boardupdate_field(monkeypatch, env):
     API's `BoardUpdate` in one invocation. The set is pinned **by name, not by a
     number**, because counts on this project have been wrong before — and this test
     has now earned that twice: V51 (KAN-972) added `key`, taking the set from six to
-    seven; V67 (KAN-1056) added `team_id`, taking it to eight."""
+    seven; V67 (KAN-1056) added `workspace_id`, taking it to eight."""
     fake = patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
     code = cli.run([
         "board", "update", "5",
         "--name", "Pandan Roadmap",
         "--key", "PDN",
-        "--team", "9",
+        "--workspace", "9",
         "--autosync-enabled",
         "--autosync-advance-to-done",
         "--outbound-webhook-url", "https://hooks.example/pandan",
@@ -2265,10 +2265,10 @@ def test_board_update_covers_every_boardupdate_field(monkeypatch, env):
         "outbound_webhook_url",
         "outbound_webhook_secret",
         "outbound_webhook_enabled",
-        "team_id",
+        "workspace_id",
     }
     assert sent["key"] == "PDN"
-    assert sent["team_id"] == 9
+    assert sent["workspace_id"] == 9
     assert not any(value is None for value in sent.values())
 
 
@@ -2398,123 +2398,126 @@ def test_board_delete_with_yes_reports_the_board_noun(monkeypatch, env, capsys):
     assert capsys.readouterr().out == "deleted board 5\n"
 
 
-# --- team (M9 V69, KAN-1058) -------------------------------------------------
+# --- workspace (M9 V69, KAN-1058) -------------------------------------------------
 
-TEAM = {"id": 1, "name": "Platform", "role": "owner"}
-
-
-def test_team_list_calls_list_teams(monkeypatch, env):
-    fake = patch_client(monkeypatch, FakeClient(result={"teams": [TEAM]}))
-    assert cli.run(["team", "list"]) == 0
-    assert fake.calls == [("list_teams", {})]
+WORKSPACE = {"id": 1, "name": "Platform", "role": "owner"}
 
 
-def test_team_create_passes_name(monkeypatch, env):
-    fake = patch_client(monkeypatch, FakeClient(result=TEAM))
-    assert cli.run(["team", "create", "Platform"]) == 0
-    assert fake.calls == [("create_team", {"name": "Platform"})]
+def test_workspace_list_calls_list_workspaces(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={"workspaces": [WORKSPACE]}))
+    assert cli.run(["workspace", "list"]) == 0
+    assert fake.calls == [("list_workspaces", {})]
 
 
-def test_team_get_calls_get_team(monkeypatch, env):
-    fake = patch_client(monkeypatch, FakeClient(result=TEAM))
-    assert cli.run(["team", "get", "1"]) == 0
-    assert fake.calls == [("get_team", {"team_id": 1})]
+def test_workspace_create_passes_name(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=WORKSPACE))
+    assert cli.run(["workspace", "create", "Platform"]) == 0
+    assert fake.calls == [("create_workspace", {"name": "Platform"})]
 
 
-def test_team_get_human_output_is_the_team_line(monkeypatch, env, capsys):
-    patch_client(monkeypatch, FakeClient(result=TEAM))
-    cli.run(["team", "get", "1"])
+def test_workspace_get_calls_get_workspace(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=WORKSPACE))
+    assert cli.run(["workspace", "get", "1"]) == 0
+    assert fake.calls == [("get_workspace", {"workspace_id": 1})]
+
+
+def test_workspace_get_human_output_is_the_workspace_line(monkeypatch, env, capsys):
+    patch_client(monkeypatch, FakeClient(result=WORKSPACE))
+    cli.run(["workspace", "get", "1"])
     assert capsys.readouterr().out == "1\tPlatform\towner\n"
 
 
-def test_team_update_sends_name(monkeypatch, env):
-    fake = patch_client(monkeypatch, FakeClient(result=TEAM))
-    assert cli.run(["team", "update", "1", "--name", "Core Platform"]) == 0
-    assert fake.calls == [("update_team", {"team_id": 1, "name": "Core Platform"})]
+def test_workspace_update_sends_name(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result=WORKSPACE))
+    assert cli.run(["workspace", "update", "1", "--name", "Core Platform"]) == 0
+    assert fake.calls == [("update_workspace", {"workspace_id": 1, "name": "Core Platform"})]
 
 
-def test_team_update_without_name_is_an_error(monkeypatch, env, capsys):
-    fake = patch_client(monkeypatch, FakeClient(result=TEAM))
-    assert cli.run(["team", "update", "1"]) == cli.EXIT_ERROR
+def test_workspace_update_without_name_is_an_error(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result=WORKSPACE))
+    assert cli.run(["workspace", "update", "1"]) == cli.EXIT_ERROR
     assert read_error(capsys).code == "invalid_input"
     assert fake.calls == []
 
 
-def test_team_delete_refuses_without_yes(monkeypatch, env, capsys):
+def test_workspace_delete_refuses_without_yes(monkeypatch, env, capsys):
     fake = patch_client(monkeypatch, FakeClient(result={"deleted": 1}))
-    assert cli.run(["team", "delete", "1"]) == cli.EXIT_ERROR
+    assert cli.run(["workspace", "delete", "1"]) == cli.EXIT_ERROR
     assert read_error(capsys).code == "confirmation_required"
     assert fake.calls == []
 
 
-def test_team_delete_with_yes_reports_the_team_noun(monkeypatch, env, capsys):
+def test_workspace_delete_with_yes_reports_the_workspace_noun(monkeypatch, env, capsys):
     fake = patch_client(monkeypatch, FakeClient(result={"deleted": 1}))
-    assert cli.run(["team", "delete", "1", "--yes"]) == 0
-    assert fake.calls == [("delete_team", {"team_id": 1})]
-    assert capsys.readouterr().out == "deleted team 1\n"
+    assert cli.run(["workspace", "delete", "1", "--yes"]) == 0
+    assert fake.calls == [("delete_workspace", {"workspace_id": 1})]
+    assert capsys.readouterr().out == "deleted workspace 1\n"
 
 
-# --- team member (M9 V69, KAN-1058 — CLI-only, no MCP twin) -----------------
+# --- workspace member (M9 V69, KAN-1058 — CLI-only, no MCP twin) -----------------
 
 MEMBER = {
-    "id": 5, "team_id": 1, "user_id": "u1", "email": "bob@example.com", "role": "viewer",
+    "id": 5, "workspace_id": 1, "user_id": "u1", "email": "bob@example.com", "role": "viewer",
 }
 
 
-def test_team_member_list_calls_list_team_members(monkeypatch, env):
+def test_workspace_member_list_calls_list_workspace_members(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result={"members": [MEMBER]}))
-    assert cli.run(["team", "member", "list", "1"]) == 0
-    assert fake.calls == [("list_team_members", {"team_id": 1})]
+    assert cli.run(["workspace", "member", "list", "1"]) == 0
+    assert fake.calls == [("list_workspace_members", {"workspace_id": 1})]
 
 
-def test_team_member_get_human_output_is_the_member_line(monkeypatch, env, capsys):
+def test_workspace_member_get_human_output_is_the_member_line(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"members": [MEMBER]}))
-    cli.run(["team", "member", "list", "1"])
+    cli.run(["workspace", "member", "list", "1"])
     assert data_out(capsys) == "5\tbob@example.com\tviewer\n1 member"
 
 
-def test_team_member_add_by_email_defaults_role_viewer(monkeypatch, env):
+def test_workspace_member_add_by_email_defaults_role_viewer(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result=MEMBER))
-    assert cli.run(["team", "member", "add", "1", "--email", "bob@example.com"]) == 0
+    assert cli.run(["workspace", "member", "add", "1", "--email", "bob@example.com"]) == 0
     assert fake.calls == [
-        ("add_team_member", {
-            "team_id": 1, "user_id": None, "email": "bob@example.com", "role": "viewer",
+        ("add_workspace_member", {
+            "workspace_id": 1, "user_id": None, "email": "bob@example.com", "role": "viewer",
         }),
     ]
 
 
-def test_team_member_add_by_user_id_with_role(monkeypatch, env):
+def test_workspace_member_add_by_user_id_with_role(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result=MEMBER))
-    code = cli.run(["team", "member", "add", "1", "--user-id", "u1", "--role", "editor"])
+    code = cli.run(["workspace", "member", "add", "1", "--user-id", "u1", "--role", "editor"])
     assert code == 0
     assert fake.calls == [
-        ("add_team_member", {"team_id": 1, "user_id": "u1", "email": None, "role": "editor"}),
+        (
+            "add_workspace_member",
+            {"workspace_id": 1, "user_id": "u1", "email": None, "role": "editor"},
+        ),
     ]
 
 
-def test_team_member_add_requires_exactly_one_identity(monkeypatch, env, capsys):
+def test_workspace_member_add_requires_exactly_one_identity(monkeypatch, env, capsys):
     """--user-id / --email is a required mutually-exclusive pair, so omitting both
     is an argparse usage error (exit 2), not a runtime one."""
     fake = patch_client(monkeypatch, FakeClient(result=MEMBER))
     with pytest.raises(SystemExit) as exc:
-        cli.run(["team", "member", "add", "1"])
+        cli.run(["workspace", "member", "add", "1"])
     assert exc.value.code == cli.EXIT_USAGE
     assert fake.calls == []
 
 
-def test_team_member_update_role_calls_update_team_member(monkeypatch, env):
+def test_workspace_member_update_role_calls_update_workspace_member(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result=MEMBER))
-    code = cli.run(["team", "member", "update-role", "1", "5", "--role", "editor"])
+    code = cli.run(["workspace", "member", "update-role", "1", "5", "--role", "editor"])
     assert code == 0
     assert fake.calls == [
-        ("update_team_member", {"team_id": 1, "member_id": 5, "role": "editor"}),
+        ("update_workspace_member", {"workspace_id": 1, "member_id": 5, "role": "editor"}),
     ]
 
 
-def test_team_member_rm_calls_remove_team_member(monkeypatch, env, capsys):
+def test_workspace_member_rm_calls_remove_workspace_member(monkeypatch, env, capsys):
     fake = patch_client(monkeypatch, FakeClient(result={"deleted": 5}))
-    assert cli.run(["team", "member", "rm", "1", "5"]) == 0
-    assert fake.calls == [("remove_team_member", {"team_id": 1, "member_id": 5})]
+    assert cli.run(["workspace", "member", "rm", "1", "5"]) == 0
+    assert fake.calls == [("remove_workspace_member", {"workspace_id": 1, "member_id": 5})]
     # noun="member" — the delete receipt is shape-identical across entities.
     assert capsys.readouterr().out == "deleted member 5\n"
 

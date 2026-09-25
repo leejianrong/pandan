@@ -138,7 +138,11 @@ def create_board(name: str, key: str | None = None, team_id: int | None = None) 
     ``team_id`` (M9 V67) optionally links the board to a team you belong to — call
     ``list_teams`` to find one. 403 if you aren't a member (uniformly for an unknown
     id too). Omit it and the board stays personal (``team_id: null``)."""
-    return _client_instance().create_board(name, key=key, team_id=team_id)
+    # NOTE (KAN-1722): pandan_client's kwarg is workspace_id (ADR 0023's backend
+    # rename); this tool's own argument name/docstring stay team_id until KAN-1723
+    # does the MCP-surface rename itself (an ADR 0019 amendment, tracked separately
+    # from the CLI rename this commit belongs to).
+    return _client_instance().create_board(name, key=key, workspace_id=team_id)
 
 
 @mcp.tool()
@@ -175,6 +179,8 @@ def update_board(
     untouched, not cleared. When enabled with a URL set, every notification is POSTed
     there, signed like the inbound GitHub webhook. Authorized via the board's own id —
     you must own it."""
+    # NOTE (KAN-1722): see create_board's note above — workspace_id is the client
+    # kwarg; this tool keeps team_id until KAN-1723.
     return _client_instance().update_board(
         board_id,
         name=name,
@@ -184,7 +190,7 @@ def update_board(
         outbound_webhook_url=outbound_webhook_url,
         outbound_webhook_secret=outbound_webhook_secret,
         outbound_webhook_enabled=outbound_webhook_enabled,
-        team_id=team_id,
+        workspace_id=team_id,
     )
 
 
@@ -213,7 +219,9 @@ def list_teams(fields: list[str] | None = None) -> dict[str, Any]:
     ``create_board``/``update_board``'s ``team_id`` argument. A row also carries
     your role on the team, so pass ``fields=["id","name"]`` to shave it if you
     don't need it."""
-    return shape(_client_instance().list_teams(), fields=fields)
+    # NOTE (KAN-1722): pandan_client's method is list_workspaces (ADR 0023); this
+    # tool keeps its list_teams name/signature until KAN-1723's ADR 0019 amendment.
+    return shape(_client_instance().list_workspaces(), fields=fields)
 
 
 @mcp.tool()
@@ -221,26 +229,26 @@ def create_team(name: str) -> dict[str, Any]:
     """Create a new team; you are auto-added as its **owner**-role member. Returns
     it (including its id — link a board to it with ``create_board``/
     ``update_board``'s ``team_id``)."""
-    return _client_instance().create_team(name)
+    return _client_instance().create_workspace(name)
 
 
 @mcp.tool()
 def get_team(team_id: int) -> dict[str, Any]:
     """Fetch a single team by its numeric id. You must be a member (any role)."""
-    return _client_instance().get_team(team_id)
+    return _client_instance().get_workspace(team_id)
 
 
 @mcp.tool()
 def update_team(team_id: int, name: str | None = None) -> dict[str, Any]:
     """Rename a team. Owner-role members only — 403 otherwise."""
-    return _client_instance().update_team(team_id, name=name)
+    return _client_instance().update_workspace(team_id, name=name)
 
 
 @mcp.tool()
 def delete_team(team_id: int) -> dict[str, Any]:
     """Delete a team. Owner-role members only. Any board linked to it is
     **unclaimed** (its ``team_id`` set to null), not deleted."""
-    return _client_instance().delete_team(team_id)
+    return _client_instance().delete_workspace(team_id)
 
 
 # --- cards + epics (board-scoped) ------------------------------------------

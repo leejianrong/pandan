@@ -178,18 +178,18 @@ POPULATED: dict[str, tuple[list[str], dict, str]] = {
         {"card_id": 7, "blocked_by": [3, 9], "blocks": [11]},
         "2 blocked_by · 1 blocks",
     ),
-    "team list": (
-        ["team", "list"],
-        {"teams": [
+    "workspace list": (
+        ["workspace", "list"],
+        {"workspaces": [
             {"id": 1, "name": "Platform", "role": "owner"},
             {"id": 2, "name": "Growth", "role": "editor"},
         ]},
-        "2 teams",
+        "2 workspaces",
     ),
-    "team member list": (
-        ["team", "member", "list", "1"],
+    "workspace member list": (
+        ["workspace", "member", "list", "1"],
         {"members": [
-            {"id": 1, "team_id": 1, "user_id": "u1", "email": "a@x.test", "role": "owner"},
+            {"id": 1, "workspace_id": 1, "user_id": "u1", "email": "a@x.test", "role": "owner"},
         ]},
         "1 member",
     ),
@@ -263,9 +263,11 @@ EMPTY: dict[str, tuple[list[str], dict, str]] = {
         {"card_id": 7, "blocked_by": [], "blocks": []},
         "card 7\nblocked_by:\t(none)\nblocks:\t(none)\n0 blocked_by · 0 blocks\n",
     ),
-    "team list": (["team", "list"], {"teams": []}, "(no teams)\n0 teams\n"),
-    "team member list": (
-        ["team", "member", "list", "1"],
+    "workspace list": (
+        ["workspace", "list"], {"workspaces": []}, "(no workspaces)\n0 workspaces\n"
+    ),
+    "workspace member list": (
+        ["workspace", "member", "list", "1"],
         {"members": []},
         "(no members)\n0 members\n",
     ),
