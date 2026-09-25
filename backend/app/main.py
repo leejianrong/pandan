@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from . import oauth_metadata
 from .db import get_db
 from .mcp_host import hosted_mcp_app, hosted_mcp_lifespan
 from .observability import add_request_logging, configure_logging, init_error_tracking
@@ -226,6 +227,11 @@ register_auth_routes(app)
 # RFC 8628 device flow (ADR 0024, KAN-1727): /auth/device/{code,token}, no auth
 # on either route — the whole point is obtaining a first credential.
 app.include_router(device_auth.router)
+# RFC 9728 protected resource metadata (ADR 0025, KAN-1733): the discovery
+# document a cold MCP client GETs at /.well-known/oauth-protected-resource/mcp
+# to learn which authorization server protects /mcp — no auth on this route
+# either, matching every other discovery/bootstrap endpoint above.
+app.include_router(oauth_metadata.router)
 
 # Hosted Streamable HTTP MCP transport (ADR 0025, KAN-1732): the exact same
 # tool registry the stdio `pandan-mcp` server exposes, reachable without a

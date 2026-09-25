@@ -194,8 +194,12 @@ def _call_tool(client, hdrs: dict, name: str, arguments: dict, *, id_: int = 2) 
 def test_missing_bearer_is_401(client):
     r = _mcp_post(client, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
     assert r.status_code == 401
-    assert r.headers["www-authenticate"] == "Bearer"
     assert r.json()["detail"] == "missing bearer token"
+    # RFC 9728 discovery (KAN-1733): the 401 itself points a cold client at
+    # the metadata document, on THIS request's own origin.
+    assert r.headers["www-authenticate"] == (
+        'Bearer resource_metadata="http://testserver/.well-known/oauth-protected-resource/mcp"'
+    )
 
 
 def test_non_bearer_scheme_is_401(client):
