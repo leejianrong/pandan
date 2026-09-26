@@ -996,6 +996,12 @@ class TokenRead(BaseModel):
     created_at: datetime
     last_used_at: datetime | None
     expires_at: datetime | None
+    # The connected app's registered name, for a token minted via the OAuth
+    # authorization_code/refresh_token grants (ADR 0026, KAN-1736); ``None`` for
+    # a self-serve Tokens-UI/device-flow PAT (or a CIMD-issued one — see
+    # ``PersonalAccessToken.client_name``). The Tokens UI labels app-issued
+    # tokens by this instead of the user-typed ``name``.
+    client_name: str | None = None
 
 
 class TokenCreated(TokenRead):

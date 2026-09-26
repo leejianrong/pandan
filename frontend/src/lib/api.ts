@@ -804,6 +804,10 @@ export interface Token {
   created_at: string;
   last_used_at: string | null;
   expires_at: string | null;
+  // The connected app's registered name, for a token minted via the OAuth
+  // authorization_code/refresh_token grants (ADR 0026, KAN-1736) — null for a
+  // self-serve Tokens-UI/device-flow PAT.
+  client_name: string | null;
 }
 
 // The create response — metadata plus the raw secret (shown once, never again).

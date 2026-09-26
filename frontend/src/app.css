@@ -2443,6 +2443,18 @@ button.primary:disabled {
   background: var(--surface-2);
   color: var(--muted);
 }
+.token-app-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--type-label-medium-size);
+  line-height: var(--type-label-medium-line-height);
+  font-weight: 600;
+  border-radius: var(--shape-full);
+  padding: 0.1rem 0.5rem 0.1rem 0.4rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
 .scope-field {
   display: flex;
   flex-direction: column;
