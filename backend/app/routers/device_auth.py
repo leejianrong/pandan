@@ -54,6 +54,7 @@ from sqlalchemy.orm import Session
 
 from ..auth_models import (
     DeviceAuthorization,
+    OAuthClient,
     OAuthRefreshToken,
     PersonalAccessToken,
     PersonalAccessTokenBoard,
@@ -182,6 +183,12 @@ def _mint_access_token(
     credential."""
     raw, prefix, token_hash = generate_token()
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=ACCESS_TOKEN_TTL_SECONDS)
+    # A DCR-registered client has a row to point at; a CIMD client (identified
+    # by URL, resolved live in app.oauth_client) never does — see the
+    # oauth_client_id column's own docstring in app/auth_models.py.
+    oauth_client_row = db.scalars(
+        select(OAuthClient).where(OAuthClient.client_id == client_id)
+    ).first()
     pat = PersonalAccessToken(
         user_id=user_id,
         name=name,
@@ -189,6 +196,7 @@ def _mint_access_token(
         token_prefix=prefix,
         scope=scope,
         expires_at=expires_at,
+        oauth_client_id=oauth_client_row.id if oauth_client_row is not None else None,
     )
     db.add(pat)
     db.flush()  # assign pat.id before the board-scope / refresh-token FK rows

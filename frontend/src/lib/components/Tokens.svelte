@@ -1,7 +1,7 @@
 <script lang="ts">
   // Agent personal-access-token management (M3 V9, ADR 0014): create a named
   // token (secret revealed once), see your tokens' metadata, and revoke them.
-  import { KeyRound, Plus, Trash2 } from "lucide-svelte";
+  import { KeyRound, Link2, Plus, Trash2 } from "lucide-svelte";
   import type { TokenScope } from "../api";
   import {
     addToken,
@@ -147,7 +147,12 @@
         <div class="token-info">
           <div class="token-main">
             <span class="token-icon" aria-hidden="true"><KeyRound size={16} /></span>
-            <span class="token-name">{token.name}</span>
+            <span class="token-name">{token.client_name ?? token.name}</span>
+            {#if token.client_name}
+              <span class="token-app-badge" title="Issued to a connected app via OAuth">
+                <Link2 size={11} aria-hidden="true" /> connected app
+              </span>
+            {/if}
             <code class="token-prefix">{token.token_prefix}…</code>
             <span class="token-scope" class:read={token.scope === "read"}>
               {token.scope === "read" ? "observer" : "operator"}
@@ -161,7 +166,7 @@
         </div>
         {#if confirmingId === token.id}
           <div class="token-actions">
-            <span class="confirm-msg">Revoke “{token.name}”?</span>
+            <span class="confirm-msg">Revoke “{token.client_name ?? token.name}”?</span>
             <button class="danger" onclick={() => revoke(token.id)} disabled={busy}>Revoke</button>
             <button class="link" onclick={() => (confirmingId = null)}>Cancel</button>
           </div>

@@ -465,3 +465,185 @@ def test_device_code_grant_is_unaffected_by_the_new_grant_types(client):
     poll = client.post(DEVICE_TOKEN, json={"device_code": device_code})
     assert poll.status_code == 400
     assert poll.json() == {"error": "authorization_pending"}
+
+
+# --- personal_access_token.oauth_client_id (ADR 0026, KAN-1736) --------------
+
+
+def test_authorization_code_exchange_labels_the_minted_token_by_client_name(login_as, client):
+    """The Tokens UI's whole point: an app-issued token is identifiable by the
+    DCR-registered client's name, not by parsing the free-text ``name`` field."""
+    alice = login_as(*ALICE)
+    client_id = _register_client(client, name="Claude.ai")
+    verifier, challenge = _pkce_pair()
+    code = _approve_and_get_code(alice, client, client_id, verifier, challenge)
+    client.post(
+        DEVICE_TOKEN,
+        json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+            "client_id": client_id,
+            "code_verifier": verifier,
+            "resource": RESOURCE,
+        },
+    )
+
+    listed = alice.get("/api/v1/tokens").json()
+    assert len(listed) == 1
+    assert listed[0]["client_name"] == "Claude.ai"
+
+
+def test_refresh_token_carries_the_client_label_to_the_new_token(login_as, client):
+    alice = login_as(*ALICE)
+    client_id = _register_client(client, name="Claude.ai")
+    verifier, challenge = _pkce_pair()
+    code = _approve_and_get_code(alice, client, client_id, verifier, challenge)
+    first = client.post(
+        DEVICE_TOKEN,
+        json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+            "client_id": client_id,
+            "code_verifier": verifier,
+            "resource": RESOURCE,
+        },
+    ).json()
+
+    client.post(
+        DEVICE_TOKEN,
+        json={
+            "grant_type": "refresh_token",
+            "refresh_token": first["refresh_token"],
+            "client_id": client_id,
+        },
+    )
+
+    # Rotation mints a fresh PAT row rather than mutating the old one (the old
+    # access token is left to expire on its own) — both rows carry the label.
+    listed = alice.get("/api/v1/tokens").json()
+    assert len(listed) == 2
+    assert {t["client_name"] for t in listed} == {"Claude.ai"}
+
+
+def test_device_flow_and_tokens_ui_pats_have_no_client_name(login_as, client):
+    """The disposition ADR 0026 itself pins: NULL means today's PAT, whether
+    minted via the Tokens UI or ``pandan auth login``'s device flow."""
+    alice = login_as(*ALICE)
+    alice.post("/api/v1/tokens", json={"name": "self-serve"})
+
+    r = client.post("/auth/device/code", json={})
+    device_code = r.json()["device_code"]
+    user_code = r.json()["user_code"]
+    alice.post(f"/auth/device/{user_code}/approve", json={"scope": "write", "board_ids": None})
+    client.post(DEVICE_TOKEN, json={"device_code": device_code})
+
+    listed = alice.get("/api/v1/tokens").json()
+    assert len(listed) == 2
+    assert all(t["client_name"] is None for t in listed)
+
+
+def test_cimd_client_token_has_no_oauth_client_id_but_still_lists_and_revokes(login_as, client):
+    """A CIMD client (identified by URL) is never a DB row (see
+    app.oauth_client.resolve_client), so its minted token's ``oauth_client_id``
+    stays NULL even though it's OAuth-issued — the token still lists (its
+    ``name`` already bakes in the client's name at mint time) and revokes
+    exactly like any other. Primes the module-level CIMD cache directly rather
+    than fetching a live URL or monkeypatching ``resolve_client`` in each of its
+    several import sites (``oauth_authorize.py``, ``device_auth.py``)."""
+    import time
+
+    from app.oauth_client import ResolvedClient, _cimd_cache
+
+    cimd_id = "https://example.com/mcp-client.json"
+    fake = ResolvedClient(client_id=cimd_id, client_name="CIMD App", redirect_uris=(REDIRECT_URI,))
+    _cimd_cache[cimd_id] = (time.monotonic() + 300, fake)
+
+    alice = login_as(*ALICE)
+    verifier, challenge = _pkce_pair()
+    payload = _authorize_params(cimd_id, challenge)
+    approved = alice.post(AUTHORIZE_APPROVE, json=payload)
+    assert approved.status_code == 200
+    code = _query(approved.json()["redirect_to"])["code"]
+
+    r = client.post(
+        DEVICE_TOKEN,
+        json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+            "client_id": cimd_id,
+            "code_verifier": verifier,
+            "resource": RESOURCE,
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    listed = alice.get("/api/v1/tokens").json()
+    assert len(listed) == 1
+    assert listed[0]["client_name"] is None
+    assert "CIMD App" in listed[0]["name"]
+
+    assert alice.delete(f"/api/v1/tokens/{listed[0]['id']}").status_code == 204
+
+
+def test_oauth_issued_token_revokes_exactly_like_a_self_serve_one(login_as, client):
+    alice = login_as(*ALICE)
+    client_id = _register_client(client)
+    verifier, challenge = _pkce_pair()
+    code = _approve_and_get_code(alice, client, client_id, verifier, challenge)
+    minted = client.post(
+        DEVICE_TOKEN,
+        json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+            "client_id": client_id,
+            "code_verifier": verifier,
+            "resource": RESOURCE,
+        },
+    ).json()
+
+    listed = alice.get("/api/v1/tokens").json()
+    assert len(listed) == 1
+    tid = listed[0]["id"]
+
+    assert alice.delete(f"/api/v1/tokens/{tid}").status_code == 204
+    h = {"Authorization": f"Bearer {minted['access_token']}"}
+    assert client.get(ME, headers=h).status_code == 401
+
+
+def test_deleting_the_oauth_client_nulls_the_fk_without_breaking_the_token(login_as, client):
+    """ON DELETE SET NULL (not CASCADE, see the column's own docstring): removing
+    the client registration loses the structured label but the token itself
+    (and the list/revoke surface) keeps working."""
+    from sqlalchemy import text
+
+    from app.db import engine
+
+    alice = login_as(*ALICE)
+    client_id = _register_client(client, name="Soon Deleted")
+    verifier, challenge = _pkce_pair()
+    code = _approve_and_get_code(alice, client, client_id, verifier, challenge)
+    minted = client.post(
+        DEVICE_TOKEN,
+        json={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+            "client_id": client_id,
+            "code_verifier": verifier,
+            "resource": RESOURCE,
+        },
+    ).json()
+
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM oauth_client WHERE client_id = :cid"), {"cid": client_id})
+
+    listed = alice.get("/api/v1/tokens").json()
+    assert len(listed) == 1
+    assert listed[0]["client_name"] is None
+
+    h = {"Authorization": f"Bearer {minted['access_token']}"}
+    assert client.get(ME, headers=h).status_code == 200

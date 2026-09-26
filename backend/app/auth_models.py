@@ -119,6 +119,25 @@ class PersonalAccessToken(Base):
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # The connected app this token was issued to, via the authorization_code/
+    # refresh_token grants (ADR 0026, KAN-1736) — set only for a DCR-registered
+    # client (a CIMD client has no ``oauth_client`` row to point at, so a
+    # CIMD-issued token leaves this NULL despite also being OAuth-issued; the
+    # module docstring below still documents it correctly to a joined caller
+    # since ``name`` already bakes in the client's name at mint time). SET NULL
+    # (not CASCADE): the token keeps working, just loses the structured label,
+    # if the client registration is ever removed. NULL = today's self-serve
+    # Tokens-UI/device-flow PAT — the disposition ADR 0026 itself specifies.
+    oauth_client_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("oauth_client.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    oauth_client: Mapped["OAuthClient | None"] = relationship(lazy="joined")
+
+    @property
+    def client_name(self) -> str | None:
+        """The registered app name to label this token by in the Tokens UI
+        (ADR 0026), or ``None`` for a self-serve PAT / a CIMD-issued one."""
+        return self.oauth_client.client_name if self.oauth_client is not None else None
 
 
 class DeviceAuthorization(Base):

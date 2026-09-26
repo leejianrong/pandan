@@ -120,10 +120,10 @@ client (Claude.ai, ChatGPT, Cursor) can add with a URL, no local install — [AD
 0025](docs/adr/0025-hosted-remote-mcp-server.md). It sits on top of its own prerequisite,
 **EPIC-281** ("OAuth 2.1 auth core, device flow & scoped tokens", fully shipped), which built
 Pandan's own OAuth 2.1 authorization-server core and the CLI's `pandan auth login` device flow —
-[ADR 0024](docs/adr/0024-oauth-device-flow-and-scoped-tokens.md). **Four of M10's six cards have
+[ADR 0024](docs/adr/0024-oauth-device-flow-and-scoped-tokens.md). **Five of M10's six cards have
 shipped**: the Streamable HTTP transport (KAN-1732, `app/mcp_host.py`), RFC 9728 protected-resource
 metadata (KAN-1733, `app/oauth_metadata.py`), RFC 7591 Dynamic Client Registration + CIMD
-(KAN-1734, `app/oauth_client.py`), and **KAN-1735 — the OAuth 2.1 `authorization_code`+PKCE
+(KAN-1734, `app/oauth_client.py`), **KAN-1735 — the OAuth 2.1 `authorization_code`+PKCE
 grant** ([ADR 0026](docs/adr/0026-oauth-authorization-code-pkce-grant.md), the redirect-based flow
 a browser-embedded client needs since device flow has no redirect target): `GET /auth/authorize` +
 `GET /auth/authorize/info` + `POST /auth/authorize/approve`/`deny` (`app/routers/
@@ -134,9 +134,20 @@ with `grant_type=authorization_code` (RFC 8707 resource binding, PKCE S256 verif
 `code_challenge`/`code_challenge_method`/`resource`/`code_hash` columns, a `ck_device_authorization_kind`
 CHECK pinning a row to exactly one flow) and extends `DeviceApproval.svelte` with a second,
 `?client_id=&redirect_uri=…` entry path alongside its existing `?user_code=` one, per ADR 0026's own
-instruction. Remaining: **KAN-1736** (per-(user, connected app) token issuance/listing/revocation —
-`personal_access_token.oauth_client_id`, Tokens UI grouping) and **KAN-1737** (docs: reposition
-hosted MCP + the CLI as the top-billed options, stdio repositioned as the self-hosting fallback).
+instruction — and **KAN-1736 — per-(user, connected app) token issuance/listing/revocation**: a
+nullable `personal_access_token.oauth_client_id` FK to `oauth_client` (`ON DELETE SET NULL`),
+populated by `_mint_access_token` (`app/routers/device_auth.py`, shared by the
+`authorization_code`/`refresh_token` grants) from a DB lookup on the resolved `client_id` — `NULL` for
+every self-serve Tokens-UI/device-flow PAT (ADR 0026's own disposition) **and** for a CIMD-issued
+token, since a CIMD client is identified by URL and fetched live rather than persisted as a row (the
+minted PAT's `name` already bakes in the client's name at mint time, so listing degrades gracefully
+either way). `GET /api/v1/tokens` already listed every kind uniformly by construction (one table); it
+now also exposes `client_name` (via a joined `PersonalAccessToken.oauth_client` relationship) so the
+Tokens UI can label an app-issued token by the connected app's registered name instead of requiring
+one — `DELETE /tokens/{id}` needed no change, since revocation was already per-row and kind-agnostic.
+Not an MCP change: `list_tokens`/`create_token` were never MCP tools. Remaining: **KAN-1737** (docs:
+reposition hosted MCP + the CLI as the top-billed options, stdio repositioned as the self-hosting
+fallback).
 
 The MCP surface was right-sized in V49 at **49 tools**: measured at 8,775 `o200k_base` tokens of resident
 schema per session, shipped at **7,388** (compact; 10,307 pretty-printed) after
