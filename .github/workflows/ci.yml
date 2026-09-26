@@ -8,7 +8,11 @@ name: CI
 # middle three all mocked httpx, no DB), a container `image` build of ./Dockerfile
 # and mcp/Dockerfile (KAN-584), and a supply-chain `security` scan (secret scan
 # over history + dependency vulnerability audit). The Deploy workflow only runs
-# after this whole workflow succeeds on main.
+# after this whole workflow succeeds on main — `security` runs `continue-on-error`
+# precisely so a real-but-non-urgent CVE finding (visible, non-blocking by design)
+# can never itself be the reason a run's overall conclusion reads `failure` and
+# silently withholds a deploy (see that job's own comment for the incident this
+# was found from).
 #
 # CI path filtering (KAN-37): a leading `changes` job computes which areas of
 # the repo a PR touched; each of the nine gated jobs then guards its *heavy
@@ -672,9 +676,28 @@ jobs:
   # documented follow-up. Until then this reports for visibility but does not
   # block merge — so a newly-published CVE surfaces without hard-stopping every
   # unrelated PR.
+  #
+  # `continue-on-error: true` is load-bearing, not a nicety (found 2026-09-26,
+  # KAN-deploy-drift-security-gate): branch-protection "required status checks"
+  # and a workflow RUN's own `conclusion` are two different mechanisms. Marking
+  # this job non-required only keeps it from blocking a PR *merge* — it does
+  # nothing to `ci.yml`'s own run-level conclusion, which GitHub computes as
+  # `failure` the moment ANY job in the run fails, this one included. And
+  # `deploy.yml`'s trigger is gated on exactly that: `github.event.workflow_run.
+  # conclusion == 'success'`. So every push to `main` from 2026-09-25 (b4353ad)
+  # through 2026-09-26 (a7d6fcf) — 18 merges, roughly a day of shipped work —
+  # silently never deployed, because a real-but-non-urgent anyio CVE kept this
+  # one job (and therefore the whole run) red the entire time. `deploy.yml`'s own
+  # "Deploy drift watcher" cron caught the *symptom* (production stale) but nobody
+  # had connected it to *this* cause yet. `continue-on-error` makes a failure here
+  # still show red and still fail the JOB (so it's exactly as visible as before —
+  # nothing here weakens the scan itself), while letting the RUN's conclusion be
+  # `success` when everything else passes, matching the "reports... does not block"
+  # intent the comment above already states for merges.
   security:
     name: Security scan
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       # fetch-depth: 0 — gitleaks scans the whole history, not just the tip.
       - uses: actions/checkout@v7
