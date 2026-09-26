@@ -17,16 +17,11 @@ at import time, for the identical reason (one image, more than one possible
 origin across dev/Fly-prod/self-hosted) — see that module's docstring for the
 full reasoning, which applies unchanged here.
 
-**One endpoint is advertised ahead of its own landing (KAN-1735).**
-``authorization_endpoint`` points at ``/auth/authorize``, which does not exist
-until KAN-1735 lands the ``authorization_code``+PKCE grant (ADR 0026);
-``token_endpoint`` already exists today (``/auth/device/token``, ADR 0024) but
-doesn't yet handle ``grant_type=authorization_code`` — also KAN-1735. This is
-a deliberate, short-lived sequencing gap **within one epic's build-out**, not
-a shipped inconsistency: nothing discovers or acts on this document from
-outside this repo until every card in EPIC-282 has landed, and
-``registration_endpoint`` (this card's own actual deliverable) is fully real
-today.
+**Both endpoints are real as of KAN-1735.** ``authorization_endpoint``
+(``/auth/authorize``) and ``token_endpoint``'s ``grant_type=authorization_code``
+handling (``/auth/device/token``, see ``app/routers/oauth_authorize.py`` +
+``app/routers/device_auth.py``) were advertised ahead of their own landing while
+EPIC-282 was still mid-build-out; both now exist.
 """
 from __future__ import annotations
 

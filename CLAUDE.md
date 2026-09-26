@@ -114,6 +114,30 @@ spelling as the historical record of what was actually built and filed under tha
 "ticket/planning history isn't rewritten for a rename" convention); ADR 0021 itself is the one
 exception, retitled/updated in place per ADR 0023's own instruction.
 
+**Milestone 10** ("Hosted remote MCP server", EPIC-282, KAN-1732..1737) turns the stdio-only MCP
+server into an also-hosted, OAuth-protected Streamable HTTP endpoint any spec-compliant remote-MCP
+client (Claude.ai, ChatGPT, Cursor) can add with a URL, no local install — [ADR
+0025](docs/adr/0025-hosted-remote-mcp-server.md). It sits on top of its own prerequisite,
+**EPIC-281** ("OAuth 2.1 auth core, device flow & scoped tokens", fully shipped), which built
+Pandan's own OAuth 2.1 authorization-server core and the CLI's `pandan auth login` device flow —
+[ADR 0024](docs/adr/0024-oauth-device-flow-and-scoped-tokens.md). **Four of M10's six cards have
+shipped**: the Streamable HTTP transport (KAN-1732, `app/mcp_host.py`), RFC 9728 protected-resource
+metadata (KAN-1733, `app/oauth_metadata.py`), RFC 7591 Dynamic Client Registration + CIMD
+(KAN-1734, `app/oauth_client.py`), and **KAN-1735 — the OAuth 2.1 `authorization_code`+PKCE
+grant** ([ADR 0026](docs/adr/0026-oauth-authorization-code-pkce-grant.md), the redirect-based flow
+a browser-embedded client needs since device flow has no redirect target): `GET /auth/authorize` +
+`GET /auth/authorize/info` + `POST /auth/authorize/approve`/`deny` (`app/routers/
+oauth_authorize.py`), extending the shared `POST /auth/device/token` (`app/routers/device_auth.py`)
+with `grant_type=authorization_code` (RFC 8707 resource binding, PKCE S256 verification, exact
+`redirect_uri` match) and `grant_type=refresh_token` (rotating, single-use). Reuses
+`device_authorization` rather than a parallel table (nullable `client_id`/`redirect_uri`/
+`code_challenge`/`code_challenge_method`/`resource`/`code_hash` columns, a `ck_device_authorization_kind`
+CHECK pinning a row to exactly one flow) and extends `DeviceApproval.svelte` with a second,
+`?client_id=&redirect_uri=…` entry path alongside its existing `?user_code=` one, per ADR 0026's own
+instruction. Remaining: **KAN-1736** (per-(user, connected app) token issuance/listing/revocation —
+`personal_access_token.oauth_client_id`, Tokens UI grouping) and **KAN-1737** (docs: reposition
+hosted MCP + the CLI as the top-billed options, stdio repositioned as the self-hosting fallback).
+
 The MCP surface was right-sized in V49 at **49 tools**: measured at 8,775 `o200k_base` tokens of resident
 schema per session, shipped at **7,388** (compact; 10,307 pretty-printed) after
 `mcp/pandan_mcp/schema.py` stripped 1,387 tokens of pure Pydantic serializer artefact. The decision is

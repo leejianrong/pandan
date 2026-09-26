@@ -875,6 +875,73 @@ export async function denyDeviceAuthorization(userCode: string): Promise<void> {
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
 }
 
+// --- authorization_code + PKCE consent screen (ADR 0026, KAN-1735) ----------
+// The second entry path DeviceApproval.svelte reaches, for a browser-embedded
+// OAuth client (Claude.ai et al.) rather than the CLI's device flow above.
+// Unversioned, like the device-flow routes — NOT under /api/v1.
+
+export interface AuthorizeParams {
+  client_id: string;
+  redirect_uri: string;
+  code_challenge: string;
+  code_challenge_method: string;
+  resource: string;
+  scope: TokenScope;
+  state: string | null;
+}
+
+export interface AuthorizeInfo {
+  client_name: string | null;
+  requested_scope: TokenScope;
+  resource: string;
+}
+
+export interface AuthorizeRedirect {
+  redirect_to: string;
+}
+
+function authorizeQuery(params: AuthorizeParams): string {
+  const q = new URLSearchParams({
+    client_id: params.client_id,
+    redirect_uri: params.redirect_uri,
+    code_challenge: params.code_challenge,
+    code_challenge_method: params.code_challenge_method,
+    resource: params.resource,
+    scope: params.scope,
+  });
+  if (params.state !== null) q.set("state", params.state);
+  return q.toString();
+}
+
+export async function getAuthorizeInfo(params: AuthorizeParams): Promise<AuthorizeInfo> {
+  const res = await fetch(`/auth/authorize/info?${authorizeQuery(params)}`);
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function approveAuthorize(
+  params: AuthorizeParams,
+  payload: { scope: TokenScope; board_ids: number[] | null },
+): Promise<AuthorizeRedirect> {
+  const res = await fetch(`/auth/authorize/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...params, ...payload }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
+export async function denyAuthorize(params: AuthorizeParams): Promise<AuthorizeRedirect> {
+  const res = await fetch(`/auth/authorize/deny`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 // --- Board members (KAN-12 API, surfaced in the UI by KAN-14) --------------
 // A board can have members (users other than the owner) with a role. The
 // management API is owner-gated (403 for non-owners). Members are scoped to a

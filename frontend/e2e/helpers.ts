@@ -15,7 +15,11 @@ export const E2E_PREFIX = "e2e-";
 // ENV-overridable (KAN-391) so a worktree run on non-default ports resolves the
 // right backend: an explicit API_ORIGIN wins, else it's derived from BACKEND_PORT,
 // both defaulting to today's http://localhost:8000 so CI + normal dev are unchanged.
-const API_ORIGIN =
+// Exported: also the value `app.oauth_authorize.canonical_mcp_resource` computes
+// server-side (Vite's proxy rewrites the Host header to the backend's own origin,
+// not the frontend's — see authorize-flow.spec.ts), so it's what any RFC 8707
+// `resource` param an e2e test builds by hand must match.
+export const API_ORIGIN =
   process.env.API_ORIGIN ??
   `http://localhost:${Number(process.env.BACKEND_PORT) || 8000}`;
 

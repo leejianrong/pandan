@@ -1,23 +1,42 @@
 <script lang="ts">
-  // Device-flow consent screen (ADR 0024, KAN-1729) — reached via a deep link
-  // (`?user_code=…`) the CLI's `pandan auth login` prints/opens, never through
-  // normal in-app navigation (no NavRail/palette entry on purpose: nothing else
-  // in the app should navigate here).
+  // Consent screen for two OAuth 2.1 grants (ADR 0024/0026): the CLI's device
+  // flow (`?user_code=…`, KAN-1729) and, since KAN-1735, a browser-embedded
+  // client's authorization_code+PKCE redirect (`?client_id=&redirect_uri=…`) —
+  // "the same component... reached via a second entry path" (ADR 0026). Both
+  // are reached via a deep link, never through normal in-app navigation (no
+  // NavRail/palette entry on purpose: nothing else in the app should navigate
+  // here).
   import {
+    approveAuthorize,
     approveDeviceAuthorization,
+    denyAuthorize,
     denyDeviceAuthorization,
+    getAuthorizeInfo,
     getDeviceAuthorization,
+    type AuthorizeInfo,
+    type AuthorizeParams,
     type DeviceAuthorization,
     type TokenScope,
   } from "../api";
   import { boardStore } from "../board.svelte";
   import { workspaceStore } from "../workspaces.svelte";
 
-  let { userCode, onDone }: { userCode: string; onDone: () => void } = $props();
+  let {
+    mode,
+    userCode,
+    authorizeParams,
+    onDone,
+  }: {
+    mode: "device" | "authorize";
+    userCode?: string;
+    authorizeParams?: AuthorizeParams;
+    onDone: () => void;
+  } = $props();
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let request = $state<DeviceAuthorization | null>(null);
+  let deviceRequest = $state<DeviceAuthorization | null>(null);
+  let authorizeInfo = $state<AuthorizeInfo | null>(null);
   let scope = $state<TokenScope>("write");
   // "All boards you own" is the default — mirrors today's Tokens-UI behaviour
   // (a PAT with no allow-list is unrestricted), so approving without touching
@@ -25,6 +44,8 @@
   let unrestricted = $state(true);
   let selectedBoardIds = $state<Set<number>>(new Set());
   let busy = $state(false);
+  // Only ever reached in device mode — authorize mode navigates the browser
+  // away (approve()/deny() below) rather than rendering a resolved state here.
   let resolution = $state<"approved" | "denied" | null>(null);
 
   // The approve endpoint only accepts boards the approving principal OWNS
@@ -38,17 +59,25 @@
     loading = true;
     error = null;
     try {
-      request = await getDeviceAuthorization(userCode);
-      scope = request.requested_scope;
-      if (request.requested_board_ids && request.requested_board_ids.length > 0) {
-        unrestricted = false;
-        selectedBoardIds = new Set(request.requested_board_ids);
+      if (mode === "device") {
+        deviceRequest = await getDeviceAuthorization(userCode!);
+        scope = deviceRequest.requested_scope;
+        if (deviceRequest.requested_board_ids && deviceRequest.requested_board_ids.length > 0) {
+          unrestricted = false;
+          selectedBoardIds = new Set(deviceRequest.requested_board_ids);
+        }
+      } else {
+        authorizeInfo = await getAuthorizeInfo(authorizeParams!);
+        scope = authorizeInfo.requested_scope;
       }
     } catch {
       // Always the friendly message here, never the raw ApiError detail — a
-      // 404's "Code not found" reads like a lookup bug, not the routine "you
+      // 404/400's detail reads like a lookup bug, not the routine "you
       // typed/opened a stale link" outcome this actually is.
-      error = "This code is invalid or has expired — check it against your terminal.";
+      error =
+        mode === "device"
+          ? "This code is invalid or has expired — check it against your terminal."
+          : "This request is invalid or has expired — go back and try connecting again.";
     } finally {
       loading = false;
     }
@@ -67,32 +96,40 @@
   }
 
   async function approve() {
-    if (busy || !request) return;
+    if (busy) return;
     busy = true;
     error = null;
+    const board_ids = unrestricted ? null : [...selectedBoardIds];
     try {
-      await approveDeviceAuthorization(userCode, {
-        scope,
-        board_ids: unrestricted ? null : [...selectedBoardIds],
-      });
-      resolution = "approved";
+      if (mode === "device") {
+        await approveDeviceAuthorization(userCode!, { scope, board_ids });
+        resolution = "approved";
+      } else {
+        // Unlike device mode, this ends the flow by leaving Pandan's UI
+        // entirely — a real top-level navigation back to the requesting app.
+        const result = await approveAuthorize(authorizeParams!, { scope, board_ids });
+        window.location.href = result.redirect_to;
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : "Could not approve — try again.";
-    } finally {
       busy = false;
     }
   }
 
   async function deny() {
-    if (busy || !request) return;
+    if (busy) return;
     busy = true;
     error = null;
     try {
-      await denyDeviceAuthorization(userCode);
-      resolution = "denied";
+      if (mode === "device") {
+        await denyDeviceAuthorization(userCode!);
+        resolution = "denied";
+      } else {
+        const result = await denyAuthorize(authorizeParams!);
+        window.location.href = result.redirect_to;
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : "Could not deny — try again.";
-    } finally {
       busy = false;
     }
   }
@@ -101,11 +138,19 @@
 <div class="device-approval page-view">
   <div class="page-head">
     <div>
-      <h2>Approve CLI login</h2>
-      <p class="page-sub">
-        Someone (hopefully you) ran <code>pandan auth login</code>. Confirm the code
-        below matches your terminal, choose what it can access, then approve or deny.
-      </p>
+      {#if mode === "device"}
+        <h2>Approve CLI login</h2>
+        <p class="page-sub">
+          Someone (hopefully you) ran <code>pandan auth login</code>. Confirm the code
+          below matches your terminal, choose what it can access, then approve or deny.
+        </p>
+      {:else}
+        <h2>Connect an application</h2>
+        <p class="page-sub">
+          <strong>{authorizeInfo?.client_name ?? "An application"}</strong> wants to connect
+          to your Pandan account. Choose what it can access, then approve or deny.
+        </p>
+      {/if}
     </div>
   </div>
 
@@ -126,15 +171,17 @@
       <span>{error}</span>
     </div>
     <button class="link" onclick={onDone}>Back to your boards</button>
-  {:else if request && request.status !== "pending"}
+  {:else if mode === "device" && deviceRequest && deviceRequest.status !== "pending"}
     <div class="banner" role="status">
-      <span>This code was already {request.status}.</span>
+      <span>This code was already {deviceRequest.status}.</span>
     </div>
     <button class="link" onclick={onDone}>Back to your boards</button>
-  {:else if request}
-    <p class="device-user-code">
-      Code: <code>{request.user_code}</code>
-    </p>
+  {:else if (mode === "device" && deviceRequest) || (mode === "authorize" && authorizeInfo)}
+    {#if mode === "device" && deviceRequest}
+      <p class="device-user-code">
+        Code: <code>{deviceRequest.user_code}</code>
+      </p>
+    {/if}
 
     <form
       class="card-form"

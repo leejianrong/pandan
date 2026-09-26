@@ -106,6 +106,12 @@ def classify(request: Request) -> str | None:
     # brute-force-adjacent tier as login/callback rather than no limit at all.
     if method == "POST" and path in ("/auth/device/code", "/auth/device/token"):
         return "auth"
+    # authorization_code+PKCE grant (ADR 0026, KAN-1735): GET /auth/authorize is
+    # the real top-level browser navigation an OAuth client redirects to, no
+    # credential required to reach it — the same "unauthenticated entry point"
+    # reasoning as the device-flow routes above.
+    if method == "GET" and path == "/auth/authorize":
+        return "auth"
 
     return None
 

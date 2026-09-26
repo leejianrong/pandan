@@ -147,6 +147,26 @@ class DeviceAuthorization(Base):
     short, human-typed fallback (``gh auth login``'s shape) and is stored as-is —
     it is not a secret on its own (the consent screen requires an authenticated
     human session to act on it), only a lookup key.
+
+    **Also backs the OAuth 2.1 ``authorization_code``+PKCE grant (ADR 0026,
+    KAN-1735)** — the redirect-based flow ADR 0024 deferred for a browser-
+    embedded client (Claude.ai et al.) that has no device to poll from. Rather
+    than a parallel table, this row is reused: the state it holds (pending →
+    approved → consumed, expiring, single-use) is the same shape, per ADR 0026's
+    own instruction. A row is one kind or the other, enforced by
+    ``ck_device_authorization_kind`` below:
+
+    - a **device-flow** row populates ``device_code_hash``/``user_code`` and
+      leaves ``client_id`` null, exactly as before this card;
+    - an **authorization-code-flow** row populates ``client_id``/
+      ``redirect_uri``/``code_challenge``/``code_challenge_method``/``resource``/
+      ``code_hash`` and leaves ``device_code_hash``/``user_code`` null. Unlike a
+      device-flow row, it is inserted already ``status="approved"`` — nothing
+      polls it beforehand (the redirect_uri callback is the poll), so there is no
+      ``pending`` phase to occupy first. ``code_hash`` is looked up by
+      ``POST /auth/device/token``'s ``grant_type=authorization_code`` branch
+      exactly like ``device_code_hash`` is for ``grant_type=device_code``, and
+      ``redeemed_at`` marks it single-use identically.
     """
 
     __tablename__ = "device_authorization"
@@ -159,19 +179,29 @@ class DeviceAuthorization(Base):
             "requested_scope IN ('read', 'write')",
             name="ck_device_authorization_requested_scope",
         ),
+        CheckConstraint(
+            "(device_code_hash IS NOT NULL AND user_code IS NOT NULL AND client_id IS NULL)"
+            " OR (device_code_hash IS NULL AND user_code IS NULL"
+            " AND client_id IS NOT NULL AND code_hash IS NOT NULL)",
+            name="ck_device_authorization_kind",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     # HMAC-SHA256 hex digest (64 chars), like PersonalAccessToken.token_hash —
-    # unique + indexed for the polling endpoint's O(1) lookup.
-    device_code_hash: Mapped[str] = mapped_column(
-        String(64), unique=True, nullable=False, index=True
+    # unique + indexed for the polling endpoint's O(1) lookup. Nullable: an
+    # authorization-code-flow row (see the class docstring) leaves this null;
+    # Postgres treats multiple NULLs in a unique index as distinct, so this
+    # doesn't collide across every such row.
+    device_code_hash: Mapped[str | None] = mapped_column(
+        String(64), unique=True, nullable=True, index=True
     )
     # The short code shown to the human as a fallback/confirmation (e.g.
     # "WDJB-MJHT"). Unique so the consent-screen lookup by code alone is
     # unambiguous; a human never has two live codes collide in practice given the
     # short (~10-15 min) lifetime, but uniqueness is enforced rather than assumed.
-    user_code: Mapped[str] = mapped_column(String(16), unique=True, nullable=False)
+    # Nullable for the same reason as ``device_code_hash`` above.
+    user_code: Mapped[str | None] = mapped_column(String(16), unique=True, nullable=True)
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default="pending"
     )
@@ -192,6 +222,30 @@ class DeviceAuthorization(Base):
     )
     requested_board_ids: Mapped[list[int] | None] = mapped_column(
         ARRAY(BigInteger), nullable=True
+    )
+    # --- authorization_code-flow-only columns (ADR 0026, KAN-1735); null on
+    # every device-flow row, see the class docstring's kind split. ---
+    # The requesting OAuth client: an RFC 7591 DCR ``client_id`` or a CIMD URL
+    # (``app.oauth_client.resolve_client``) — no FK, a CIMD client has no row.
+    client_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Validated at ``/auth/authorize`` time to be an exact match against the
+    # client's registered redirect URIs; re-checked again at token-exchange time
+    # against this stored value (RFC 6749 §4.1.3) so a code can't be redeemed
+    # against a different redirect_uri than the one it was issued for.
+    redirect_uri: Mapped[str | None] = mapped_column(String, nullable=True)
+    code_challenge: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    code_challenge_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # RFC 8707 resource indicator — the MCP endpoint's canonical URI. Bound at
+    # ``/auth/authorize`` and re-checked at exchange time, exactly like
+    # ``redirect_uri`` above; this is the enforcement point ADR 0025 named and
+    # ADR 0026 built (see ``app.oauth_authorize.canonical_mcp_resource``).
+    resource: Mapped[str | None] = mapped_column(String, nullable=True)
+    # HMAC-SHA256 hex digest of the minted authorization ``code`` — the
+    # authorization-code-flow analogue of ``device_code_hash`` above, looked up
+    # the same way by ``POST /auth/device/token``'s ``grant_type=authorization_code``
+    # branch. Nullable for the same reason (a device-flow row never sets it).
+    code_hash: Mapped[str | None] = mapped_column(
+        String(64), unique=True, nullable=True, index=True
     )
     # The minted PAT, set only on approval. SET NULL (not CASCADE): revoking the
     # resulting PAT later should not silently rewrite this row's own history of
@@ -291,4 +345,59 @@ class OAuthClient(Base):
     redirect_uris: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class OAuthRefreshToken(Base):
+    """A rotating, single-use refresh token for a ``personal_access_token`` minted
+    by the ``authorization_code`` grant (ADR 0026, KAN-1735).
+
+    Unlike a Tokens-UI/device-flow PAT (which never expires unless the user sets
+    ``expires_at``), an OAuth-issued access token is short-lived
+    (``app.oauth_authorize.ACCESS_TOKEN_TTL_SECONDS``) — this table is how the
+    client gets a new one without a human re-approving consent every hour.
+
+    **Single-use by rotation, not a shared secret.** ``POST /auth/device/token``'s
+    ``grant_type=refresh_token`` branch consumes exactly one row: it stamps
+    ``consumed_at`` on this one and inserts a fresh ``personal_access_token`` +
+    a fresh row here pointing at it. A second attempt to use an already-consumed
+    refresh token fails — the theft-detection property ADR 0026 describes ("a
+    leaked refresh token is usable at most once before the legitimate client's
+    next refresh detects the theft, the old token failing"). The access token it
+    replaces is left to expire on its own rather than force-revoked; only the
+    refresh token itself carries the single-use guarantee.
+
+    ``token_hash`` follows the same HMAC-SHA256 pattern as every other bearer
+    secret in this codebase (:func:`app.tokens.hash_token`) — indexable, never
+    stored raw.
+    """
+
+    __tablename__ = "oauth_refresh_token"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False, index=True
+    )
+    # The access token this refresh token is currently paired with. CASCADE:
+    # revoking/deleting the PAT (e.g. via the Tokens UI) takes its refresh token
+    # with it — there is no point refreshing into a credential that no longer
+    # exists.
+    personal_access_token_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("personal_access_token.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Re-validated against the caller's ``client_id`` on every refresh — a
+    # refresh token is only usable by the client it was issued to.
+    client_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Stamped the one time this row is redeemed — makes it single-use,
+    # independent of ``expires_at``, exactly like
+    # ``DeviceAuthorization.redeemed_at``.
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )

@@ -29,7 +29,7 @@
   import { setSessionUser } from "./lib/session.svelte";
   import { initTheme, themeStore, toggleTheme } from "./lib/theme.svelte";
   import { kbd } from "./lib/keyboard.svelte";
-  import { getCurrentUser, logout, type CurrentUser } from "./lib/api";
+  import { getCurrentUser, logout, type AuthorizeParams, type CurrentUser } from "./lib/api";
 
   // Every board-scoped view is reachable from the persistent NavRail
   // (NR-1..NR-4, KAN-1148..KAN-1151 — replaced the old hamburger+SideNav
@@ -99,16 +99,52 @@
   // back in (or a stray reload) doesn't lose the pending approval mid-flow.
   let deviceUserCode = $state<string | null>(null);
 
+  // The authorization_code+PKCE consent screen's second entry path (ADR 0026,
+  // KAN-1735): an OAuth client's `GET /auth/authorize` redirect lands the
+  // browser back here with these forwarded as query params. Same read-once-
+  // at-mount, same "no router" reasoning as `deviceUserCode` above; mutually
+  // exclusive with it in practice (a link is one or the other).
+  let authorizeParams = $state<AuthorizeParams | null>(null);
+
   function clearDeviceLink() {
     deviceUserCode = null;
+    authorizeParams = null;
     const url = new URL(window.location.href);
-    url.searchParams.delete("user_code");
+    for (const key of [
+      "user_code",
+      "client_id",
+      "redirect_uri",
+      "code_challenge",
+      "code_challenge_method",
+      "resource",
+      "scope",
+      "state",
+    ]) {
+      url.searchParams.delete(key);
+    }
     window.history.replaceState({}, "", url);
   }
 
   onMount(async () => {
     initTheme();
-    deviceUserCode = new URLSearchParams(window.location.search).get("user_code");
+    const search = new URLSearchParams(window.location.search);
+    deviceUserCode = search.get("user_code");
+    const clientId = search.get("client_id");
+    const redirectUri = search.get("redirect_uri");
+    const codeChallenge = search.get("code_challenge");
+    const codeChallengeMethod = search.get("code_challenge_method");
+    const resource = search.get("resource");
+    if (!deviceUserCode && clientId && redirectUri && codeChallenge && codeChallengeMethod && resource) {
+      authorizeParams = {
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_challenge: codeChallenge,
+        code_challenge_method: codeChallengeMethod,
+        resource,
+        scope: (search.get("scope") as "read" | "write" | null) ?? "write",
+        state: search.get("state"),
+      };
+    }
     try {
       user = await getCurrentUser();
     } catch {
@@ -242,7 +278,9 @@
     <NavRail {view} onNavigate={navigateFromRail} />
     <main>
       {#if deviceUserCode}
-        <DeviceApproval userCode={deviceUserCode} onDone={clearDeviceLink} />
+        <DeviceApproval mode="device" userCode={deviceUserCode} onDone={clearDeviceLink} />
+      {:else if authorizeParams}
+        <DeviceApproval mode="authorize" {authorizeParams} onDone={clearDeviceLink} />
       {:else if view === "board"}
         <Board />
       {:else if view === "dashboard"}

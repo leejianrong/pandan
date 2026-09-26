@@ -1635,3 +1635,48 @@ class ClientRegistrationResponse(BaseModel):
     token_endpoint_auth_method: Literal["none"] = "none"
     grant_types: list[str] = ["authorization_code"]
     response_types: list[str] = ["code"]
+
+
+class AuthorizeParams(BaseModel):
+    """The OAuth params a browser-embedded client's redirect to
+    ``GET /auth/authorize`` carries (RFC 6749 §4.1.1 + PKCE + RFC 8707), and
+    that ``GET /auth/authorize/info``/``POST /auth/authorize/approve``/``deny``
+    (ADR 0026, KAN-1735) all re-validate independently rather than trust from a
+    prior step — there is no persisted row for this flow until approval, unlike
+    the device-flow ``user_code`` these consent-screen routes sit alongside."""
+
+    client_id: str
+    redirect_uri: str
+    code_challenge: str
+    code_challenge_method: str
+    resource: str
+    scope: TokenScope = TokenScope.write
+    state: str | None = None
+
+
+class AuthorizeInfoResponse(BaseModel):
+    """``GET /auth/authorize/info`` (ADR 0026, KAN-1735) — what the consent
+    screen renders: which client is asking, for what scope/resource."""
+
+    client_name: str | None
+    requested_scope: TokenScope
+    resource: str
+
+
+class AuthorizeApproveRequest(AuthorizeParams):
+    """``POST /auth/authorize/approve``/``deny`` (ADR 0026, KAN-1735) — the full
+    param set ``/authorize`` forwarded to the consent screen, plus the human's
+    final scope/board choice (mirrors ``DeviceApproveRequest``: pre-filled from
+    ``AuthorizeParams.scope`` but editable, and replaces rather than merges)."""
+
+    board_ids: list[int] | None = None
+
+
+class AuthorizeRedirect(BaseModel):
+    """The response both ``/auth/authorize/approve`` and ``/deny`` return: a
+    URL for the SPA to navigate the browser to (a real top-level navigation
+    back to the requesting app), not a JSON success/failure state to render in
+    place — unlike the device-flow consent screen, this flow ends by leaving
+    Pandan's own UI entirely."""
+
+    redirect_to: str
