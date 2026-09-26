@@ -36,6 +36,7 @@ from .routers import (
     me,
     members,
     notifications,
+    oauth_authorize,
     oauth_register,
     planning_intervals,
     templates,
@@ -241,6 +242,10 @@ app.include_router(oauth_server_metadata.router)
 # no auth — obtaining a first client identity, the same asymmetry as the device
 # flow above.
 app.include_router(oauth_register.router)
+# OAuth 2.1 authorization_code + PKCE grant (ADR 0026, KAN-1735): the
+# redirect-based flow a browser-embedded client (Claude.ai, ChatGPT, Cursor)
+# completes, reusing the same /auth/device/token exchange endpoint above.
+app.include_router(oauth_authorize.router)
 
 # Hosted Streamable HTTP MCP transport (ADR 0025, KAN-1732): the exact same
 # tool registry the stdio `pandan-mcp` server exposes, reachable without a

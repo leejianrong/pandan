@@ -5,8 +5,14 @@ Five routes:
 - ``POST /auth/device/code`` — no auth. The CLI calls this first; returns a
   ``device_code`` (secret, polled with) and a ``user_code`` (short, human-typed
   fallback) plus where a human approves.
-- ``POST /auth/device/token`` — no auth (the ``device_code`` itself is the
-  credential). Polled at ``interval``-second intervals until the row resolves.
+- ``POST /auth/device/token`` — no auth (the credential itself, whichever grant
+  presents one, is what authenticates the request). Polled at
+  ``interval``-second intervals until the row resolves for RFC 8628 device-code
+  polling; also, since ADR 0026 (KAN-1735), this is the one ``token_endpoint``
+  every grant shares — ``grant_type=authorization_code`` (redeeming
+  ``app/routers/oauth_authorize.py``'s consent-screen code) and
+  ``grant_type=refresh_token`` (rotation) are handled by two helpers below,
+  ``_exchange_authorization_code``/``_exchange_refresh_token``.
 - ``GET /auth/device/{user_code}`` — **cookie/PAT auth required**
   (:func:`app.authz.get_principal`). The consent screen's own read: what scope
   and boards were requested, and the code's current status (so a re-visited
@@ -46,7 +52,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..auth_models import DeviceAuthorization, PersonalAccessToken, PersonalAccessTokenBoard, User
+from ..auth_models import (
+    DeviceAuthorization,
+    OAuthRefreshToken,
+    PersonalAccessToken,
+    PersonalAccessTokenBoard,
+    User,
+)
 from ..authz import get_principal
 from ..db import get_db
 from ..device_flow import (
@@ -58,14 +70,22 @@ from ..device_flow import (
     too_soon_to_poll,
 )
 from ..models import Board
+from ..oauth_authorize import (
+    ACCESS_TOKEN_TTL_SECONDS,
+    REFRESH_TOKEN_TTL_SECONDS,
+    generate_refresh_token,
+    verify_pkce,
+)
+from ..oauth_client import resolve_client
 from ..schemas import (
     DeviceApproveRequest,
     DeviceAuthorizationRead,
     DeviceCodeRequest,
     DeviceCodeResponse,
-    DeviceTokenRequest,
 )
 from ..tokens import generate_token, hash_token
+
+DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 
 router = APIRouter(prefix="/auth/device", tags=["auth"])
 
@@ -127,18 +147,198 @@ def create_device_code(
     )
 
 
-@router.post("/token")
-def poll_device_token(payload: DeviceTokenRequest, db: Session = Depends(get_db)):
-    """Poll for the outcome of a device-flow login.
+async def _parse_token_request_body(request: Request) -> dict[str, str]:
+    """Real OAuth clients (Claude.ai, ChatGPT, Cursor) POST RFC 6749 §4.1.3
+    ``application/x-www-form-urlencoded`` bodies for ``authorization_code``/
+    ``refresh_token`` — this repo's own CLI sends JSON instead (an accepted
+    deviation, KAN-1727, since it's the only device-flow client). This endpoint
+    is the one ``token_endpoint`` every grant shares
+    (``app/oauth_server_metadata.py``), so it accepts either wire format rather
+    than forcing every caller onto the CLI's own JSON convention."""
+    content_type = request.headers.get("content-type", "")
+    if "application/x-www-form-urlencoded" in content_type:
+        form = await request.form()
+        return {k: str(v) for k, v in form.items()}
+    try:
+        body = await request.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
 
-    Every "not a live, pending row" case (unknown code, expired, already
-    redeemed) collapses to the same ``expired_token`` response — uniformly, so a
-    stale poll can't be used to probe whether a code ever existed, matching this
-    API's existing batch-read convention of not turning a lookup into an
-    existence oracle."""
+
+def _mint_access_token(
+    db: Session,
+    *,
+    user_id,
+    name: str,
+    scope: str,
+    board_ids: list[int] | None,
+    client_id: str,
+) -> tuple[str, PersonalAccessToken, str]:
+    """Mint a real ``personal_access_token`` (short-lived, unlike a Tokens-UI/
+    device-flow PAT — see ``app.oauth_authorize``'s module docstring) plus a
+    paired refresh token. Shared by the ``authorization_code`` exchange and the
+    ``refresh_token`` rotation below, since both mint the same shape of
+    credential."""
+    raw, prefix, token_hash = generate_token()
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ACCESS_TOKEN_TTL_SECONDS)
+    pat = PersonalAccessToken(
+        user_id=user_id,
+        name=name,
+        token_hash=token_hash,
+        token_prefix=prefix,
+        scope=scope,
+        expires_at=expires_at,
+    )
+    db.add(pat)
+    db.flush()  # assign pat.id before the board-scope / refresh-token FK rows
+    for board_id in board_ids or []:
+        db.add(PersonalAccessTokenBoard(personal_access_token_id=pat.id, board_id=board_id))
+
+    refresh_raw = generate_refresh_token()
+    refresh_expires_at = datetime.now(timezone.utc) + timedelta(
+        seconds=REFRESH_TOKEN_TTL_SECONDS
+    )
+    db.add(
+        OAuthRefreshToken(
+            token_hash=hash_token(refresh_raw),
+            personal_access_token_id=pat.id,
+            client_id=client_id,
+            expires_at=refresh_expires_at,
+        )
+    )
+    return raw, pat, refresh_raw
+
+
+def _exchange_authorization_code(body: dict, request: Request, db: Session) -> JSONResponse | dict:
+    """``grant_type=authorization_code`` (ADR 0026, KAN-1735) — redeem the code
+    ``POST /auth/authorize/approve`` minted. Response shape is RFC 6749 §5.1
+    verbatim (``access_token``/``token_type``/...), unlike the device-code
+    branch's CLI-specific shape below — this branch's caller is a real
+    third-party OAuth client, not this repo's own CLI."""
+    code = body.get("code")
+    redirect_uri = body.get("redirect_uri")
+    client_id = body.get("client_id")
+    code_verifier = body.get("code_verifier")
+    resource = body.get("resource")
+    if not all([code, redirect_uri, client_id, code_verifier, resource]):
+        return _oauth_error("invalid_request")
+
+    row = db.scalars(
+        select(DeviceAuthorization).where(DeviceAuthorization.code_hash == hash_token(code))
+    ).first()
+    # Every "not a live, redeemable row" case collapses to `invalid_grant`,
+    # uniformly — same "don't turn a lookup into an oracle" convention the
+    # device-code branch below already follows for `expired_token`.
+    if row is None or row.expires_at <= datetime.now(timezone.utc) or row.redeemed_at is not None:
+        return _oauth_error("invalid_grant")
+    if row.client_id != client_id or row.redirect_uri != redirect_uri or row.resource != resource:
+        return _oauth_error("invalid_grant")
+    if not verify_pkce(code_verifier, row.code_challenge or ""):
+        return _oauth_error("invalid_grant")
+
+    client_name = None
+    resolved = resolve_client(db, client_id)
+    if resolved is not None:
+        client_name = resolved.client_name
+
+    raw, pat, refresh_raw = _mint_access_token(
+        db,
+        user_id=row.user_id,
+        name=f"{client_name or 'OAuth client'} (authorization code)",
+        scope=row.requested_scope,
+        board_ids=row.requested_board_ids,
+        client_id=client_id,
+    )
+    row.pat_id = pat.id
+    row.redeemed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "access_token": raw,
+        "token_type": "Bearer",
+        "expires_in": ACCESS_TOKEN_TTL_SECONDS,
+        "refresh_token": refresh_raw,
+        "scope": pat.scope,
+    }
+
+
+def _exchange_refresh_token(body: dict, db: Session) -> JSONResponse | dict:
+    """``grant_type=refresh_token`` (ADR 0026, KAN-1735) — rotate: consume the
+    presented refresh token, mint a fresh access token + a fresh refresh token
+    carrying over the old one's scope/board allow-list. A second attempt to use
+    the now-consumed refresh token fails (single-use rotation; see the
+    ``OAuthRefreshToken`` model docstring for the theft-detection reasoning)."""
+    refresh_token = body.get("refresh_token")
+    client_id = body.get("client_id")
+    if not refresh_token or not client_id:
+        return _oauth_error("invalid_request")
+
+    row = db.scalars(
+        select(OAuthRefreshToken).where(OAuthRefreshToken.token_hash == hash_token(refresh_token))
+    ).first()
+    if row is None or row.expires_at <= datetime.now(timezone.utc) or row.consumed_at is not None:
+        return _oauth_error("invalid_grant")
+    if row.client_id != client_id:
+        return _oauth_error("invalid_grant")
+
+    old_pat = db.get(PersonalAccessToken, row.personal_access_token_id)
+    if old_pat is None:
+        return _oauth_error("invalid_grant")
+    old_board_ids = db.scalars(
+        select(PersonalAccessTokenBoard.board_id).where(
+            PersonalAccessTokenBoard.personal_access_token_id == old_pat.id
+        )
+    ).all()
+
+    raw, pat, refresh_raw = _mint_access_token(
+        db,
+        user_id=old_pat.user_id,
+        name=old_pat.name,
+        scope=old_pat.scope,
+        board_ids=list(old_board_ids),
+        client_id=client_id,
+    )
+    row.consumed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "access_token": raw,
+        "token_type": "Bearer",
+        "expires_in": ACCESS_TOKEN_TTL_SECONDS,
+        "refresh_token": refresh_raw,
+        "scope": pat.scope,
+    }
+
+
+@router.post("/token")
+async def poll_device_token(request: Request, db: Session = Depends(get_db)):
+    """The one ``token_endpoint`` every grant this server issues shares
+    (``app/oauth_server_metadata.py``): RFC 8628 device-code polling (below,
+    unchanged since ADR 0024) plus the ``authorization_code``/``refresh_token``
+    grants ADR 0026 adds (KAN-1735, delegated to the two helpers above)."""
+    body = await _parse_token_request_body(request)
+    grant_type = body.get("grant_type") or DEVICE_CODE_GRANT
+    if grant_type == "authorization_code":
+        return _exchange_authorization_code(body, request, db)
+    if grant_type == "refresh_token":
+        return _exchange_refresh_token(body, db)
+    if grant_type != DEVICE_CODE_GRANT:
+        return _oauth_error("unsupported_grant_type")
+
+    device_code = body.get("device_code")
+    if not device_code:
+        return _oauth_error("invalid_request")
+
+    # RFC 8628 device-code polling, unchanged since ADR 0024. Every "not a
+    # live, pending row" case (unknown code, expired, already redeemed)
+    # collapses to the same `expired_token` response — uniformly, so a stale
+    # poll can't be used to probe whether a code ever existed, matching this
+    # API's existing batch-read convention of not turning a lookup into an
+    # existence oracle.
     row = db.scalars(
         select(DeviceAuthorization).where(
-            DeviceAuthorization.device_code_hash == hash_token(payload.device_code)
+            DeviceAuthorization.device_code_hash == hash_token(device_code)
         )
     ).first()
     if row is None:
