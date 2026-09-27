@@ -47,6 +47,6 @@ test("create an epic (own view), link a story, tag + rollup persist", async ({ p
 
   // Server-authoritative: the link survives a full reload.
   await page.reload();
-  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await openView(page, "Board");
   await expect(cardInColumn(page, "Todo", storyTitle).locator(".epic-tag")).toHaveText(epicName);
 });

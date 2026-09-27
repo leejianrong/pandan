@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { KeyRound, Keyboard, LogOut, Moon, Search, Settings, Sun, UsersRound } from "lucide-svelte";
+  import { KeyRound, Keyboard, LogOut, Menu, Moon, Search, Settings, Sun, UsersRound } from "lucide-svelte";
   import Activity from "./lib/components/Activity.svelte";
   import Backlog from "./lib/components/Backlog.svelte";
   import Board from "./lib/components/Board.svelte";
@@ -49,6 +49,12 @@
     | "settings"
   >("board");
 
+  // The nav rail's open state (NR-5 — a follow-up UI pass reverting the
+  // always-visible rail to a collapsible overlay, closed by default at every
+  // viewport width; see nav-rail-shaping.md D6, which deferred this rather
+  // than ruling it out). Owned here since App.svelte drives the toggle button.
+  let railOpen = $state(false);
+
   // The ⌘K command palette's open state (V35, KAN-299).
   let paletteOpen = $state(false);
 
@@ -75,9 +81,9 @@
     if (next === "tokens") refetchTokens();
   }
 
-  // Navigating from the persistent rail. Board is one of the rail's items
-  // since NR-2 (the top-bar pill it used to be is gone — see the .app-shell
-  // style comment); the old hamburger+drawer this replaced is gone since NR-4.
+  // Navigating from the rail. Board is one of the rail's items since NR-2
+  // (the top-bar pill it used to be is gone for good). The rail closes
+  // itself on pick (NavRail.svelte's pick()); nothing further to do here.
   function navigateFromRail(next: RailView) {
     show(next);
   }
@@ -228,6 +234,14 @@
   <Landing />
 {:else}
   <header class="topbar">
+    <button
+      class="icon-btn nav-toggle"
+      aria-label="Toggle menu"
+      aria-expanded={railOpen}
+      onclick={() => (railOpen = !railOpen)}
+    >
+      <Menu size={18} />
+    </button>
     <Brand />
     <BoardSwitcher />
     <div class="topbar-search">
@@ -271,11 +285,10 @@
 
   <CommandPalette bind:open={paletteOpen} navigate={(v) => show(v as typeof view)} />
 
-  <!-- app-shell (NR-1, KAN-1148): a layout column for the persistent rail —
-       the only board-scoped nav surface since NR-4 removed the old
-       hamburger+SideNav drawer it used to run alongside (nav-rail-shaping.md D3). -->
+  <!-- app-shell: NavRail is a fixed-position overlay (NR-5), not a layout
+       column, so main is always full-width regardless of railOpen. -->
   <div class="app-shell">
-    <NavRail {view} onNavigate={navigateFromRail} />
+    <NavRail {view} open={railOpen} onNavigate={navigateFromRail} onClose={() => (railOpen = false)} />
     <main>
       {#if deviceUserCode}
         <DeviceApproval mode="device" userCode={deviceUserCode} onDone={clearDeviceLink} />
@@ -324,10 +337,10 @@
 {/if}
 
 <style>
-  /* Layout column for NavRail + main (NR-1, KAN-1148). Previously header/main
-     were plain top-level siblings with no shell — app.css's own `main`
-     selector still governs main's padding/etc, this just gives the rail a
-     place to sit beside it. */
+  /* NavRail is a fixed-position overlay (NR-5) and takes no flow space, so
+     main is the only flex participant here — flex:1 is harmless with one
+     child, kept so a future layout column (if any) slots in without a
+     rewrite. app.css's own `main` selector still governs main's padding. */
   .app-shell {
     display: flex;
     align-items: flex-start;
@@ -336,6 +349,12 @@
   .app-shell > :global(main) {
     flex: 1;
     min-width: 0;
+  }
+
+  /* Rail toggle (NR-5): same icon-btn treatment as the theme toggle/close
+     buttons elsewhere, just first in the topbar. */
+  .nav-toggle {
+    flex: none;
   }
 
   .settings-stub {
