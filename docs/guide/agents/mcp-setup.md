@@ -1,17 +1,59 @@
 <!--
 title: "Set up the MCP server"
-description: Wire the Pandan MCP server into Claude Code with the prebuilt container image or from a source checkout, then verify it works.
+description: Connect to Pandan's hosted remote MCP server with a URL and OAuth, or self-host it with the container image or a source checkout.
 -->
 
 # Set up the MCP server
 
-The MCP server is a thin adapter over the REST API. It holds no database and no state, so running it is
-just running a process that can reach your board.
+The MCP server is a thin adapter over the REST API. It holds no database and no state of its own.
 
-Claude Code discovers project-scoped servers from a `.mcp.json` at the root of your repository. Other
-MCP clients use their own config file, but the server entry is the same shape.
+Two transports reach it. The **hosted server** is an always-on Streamable HTTP endpoint on Pandan's own
+backend — any spec-compliant remote-MCP client adds it with a URL, no local process and no token to
+copy by hand. The **stdio server** is a local subprocess a client like Claude Code launches from
+`.mcp.json`, configured with a `PANDAN_TOKEN` env var. Prefer the hosted server; reach for stdio only if
+your client can't do remote MCP, or you're self-hosting Pandan and want no dependency on
+`simple-kanban-jian.fly.dev`.
 
-## Pick how to run it
+## Connect the hosted server
+
+Works with Claude.ai, Claude Desktop, Claude Code, ChatGPT, Cursor, or anything else that speaks
+Streamable HTTP with OAuth. Add a remote server pointing at:
+
+```
+https://simple-kanban-jian.fly.dev/mcp
+```
+
+(or `<your-origin>/mcp` on a self-hosted instance). There is no config file and nothing to install.
+Your client takes it from there:
+
+1. It fetches the discovery document at `/.well-known/oauth-protected-resource/mcp` (RFC 9728) to learn
+   which authorization server protects the endpoint — Pandan itself.
+2. It self-registers a client identity (RFC 7591 Dynamic Client Registration), rather than sharing one
+   pre-registered client with every other app that connects.
+3. It opens your browser to Pandan's consent screen. Approve it.
+4. It receives a token scoped to **this one connected app** (RFC 8707 resource binding — the token is
+   bound to the `/mcp` endpoint and cannot be replayed elsewhere), distinct from any PAT you've minted
+   for the CLI. It's listed and revocable at the board's Tokens tab like any other token, labelled with
+   the connecting app's name.
+
+!!! warning "No default board on the hosted path"
+
+    A local `PANDAN_BOARD_ID` is per-process, set once in your own config. The hosted server has no
+    equivalent — it's one process serving every caller, so there's nowhere to persist a default per
+    user. Every board-scoped call needs an explicit `board_id`, or `list_*` tools span every board you
+    can reach while `create_*` tools land on your earliest one — the exact behaviour an *unset*
+    `PANDAN_BOARD_ID` produces locally. Call `list_boards` first and pass its id back on the calls that
+    follow.
+
+Verify with the same two calls as the stdio path below: `warmup`, then `list_boards`.
+
+## Or self-host it: stdio
+
+Two ways to run the stdio server yourself, neither needing a browser or an OAuth round trip — just a
+`PANDAN_TOKEN` you mint once at the Tokens tab and paste into config.
+
+Claude Code discovers project-scoped stdio servers from a `.mcp.json` at the root of your repository.
+Other MCP clients use their own config file, but the server entry is the same shape.
 
 === "Container"
 
@@ -108,7 +150,9 @@ Whatever you call the server in `mcpServers` becomes the namespace for every too
 
 ## Verify it
 
-Restart your client so it picks up `.mcp.json`, approve the server when prompted, then run two tools.
+For the stdio setup above: restart your client so it picks up `.mcp.json`, approve the server when
+prompted, then run two tools. (For the hosted server, this is the same pair, run right after you
+approve the consent screen — see [above](#connect-the-hosted-server).)
 
 **First `warmup`.** It pings the unauthenticated health endpoint and wakes a scaled-to-zero deploy, so
 the cold start is paid once, up front, rather than inside your first real call.
@@ -137,6 +181,14 @@ In Claude Code, just ask:
     will see.
 
 ## Recap
+
+**Hosted (do this unless you have a reason not to):**
+
+1. Add `https://simple-kanban-jian.fly.dev/mcp` as a remote server in your client.
+2. Approve the browser consent prompt.
+3. Run `warmup`, then `list_boards` — pass `board_id` on every call after that.
+
+**Stdio (self-hosting, or a client with no remote-MCP support):**
 
 1. Copy `.mcp.json.example` to `.mcp.json` and keep one server entry.
 2. Set the origin, paste your token, and set `PANDAN_BOARD_ID` to a board you own.

@@ -18,13 +18,13 @@ uv run --project mcp mcp/scripts/measure_read_payload_tokens.py
 
 ## Where the cost actually is
 
-The intuition is that 49 tools must be expensive, because their schemas sit in context for the whole
+The intuition is that 57 tools must be expensive, because their schemas sit in context for the whole
 session. That turns out to be the smaller half of the problem.
 
 | Cost | Tokens | When you pay it |
 | --- | --- | --- |
-| Resident tool schemas | **8,162** | Once per session |
-| `outputSchema`, if your client forwards it | +836 | Once per session |
+| Resident tool schemas | **~10,000** | Once per session |
+| `outputSchema`, if your client forwards it | +~1,000 | Once per session |
 | One unnarrowed `list_cards` on a real board | **~45,000** | Every time you call it |
 | One `list_notifications` over 127 rows | **14,326** | Every time you call it |
 
@@ -35,7 +35,9 @@ tools. It was to make reads shapeable and then actually shape them.
 
 Adding `fields` and `full` to the reads where the tokens were cost **552** resident tokens and saved
 about **82%** across five representative reads. A later pass extended three more tools for another
-**222** resident tokens, which is where the 8,162 figure comes from.
+**222** resident tokens. The tool count has since grown three times over (workspaces, planning
+intervals, `close_cycle`), which is most of the gap between that and the resident figure above — re-run
+the script for today's exact number rather than trusting either one.
 
 Nine other reads were left deliberately unshaped, because they return between 7 and 474 tokens each.
 Adding arguments to shape a payload that small costs more schema than it could ever save, and a test
@@ -137,7 +139,7 @@ Compare that with one unnarrowed `list_cards` at around 45,000 tokens, which tel
 
 ## Recap
 
-- Resident schema is 8,162 tokens. One careless read is 45,000. Optimise the read.
+- Resident schema is on the order of 10,000 tokens. One careless read is 45,000. Optimise the read.
 - Always filter server-side, then pass `fields`.
 - Leave truncation on. Pass `full` only when you need the body.
 - `human` for flat lists, `toon` for nested reads, `json` only for programs.

@@ -112,8 +112,10 @@ Revocable individually.
 ## Clients and integration
 
 **MCP server**
-: A [Model Context Protocol](https://modelcontextprotocol.io) adapter exposing the API as 49 tools, for
-agents that speak MCP. Holds no state of its own.
+: A [Model Context Protocol](https://modelcontextprotocol.io) adapter exposing the API as 57 tools, for
+agents that speak MCP. Holds no state of its own. Reachable hosted, over Streamable HTTP with OAuth
+(add a URL, no install), or as a local stdio subprocess for self-hosting or a client with no remote-MCP
+support.
 
 **CLI**
 : The `pandan` command. A thin client over the same API, roughly one subcommand per endpoint.
