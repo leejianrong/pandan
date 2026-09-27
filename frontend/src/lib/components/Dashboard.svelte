@@ -1361,4 +1361,12 @@
       grid-template-columns: 1fr;
     }
   }
+
+  /* Narrower tier (NR-5 follow-up): even 2-up stat tiles get cramped once the
+     viewport itself is phone-width, not just tablet-width. */
+  @media (max-width: 480px) {
+    .stat-strip {
+      grid-template-columns: 1fr;
+    }
+  }
 </style>
