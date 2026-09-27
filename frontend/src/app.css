@@ -770,6 +770,11 @@ main {
   font-weight: var(--type-title-medium-weight);
   letter-spacing: var(--type-title-medium-tracking);
   line-height: 1.35;
+  /* A long unbroken title (a pasted URL, a no-space token) would otherwise
+     poke out of the card — same fix as .epic-name/.note-text. .board's own
+     grid can't blow out from this (its minmax(260px, 1fr) floor is fixed,
+     not content-derived), but the card's own box still needs it. */
+  overflow-wrap: anywhere;
 }
 /* Priority badge (M5 V11, KAN-244): a colored dot + level, hidden for "none". */
 .priority-badge {
@@ -2315,7 +2320,16 @@ button.primary:disabled {
 /* ---- Epic grid + card ---- */
 .epic-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* minmax(0, 1fr), not bare 1fr: a bare `1fr` track's default minimum is
+     `auto` (its content's min-content width), so ONE card with an unbroken
+     long token (a pasted URL, a no-space name) forces that track wider than
+     its fair share — both overflowing the page AND making the Active and
+     Completed sections (two independent grids) size their cards
+     differently, since each grid only sees its own content. minmax(0, 1fr)
+     pins every track to an equal share of the container regardless of
+     content; overflow-wrap on .epic-name (below) is what keeps a long token
+     from then overflowing its own now-fixed-width card. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.85rem;
   align-items: start;
 }
@@ -2324,6 +2338,7 @@ button.primary:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  min-width: 0;
 }
 .card.epic-card:hover {
   transform: none;
@@ -2337,6 +2352,7 @@ button.primary:disabled {
   font-weight: 650;
   letter-spacing: -0.01em;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 .epic-card.completed {
   opacity: 0.92;
