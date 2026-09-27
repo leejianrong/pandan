@@ -694,7 +694,11 @@
   /* --- stat strip --- */
   .stat-strip {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    /* minmax(0, 1fr): see .epic-grid's comment in app.css — a bare 1fr
+       track's default min is its content's min-content width, so long
+       unbroken content in one tile can force that track (and the whole
+       grid) wider than the container. */
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.85rem;
     margin: 1.2rem 0 1.4rem;
   }
@@ -760,7 +764,10 @@
   /* --- panels --- */
   .panel-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* minmax(0, 1fr): a long unbroken assignee name in the left panel could
+       otherwise force this grid (and the page) wider than the container —
+       see .epic-grid's comment in app.css for the general mechanism. */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 1rem;
     margin-bottom: 1rem;
   }
@@ -844,6 +851,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    /* Without this, the ellipsis above never actually triggers: a flex
+       item's default min-width is `auto` (its content's width), and
+       `white-space: nowrap` makes that content's min-content the FULL
+       unwrapped text width — so a long assignee string would still force
+       .assignee-head (and .panel-grid above it) wider instead of eliding. */
+    min-width: 0;
   }
   .assignee-head .count {
     margin-left: auto;
