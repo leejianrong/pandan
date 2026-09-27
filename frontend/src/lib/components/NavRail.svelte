@@ -1,18 +1,17 @@
 <script lang="ts">
-  // Persistent left nav rail (NR-1, KAN-1148 — docs/design-reviews/nav-rail-shaping.md).
-  // Always-visible replacement for the hamburger+SideNav drawer's board-scoped
-  // items. Borrows SideNav.svelte's item list/icons/aria-current pattern
-  // verbatim (per the audit, "the starting point for the new rail component,
-  // not a from-scratch design") but is deliberately a separate, smaller
-  // component — no open/onClose/scrim/onOpenInbox, since this is always
-  // visible and never shows Inbox (that stays the top-bar bell only).
+  // Left nav rail (NR-1, KAN-1148 — docs/design-reviews/nav-rail-shaping.md;
+  // NR-5, KAN-<TBD> — reverted to an overlay, closed by default, per a
+  // follow-up UI pass: nav-rail-shaping.md D6 explicitly deferred a
+  // responsive/collapsible rail as future work rather than ruling it out.
+  // Borrows SideNav.svelte's item list/icons/aria-current pattern verbatim
+  // (per the audit, "the starting point for the new rail component, not a
+  // from-scratch design") and, now, its scrim/fixed-position/Escape-to-close
+  // mechanics too — but stays a separate, smaller component: no
+  // onOpenInbox, since Inbox is still bell-only (D3/crease 4).
   //
-  // "Board" is the rail's first item (NR-2, KAN-1149) — added here atomically
-  // with retiring the top-bar .board-tab pill in App.svelte, so there is
-  // never a moment with two buttons named "Board" on screen (see D1,
-  // nav-rail-shaping.md, and its correction — the same collision actually
-  // hit all 7 of NR-1's items during the drawer/rail coexistence window,
-  // fixed in frontend/e2e/helpers.ts's openView() rather than here).
+  // "Board" is a rail item (NR-2, KAN-1149) — the top-bar .board-tab pill it
+  // replaced is retired for good, so there is no risk of two buttons named
+  // "Board" reappearing.
   //
   // Still excludes Tokens/Workspaces (account-scoped, D2) and Inbox (already has
   // the bell, D3/crease 4) — those never appear in the rail at any point.
@@ -38,7 +37,12 @@
     | "members"
     | "trash";
 
-  let { view, onNavigate }: { view: string; onNavigate: (view: RailView) => void } =
+  let {
+    view,
+    open,
+    onNavigate,
+    onClose,
+  }: { view: string; open: boolean; onNavigate: (view: RailView) => void; onClose: () => void } =
     $props();
 
   const items: { id: RailView; label: string; icon: typeof Icon }[] = [
@@ -51,16 +55,33 @@
     { id: "members", label: "Members", icon: Users },
     { id: "trash", label: "Trash", icon: Trash2 },
   ];
+
+  // Picking a destination navigates AND closes the rail — it's a transient
+  // overlay, not a persistent layout column, so there's nothing to leave open.
+  function pick(id: RailView) {
+    onNavigate(id);
+    onClose();
+  }
+
+  // Close on Escape while open (mirrors the old SideNav drawer's own handling).
+  function onKeydown(e: KeyboardEvent) {
+    if (open && e.key === "Escape") onClose();
+  }
 </script>
 
-<nav class="nav-rail" aria-label="Views">
+<svelte:window onkeydown={onKeydown} />
+
+<div class="nav-scrim" class:open onclick={onClose} aria-hidden="true"></div>
+
+<nav class="nav-rail" class:open aria-label="Views" aria-hidden={!open}>
   {#each items as item (item.id)}
     {@const ItemIcon = item.icon}
     <button
       class="rail-item"
       class:active={view === item.id}
       aria-current={view === item.id ? "page" : undefined}
-      onclick={() => onNavigate(item.id)}
+      tabindex={open ? 0 : -1}
+      onclick={() => pick(item.id)}
     >
       <ItemIcon size={18} />
       <span>{item.label}</span>
@@ -69,21 +90,45 @@
 </nav>
 
 <style>
-  /* Same visual language as SideNav.svelte's .drawer-item — this is the
-     rail's whole point, so it should look like it always belonged, not
-     like a bolted-on second nav. Differs only in not being a fixed overlay:
-     it's a layout column (see App.svelte's .app-shell), so no position,
-     transform, scrim, or z-index here. */
+  /* An overlay, not a layout column (see App.svelte — .app-shell no longer
+     reserves space for it): fixed position + a scrim behind it, so opening
+     it never shifts main/.board/anything else. Same visual language as the
+     old SideNav.svelte's .drawer-item throughout. */
+  .nav-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: var(--scrim);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+  }
+  .nav-scrim.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
   .nav-rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 100;
     width: 200px;
-    flex: none;
+    max-width: 82vw;
     display: flex;
     flex-direction: column;
     gap: 0.1rem;
     padding: 1rem 0.6rem;
-    background: var(--card-bg);
+    background: var(--elevation-3-surface);
     border-right: 1px solid var(--border);
+    box-shadow: var(--elevation-3-shadow);
     overflow-y: auto;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .nav-rail.open {
+    transform: translateX(0);
   }
 
   .rail-item {

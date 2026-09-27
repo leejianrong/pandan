@@ -62,7 +62,7 @@ test("trash lists a deleted card, restores it, then purges it", async ({ page })
   // Restore → gone from trash, back on the board.
   await trashRow(page, title).getByRole("button", { name: "Restore" }).click();
   await expect(trashRow(page, title)).toBeHidden();
-  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await openView(page, "Board");
   await expect(cardInColumn(page, "Todo", title)).toBeVisible();
 
   // Delete again, then purge permanently → gone from the trash for good.

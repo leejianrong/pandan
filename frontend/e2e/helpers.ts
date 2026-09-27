@@ -90,17 +90,16 @@ export async function pickSelect(
   await page.getByRole("option", { name: optionLabel, exact: true }).click();
 }
 
-// Navigate to a board-scoped secondary view via the persistent NavRail
-// (NR-1..NR-4, KAN-1148..KAN-1151). Originally opened the hamburger side-nav
-// drawer (KAN-319/U4) first; the drawer is gone since NR-4, and every caller
-// of this helper (Activity/Backlog/Dashboard/Epics/Labels/Trash) moved to the
-// rail with it — Tokens/Workspaces callers already switched to
-// openAccountMenuView() in NR-3, since those live in the avatar menu instead.
+// Navigate to a board-scoped secondary view via the NavRail (NR-1..NR-5,
+// KAN-1148..KAN-1151). The rail is a closed-by-default overlay since NR-5
+// (nav-rail-shaping.md D6's deferred follow-up), opened via the topbar's
+// "Open menu" toggle — picking an item both navigates and closes the rail
+// again (NavRail.svelte's pick()), so each call re-opens it.
 //
 // Scoped to the rail (role "navigation", aria-label "Views") rather than
-// page-wide — harmless now that the drawer is gone, but keeps the intent
-// explicit and matches openAccountMenuView()'s own scoping.
+// page-wide, matching openAccountMenuView()'s own scoping.
 export async function openView(page: Page, name: string): Promise<void> {
+  await page.getByRole("button", { name: "Toggle menu" }).click();
   await page
     .getByRole("navigation", { name: "Views" })
     .getByRole("button", { name, exact: true })
@@ -170,7 +169,7 @@ export async function createStoryUnder(
   epicTicket: string,
   epicName: string,
 ): Promise<void> {
-  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await openView(page, "Board");
   const col = column(page, columnLabel);
   await col.getByRole("button", { name: "Add card" }).click();
   await col.getByPlaceholder("Title (required)").fill(title);
