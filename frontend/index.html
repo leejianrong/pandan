@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pandan</title>
+    <!-- The sprout mark (three blades, one plant — brand exploration MARK-01):
+         SVG first for every modern browser, .ico as the legacy/bookmark-icon
+         fallback (some browsers/crawlers request /favicon.ico directly,
+         bypassing these tags entirely, which is why one exists on disk too). -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script>
       // Set the theme attribute before first paint to avoid a flash of the wrong
       // theme. Mirrors src/lib/theme.svelte.ts (localStorage → OS preference).
