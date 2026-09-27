@@ -562,6 +562,12 @@ main {
   align-items: start;
 }
 
+/* Mobile column indicator (see the responsive .board rule below) — a no-op
+   above the breakpoint, so it costs nothing on desktop. */
+.board-col-indicator {
+  display: none;
+}
+
 .column {
   position: relative;
   background: var(--col-bg);
@@ -2487,6 +2493,92 @@ button.primary:disabled {
   }
   .epic-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Topbar responsive wrap (NR-5 follow-up) — .topbar had no width handling at
+   all: board-switcher/search/user-menu simply forced horizontal overflow on
+   a narrow viewport. Let the row wrap instead of overflow, and push search
+   onto its own full-width second line (order:4, after nav-toggle/brand/
+   board-switcher/topbar-user which stay order:0 and keep their DOM/tab
+   order) rather than shrinking it to the point of being unusable. */
+@media (max-width: 640px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  .board-switcher {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .board-switcher select {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .topbar-search {
+    order: 4;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  .topbar-search input {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+/* Board — mobile column handling (NR-5 follow-up): the 3×minmax(260px)
+   grid simply overflowed the page on a phone with no scroll affordance.
+   Below 768px it becomes a horizontal scroll-snap row instead, one column
+   filling most of the viewport width at a time (swipe between them) —
+   preserves the kanban metaphor better than stacking all 3 full-width. */
+@media (max-width: 768px) {
+  .board-col-indicator {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+  .board-col-dot {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: var(--shape-full);
+    background: none;
+    cursor: pointer;
+  }
+  .board-col-dot::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: var(--shape-full);
+    background: var(--border);
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  .board-col-dot.active::before {
+    background: var(--accent);
+    transform: scale(1.35);
+  }
+  .board-col-dot:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .board {
+    display: flex;
+    grid-template-columns: none;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    gap: 1rem;
+    padding-bottom: 0.5rem;
+  }
+  .board .column {
+    flex: 0 0 85%;
+    max-width: 85%;
+    min-width: 0;
+    scroll-snap-align: start;
   }
 }
 
