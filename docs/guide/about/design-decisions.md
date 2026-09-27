@@ -81,16 +81,18 @@ This is the default rather than an option because the failure it prevents is exp
 with a long write-up filling an agent's context window on a single read. Making the safe behaviour the
 default and the complete read explicit is the right way round.
 
-## Breadth in the MCP surface, frozen
+## Breadth in the MCP surface, frozen against growth
 
-The MCP server has 49 tools, which sounds like a lot to keep resident in every session.
+The MCP server has 57 tools, which sounds like a lot to keep resident in every session.
 
 It was measured against two alternatives, a consolidated verb set and a single tool that shells out to the
-CLI. The finding was that resident schema is the smaller cost, at around 8,162 tokens per session, while a
+CLI. The finding was that resident schema is the smaller cost, at around 10,000 tokens per session, while a
 single unnarrowed read costs roughly 45,000. So breadth was kept and the effort went into making reads
 shapeable, which cut about 82% off a representative set for 552 resident tokens.
 
-The count is now frozen by a test. Adding a tool means amending the decision record, not editing a fixture.
+The count is frozen by a test — not literally never-growing (it started at 49 and has grown three times
+since, for workspaces, planning intervals, and closing a cycle explicitly), but each growth is an
+amendment to the decision record, not an open-ended addition or a fixture edit.
 Numbers and method are in [token budget](../agents/token-budget.md).
 
 ## Names that were deliberately not changed

@@ -30,12 +30,12 @@ why" is far more useful than one that guesses or stops.
 
 <div class="grid cards" markdown>
 
--   **MCP server**
+-   **Hosted MCP server**
 
-    For agents that speak [MCP](https://modelcontextprotocol.io): Claude Code, Claude Desktop, and
-    anything else with an MCP client. 49 tools, one per API capability.
+    For any spec-compliant remote-MCP client: Claude.ai, Claude Desktop, Claude Code, ChatGPT, Cursor.
+    Add a URL, approve an OAuth prompt, no local install. 57 tools, one per API capability.
 
-    [Set it up](mcp-setup.md)
+    [Connect it](mcp-setup.md#connect-the-hosted-server)
 
 -   **The CLI**
 
@@ -45,10 +45,16 @@ why" is far more useful than one that guesses or stops.
 
 </div>
 
-Which one? If your agent has an MCP client, use MCP, because tool calls are structured and it does not
-have to parse output. If your agent shells out, or you are writing a pipeline, use the CLI.
+Which one? If your agent has an MCP client, connect the hosted server, because tool calls are structured
+and it does not have to parse output. If your agent shells out, or you are writing a pipeline, use the
+CLI.
 
-Some setups want both, and that is fine. They read the same configuration and the same token.
+Some setups want both, and that is fine. Both read the same underlying permissions from whatever token
+resolves them.
+
+Running your own Pandan instance, or on a client that only supports local stdio MCP servers (no remote
+add-by-URL)? The MCP server also runs as a subprocess launched from `.mcp.json` — a container image or a
+source checkout, both [covered as the self-hosting fallback](mcp-setup.md#or-self-host-it-stdio).
 
 !!! info "The CLI is often cheaper"
 
@@ -87,11 +93,12 @@ soft within a few seconds, so a cold-starting API cannot delay a session. Detail
 
 -   **[Set up the MCP server](mcp-setup.md)**
 
-    The container and from-source options, and how to verify the connection.
+    The hosted endpoint, plus the container and from-source stdio fallback, and how to verify the
+    connection.
 
 -   **[Tool reference](mcp-tools.md)**
 
-    All 49 tools, grouped, with the arguments that shape their output.
+    All 57 tools, grouped, with the arguments that shape their output.
 
 -   **[Agent workflows](workflows.md)**
 

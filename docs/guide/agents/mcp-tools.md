@@ -1,12 +1,14 @@
 <!--
 title: "MCP tool reference"
-description: All 49 Pandan MCP tools, grouped by what they touch, plus the fields and full arguments that control payload size.
+description: All 57 Pandan MCP tools, grouped by what they touch, plus the fields and full arguments that control payload size.
 -->
 
 # MCP tool reference
 
-49 tools, one per API capability. Names below are unprefixed. Your client sees them namespaced by your
-`mcpServers` key, so `list_cards` is `mcp__pandan__list_cards` with the recommended key.
+57 tools, one per API capability, identical whether you reach them through the [hosted server or
+stdio](mcp-setup.md). Names below are unprefixed. Your client namespaces them by whatever name you gave
+the server: on Claude Code's stdio `.mcp.json` with the recommended `pandan` key, `list_cards` is
+`mcp__pandan__list_cards`.
 
 Every board-scoped tool takes an optional `board_id`. Omit it and it falls back to `PANDAN_BOARD_ID`.
 
@@ -19,6 +21,19 @@ Every board-scoped tool takes an optional `board_id`. Omit it and it falls back 
 | `create_board` | New board, owned by you. |
 | `update_board` | Rename, or change board settings. |
 | `delete_board` | Deletes the board **and its cards and epics**. |
+
+## Workspaces
+
+| Tool | What it does |
+| --- | --- |
+| `list_workspaces` | Workspaces you're a member of, with your role on each. Discover a `workspace_id` for `create_board`/`update_board`. |
+| `get_workspace` | One workspace. You must be a member, any role. |
+| `create_workspace` | New workspace. You're auto-added as its owner-role member. |
+| `update_workspace` | Rename it. Owner-role members only. |
+| `delete_workspace` | Delete it. Owner-role members only. Any board linked to it is **unclaimed**, not deleted. |
+
+Membership (add/remove a member, change a role) has no MCP tool — mirroring `board`'s own long-standing
+absence from this surface — and is CLI-only: `pandan workspace member add/rm/list/update-role`.
 
 ## Cards
 
@@ -85,7 +100,10 @@ them; `dispatch` does not.
 | `list_labels`, `create_label`, `delete_label` | Per-board labels with optional colours. |
 | `list_views`, `create_view`, `delete_view` | Saved queries. Anything `list_cards` accepts can be saved. |
 | `list_cycles`, `create_cycle`, `delete_cycle` | Iterations, with start and end dates. |
-| `cycle_metrics` | Flow metrics scoped to one cycle. |
+| `close_cycle` | End a cycle explicitly and roll its unfinished cards to another open cycle or the backlog. Freezes the metrics snapshot. |
+| `cycle_metrics` | Flow metrics scoped to one cycle. Reads the frozen snapshot once the cycle is closed. |
+| `list_planning_intervals` | A board's planning intervals — the grouping one level above a cycle, e.g. a quarter containing several sprints. |
+| `planning_interval_metrics` | Committed/completed/velocity **summed** across a planning interval's member cycles, not a per-cycle average. |
 | `list_templates`, `create_template`, `delete_template` | Named sets of cards. |
 | `apply_template` | Stamp a template's cards onto the board. |
 
@@ -165,12 +183,16 @@ reference does not cost you the other thirty-nine:
 Capped at 100 selectors, and not combinable with `limit`/`cursor` — a truncated page would report
 real cards as unresolved.
 
-## Why 49 tools
+## Why 57 tools
 
 The surface was measured against two alternatives, a consolidated verb set and a single tool that just
 executes the CLI, and kept as it is. The reasoning: resident schema turned out to be the small half of
-the cost, at roughly 8,162 tokens per session, while a single careless read costs five times that. So
-breadth stays and payload shaping got the attention instead.
+the cost, at roughly 10,000 tokens per session (drifts with every argument or tool the surface gains —
+see [token budget](token-budget.md) for how to remeasure it), while a single careless read costs several
+times that. So breadth stays and payload shaping got the attention instead.
+
+The count started at 49 and has grown three times since, each as a decision-record amendment rather than
+an open-ended surface: +5 workspace tools, +2 planning-interval tools, +1 `close_cycle`.
 
 The count is frozen by a test. Adding a tool means amending the decision record, not editing a fixture.
 Details in [design decisions](../about/design-decisions.md).

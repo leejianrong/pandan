@@ -113,8 +113,13 @@ docs lead with. A symlink works on both.
 
 ## Install the MCP server
 
-Two options, neither of which needs the CLI. Both are covered properly in
-[set up the MCP server](agents/mcp-setup.md), so this is just the summary:
+There is nothing to install for the recommended path. Any spec-compliant remote-MCP client adds
+`https://simple-kanban-jian.fly.dev/mcp` as a hosted server and completes an OAuth prompt in the
+browser — no CLI, no config file, no token to copy.
+
+Two more options exist for self-hosting, or for a client that only speaks local stdio MCP servers.
+Neither needs the CLI. Both are covered properly in [set up the MCP server](agents/mcp-setup.md), so
+this is just the summary:
 
 - **Container.** Run `ghcr.io/leejianrong/pandan-mcp:latest`. No Python, no `uv`, no checkout.
 - **From source.** `uv run --directory ./mcp python -m pandan_mcp` from a repository checkout.
