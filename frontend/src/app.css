@@ -419,24 +419,17 @@ body {
   letter-spacing: var(--type-title-large-tracking);
 }
 .brand-glyph {
-  display: grid;
-  grid-template-columns: 6px 6px;
-  gap: 3px;
-  width: 15px;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  overflow: visible;
 }
-.brand-glyph i {
-  display: block;
-  height: 15px;
-  border-radius: 2px;
-  background: var(--accent);
+.blade {
+  fill: var(--accent);
 }
-.brand-glyph i:nth-child(2) {
-  align-self: end;
-  height: 9px;
-  background: var(--agent);
-}
-.brand-glyph i:nth-child(3) {
-  height: 9px;
+.blade-l,
+.blade-r {
+  opacity: 0.72;
 }
 
 /* Board switcher in the top bar (M3 V7). */
