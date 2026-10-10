@@ -206,7 +206,7 @@ it isn't a story yet.
   ```
 - **Dependencies are structure, not prose**: `pandan dep add ENG-14 --blocked-by ENG-9`. Reference other
   cards by board-local ref. Never write "blocked by X" or "see KAN-424" as the only record.
-- **Progress, findings and history go in comments** (`pandan comment add`), not the description. The
+- **Progress, findings and history go in comments** (`pandan comment add ENG-14 --body "…"`), not the description. The
   description states intent and stays true after the card ships; don't edit it into a changelog.
 - **One card, one outcome.** "And also…" means a second card. Checklists of unrelated chores belong
   as separate cards; a checklist inside **Done when** is for verifying one outcome.
@@ -240,7 +240,8 @@ backlog, not an epic.
 
 Creating a plan in bulk: write the epic, then `pandan batch-create - < stories.json` with each
 object's `title`, `description` (the template above), `story_points` and `epic_id`. Re-read one card
-back with `pandan get` before filing forty.
+back with `pandan get` before filing forty. It is not atomic: if one card is rejected, the earlier ones
+stay created, so re-run only the remainder.
 
 ## Command surface
 
