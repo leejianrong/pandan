@@ -5484,3 +5484,25 @@ def test_every_cli_error_code_raised_in_the_source_is_in_error_codes():
         "the user as `error unexpected KeyError: ...` instead of the intended code:\n"
         + "\n".join(f"  cli.py:{line}  code={code!r}" for code, line in sorted(unmapped.items()))
     )
+
+
+def test_metrics_aging_row_shows_board_local_ref(monkeypatch, env, capsys):
+    """The aging-WIP rows of ``pandan metrics`` name a card by its board-local ``ref``
+    (attached by the API since M8 V54), not the canonical ``KAN-`` ticket — the one
+    human surface that still printed the canonical form."""
+    import copy
+
+    metrics = copy.deepcopy(METRICS)
+    metrics["aging_wip"]["items"][0]["ref"] = "ENG-14"
+    patch_client(monkeypatch, FakeClient(result=metrics))
+    assert cli.run(["metrics", "--board", "2"]) == 0
+    out = data_out(capsys)
+    assert "  ENG-14\tagent-b\t" in out
+    assert "KAN-3" not in out
+
+
+def test_projected_card_list_items_use_board_local_ref():
+    """A list-of-cards cell in a ``--fields`` row shows each card's ``ref`` first,
+    falling back to the canonical ticket for an item without one."""
+    assert cli._field_item({"ticket_number": "KAN-3", "ref": "ENG-14"}) == "ENG-14"
+    assert cli._field_item({"ticket_number": "KAN-3"}) == "KAN-3"

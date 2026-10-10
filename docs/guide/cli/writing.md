@@ -23,7 +23,7 @@ pandan create "Add a cursor flag to list" \
   --points 2 \
   --priority high \
   --assignee claude \
-  --epic EPIC-4 \
+  --epic ENG-E4 \
   --due 2026-09-01
 ```
 
@@ -39,9 +39,9 @@ pandan create "Fix the warmup message" --label 3 --label 7
 ### Edit
 
 ```bash
-pandan update KAN-591 --priority high
-pandan update KAN-591 --title "A clearer title" --points 3
-pandan update KAN-591 --assignee claude --due 2026-09-15
+pandan update ENG-9 --priority high
+pandan update ENG-9 --title "A clearer title" --points 3
+pandan update ENG-9 --assignee claude --due 2026-09-15
 ```
 
 `--label` on `update` **replaces** the card's labels rather than adding to them, so pass the full set
@@ -56,9 +56,9 @@ you want.
 ### Move
 
 ```bash
-pandan move KAN-591 in_progress
-pandan move KAN-591 done
-pandan move KAN-591 todo --position 0     # to the top of the column
+pandan move ENG-9 in_progress
+pandan move ENG-9 done
+pandan move ENG-9 todo --position 0     # to the top of the column
 ```
 
 Without `--position` the card is appended to the end of the target column. With one, it is clamped
@@ -69,7 +69,7 @@ The three columns are `todo`, `in_progress` and `done`.
 ### Delete
 
 ```bash
-pandan delete KAN-591
+pandan delete ENG-9
 ```
 
 Deleted cards go to the board's trash rather than vanishing, and can be restored from the web UI.
@@ -94,7 +94,7 @@ With `--claim` it moves the card to `in_progress` and assigns it in one call, so
 ### Claim a specific card
 
 ```bash
-pandan claim KAN-591 --assignee claude
+pandan claim ENG-9 --assignee claude
 ```
 
 `--assignee` is required here. There is no default, on purpose: a claim with no owner is not a claim.
@@ -102,8 +102,8 @@ pandan claim KAN-591 --assignee claude
 ### Hand it back to a human
 
 ```bash
-pandan needs-human KAN-591 --note "Needs a decision on whether to break the flag contract"
-pandan resolve KAN-591
+pandan needs-human ENG-9 --note "Needs a decision on whether to break the flag contract"
+pandan resolve ENG-9
 ```
 
 `needs-human` flags the card and records the note. The card shows up in `pandan list --needs-human`
@@ -140,20 +140,20 @@ An epic groups stories. It has no column, no position and no points, because an 
 
 ```bash
 pandan epic list
-pandan epic get EPIC-4
+pandan epic get ENG-E4
 pandan epic create "Onboarding flow" \
   --description "New-user first-run experience" \
   --lead claude \
   --target-date 2026-10-01
-pandan epic update EPIC-4 --name "Onboarding"
-pandan epic delete EPIC-4
+pandan epic update ENG-E4 --name "Onboarding"
+pandan epic delete ENG-E4
 ```
 
 Hang a story off an epic at creation or later:
 
 ```bash
-pandan create "Landing page" --epic EPIC-4
-pandan update KAN-601 --epic EPIC-4
+pandan create "Landing page" --epic ENG-E4
+pandan update ENG-14 --epic ENG-E4
 ```
 
 Deleting an epic detaches its stories rather than deleting them.
@@ -237,23 +237,23 @@ it.
 **Dependencies** record that one card is blocked by another. `next` respects them.
 
 ```bash
-pandan dep add KAN-591 --blocked-by KAN-439
-pandan dep list KAN-591                     # both blocked_by and blocks
-pandan dep rm KAN-591 --blocked-by KAN-439
+pandan dep add ENG-9 --blocked-by ENG-7
+pandan dep list ENG-9                     # both blocked_by and blocks
+pandan dep rm ENG-9 --blocked-by ENG-7
 ```
 
 **Links** attach a URL to a card, which is how an agent records the pull request it opened:
 
 ```bash
-pandan link add KAN-591 --label "PR #266" --url https://github.com/leejianrong/pandan/pull/266
-pandan link rm KAN-591 4
+pandan link add ENG-9 --label "PR #266" --url https://github.com/leejianrong/pandan/pull/266
+pandan link rm ENG-9 4
 ```
 
 **Comments** are notes on a card:
 
 ```bash
-pandan comment add KAN-591 --body "Confirmed: activity takes --cursor, list does not."
-pandan comment list KAN-591
+pandan comment add ENG-9 --body "Confirmed: activity takes --cursor, list does not."
+pandan comment list ENG-9
 ```
 
 ## Recap
@@ -262,11 +262,11 @@ A complete agent cycle, start to finish:
 
 ```bash
 pandan next --claim --assignee claude                      # take work
-pandan comment add KAN-601 --body "Starting on this"
-pandan link add KAN-601 --label "PR #267" --url https://…  # record the PR
-pandan needs-human KAN-601 --note "Needs a call on X"      # if stuck
-pandan resolve KAN-601                                     # human answered
-pandan move KAN-601 done                                   # finish
+pandan comment add ENG-14 --body "Starting on this"
+pandan link add ENG-14 --label "PR #267" --url https://…  # record the PR
+pandan needs-human ENG-14 --note "Needs a call on X"      # if stuck
+pandan resolve ENG-14                                     # human answered
+pandan move ENG-14 done                                   # finish
 ```
 
 Next: [output formats](output-formats.md) to control how much comes back, or

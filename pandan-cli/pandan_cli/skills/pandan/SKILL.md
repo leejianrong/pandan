@@ -5,7 +5,7 @@ description: >-
   the primary interface — with the `mcp__pandan__*` MCP tools as the fallback. Use whenever the task
   is to look at, create, update, move, or organise cards/epics/boards on Pandan (the board at
   simple-kanban-jian.fly.dev or a self-hosted instance): "add a card", "what's on the board", "move
-  KAN-12 to done", "list my epics", "track this work on kanban". For orchestrating a whole backlog as
+  ENG-12 to done", "list my epics", "track this work on kanban". For orchestrating a whole backlog as
   a scrum-master, see the pandan-pm skill; this skill is the tool reference it builds on.
 ---
 
@@ -179,13 +179,25 @@ rides out the wake, and exits `0` once the API is up. In a script:
 until pandan warmup; do sleep 2; done
 ```
 
+## Refer to cards by their board-local ref
+
+Every card and epic carries a **board-local `ref`** — `ENG-14` for a card, `ENG-E7` for an epic, built
+from the board's key. **Use it, in your messages, commit/branch names, comments and notes, and as the
+argument to every verb** (`pandan move ENG-14 done`). It is what the human rows and `--json` `.ref`
+show, and it is the name the board's users see in the web UI.
+
+The canonical `KAN-955` (`ticket_number`) still exists and still resolves, but it is a cross-board
+address, not a name: reach for it only when a board-local ref is ambiguous (the CLI's
+`ambiguous_ref` error says so and lists the boards) or when no `ref` was returned. Don't copy
+`ticket_number` out of `--json` into prose. `--fields ticket` stays canonical on purpose.
+
 ## Command surface
 
 Cards are the top-level verbs; `board`, `epic`, `label`, `view`, `template`, `dep`, `link`, and
 `comment` are nested groups. Columns are `todo`, `in_progress`, `done`. Story points are one of
 {1,2,3,5,8,13}. Priority is one of `none`/`low`/`medium`/`high`/`urgent`. Every command takes `--json`
 for machine-readable output you can pipe into `jq`; the human line for a card is
-`ticket  column  title  pts=N` (`pts=-` when unestimated).
+`ref  column  title  pts=N` (`pts=-` when unestimated).
 
 **`--json` output is enveloped for list verbs, bare for single reads — don't guess the shape**
 (KAN-434, verified 2026-07-31). `--json` is a verbatim passthrough of the shared client's return
@@ -207,9 +219,9 @@ differs per verb:
 | `metrics`, `cycle metrics`, `config show` | **bare object** — no envelope |
 
 ```bash
-pandan list --json | jq -r '.cards[] | "\(.ticket_number)\t\(.title)"'   # NOT .[]
-pandan next --json | jq -r '.card.ticket_number // "none ready"'
-pandan get KAN-7 --json | jq -r .title                                   # single reads are BARE
+pandan list --json | jq -r '.cards[] | "\(.ref)\t\(.title)"'            # NOT .[]
+pandan next --json | jq -r '.card.ref // "none ready"'
+pandan get ENG-7 --json | jq -r .title                                   # single reads are BARE
 ```
 
 The envelope is load-bearing (`next_cursor` rides there, and a `summary` field is coming) — treat it

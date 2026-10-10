@@ -364,18 +364,21 @@ def list_cards(
     available together with ``sort`` or ``q``).
 
     **``refs`` reads a known set of stories in ONE call** — a comma-separated list of
-    ids and/or references, e.g. ``"KAN-12,45,KAN-9"``. Use it instead of N ``get_card``
-    calls whenever you already hold the refs. Capped at 100, cannot be combined with
+    ids and/or references, e.g. ``"ENG-12,45,ENG-9"`` (with ``board_id``) or canonical
+    ``"KAN-12,KAN-9"``. Use it instead of N ``get_card`` calls whenever you already hold the
+    refs. Capped at 100, cannot be combined with
     ``limit``/``cursor``, and any selector matching nothing is left out of ``cards``
     and named in ``unresolved`` rather than failing the call.
 
-    Board-local references work too (``"ENG-14"``) **but only with ``board_id``**: a
+    **Name stories by their board-local ``ref`` (``"ENG-14"``) in everything you write**
+    — it is on every row; ``ticket_number`` is only the cross-board address. A
+    board-local ref resolves **only with ``board_id``**: a
     board key is unique per owner, so ``ENG-14`` names a different card for different
     people and is only decidable inside a known board. Without a board, use the
     canonical ``KAN-<n>``, which resolves from anywhere.
 
     **Pass ``fields``** — the keys to keep on each row, e.g.
-    ``["ticket_number","title","column","assignee"]`` (aliases: ticket, pts). A full
+    ``["ref","title","column","assignee"]`` (aliases: ticket → ticket_number, pts). A full
     22-key page of a busy board costs ~9× a narrowed one; an unknown name errors and
     lists the valid ones. Descriptions are cut to 500 chars with a
     ``(truncated, N chars total …)`` hint — ``full=true`` returns them whole.
@@ -417,9 +420,9 @@ def list_epics(
     fields: list[str] | None = None,
     full: bool = False,
 ) -> dict[str, Any]:
-    """List a board's epics (``board_id``, or the session's ``use_board`` pick).
-    ``fields`` narrows each row to those keys
-    (e.g. ``["ticket_number","name","progress"]``); descriptions are truncated with a
+    """List epics. ``board_id`` targets one board (defaults to PANDAN_BOARD_ID;
+    omit both to span all your boards). ``fields`` narrows each row to those keys
+    (e.g. ``["ref","name","progress"]``); descriptions are truncated with a
     size hint unless ``full=true``."""
     return shape(
         _client_instance().list_epics(board_id=_require_board(board_id)),

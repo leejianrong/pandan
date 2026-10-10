@@ -166,7 +166,7 @@ round trips:
 ```json
 {
   "name": "list_cards",
-  "arguments": { "refs": "KAN-12,45,KAN-9", "fields": ["ticket_number", "title", "column"] }
+  "arguments": { "refs": "ENG-12,45,ENG-9", "board_id": 3, "fields": ["ref", "title", "column"] }
 }
 ```
 
