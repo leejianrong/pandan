@@ -204,7 +204,7 @@ def test_restore_records_a_restored_activity_event(client):
     assert len(restored) == 1
     assert restored[0]["entity_type"] == "card"
     assert restored[0]["entity_id"] == card["id"]
-    assert card["ticket_number"] in restored[0]["summary"]
+    assert (card.get("ref") or card["ticket_number"]) in restored[0]["summary"]
 
 
 # --- authz gates --------------------------------------------------------------
