@@ -23,6 +23,7 @@ from ..auth_models import User
 from ..authz import require_user
 from ..db import get_db
 from ..models import Notification
+from ..ref_text import render_refs
 from ..schemas import NotificationRead
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -33,7 +34,7 @@ def list_notifications(
     unread: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
-) -> list[Notification]:
+) -> list[NotificationRead]:
     """List the caller's own notifications, newest-first. ``unread=true`` filters to
     only the unread ones (``read_at IS NULL``); default returns all. Owner-scoped:
     a caller only ever sees notifications addressed to them."""
@@ -41,7 +42,13 @@ def list_notifications(
     if unread:
         query = query.where(Notification.read_at.is_(None))
     query = query.order_by(Notification.id.desc())
-    return list(db.scalars(query).all())
+    rows = list(db.scalars(query).all())
+    # Per-read board-local refs (the stored body keeps the immutable ticket).
+    bodies = render_refs(db, [(r.board_id, r.body) for r in rows])
+    return [
+        NotificationRead.model_validate(r).model_copy(update={"body": b})
+        for r, b in zip(rows, bodies, strict=True)
+    ]
 
 
 @router.patch("/{notification_id}", response_model=NotificationRead)
@@ -49,7 +56,7 @@ def mark_read(
     notification_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
-) -> Notification:
+) -> NotificationRead:
     """Mark one of the caller's notifications read (stamp ``read_at``). Idempotent —
     re-marking an already-read one leaves its timestamp untouched. **404** if it
     doesn't exist or belongs to another user (don't reveal that the id exists)."""
@@ -62,4 +69,5 @@ def mark_read(
         notification.read_at = func.now()
     db.commit()
     db.refresh(notification)
-    return notification
+    (body,) = render_refs(db, [(notification.board_id, notification.body)])
+    return NotificationRead.model_validate(notification).model_copy(update={"body": body})
