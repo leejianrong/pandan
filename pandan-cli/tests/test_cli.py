@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -2047,7 +2048,7 @@ def test_board_update_with_only_a_key_is_not_nothing_to_update(monkeypatch, env,
 def test_board_list_human_output(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"boards": [BOARD]}))
     cli.run(["board", "list"])
-    assert capsys.readouterr().out.strip() == "2\tRoadmap\n1 board"
+    assert capsys.readouterr().out.strip() == "2\t-\tRoadmap\n1 board"
 
 
 def test_board_list_empty(monkeypatch, env, capsys):
@@ -2111,11 +2112,11 @@ def test_the_verbs_this_slice_did_not_touch_are_byte_identical(monkeypatch, env,
     KAN-502 widened to cover `created`."""
     patch_client(monkeypatch, FakeClient(result={"boards": [BOARD]}))
     cli.run(["board", "list"])
-    assert capsys.readouterr().out == "2\tRoadmap\n1 board\n"
+    assert capsys.readouterr().out == "2\t-\tRoadmap\n1 board\n"
 
     patch_client(monkeypatch, FakeClient(result=BOARD))
     cli.run(["board", "create", "Roadmap"])
-    assert data_out(capsys) == "2\tRoadmap"
+    assert data_out(capsys) == "2\t-\tRoadmap"
 
     patch_client(monkeypatch, FakeClient(result=CARD))
     cli.run(["create", "Ship it"])
@@ -2134,7 +2135,7 @@ def test_board_get_calls_client_with_the_numeric_id(monkeypatch, env):
 def test_board_get_human_output_is_the_board_line(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result=BOARD_WITH_WEBHOOK))
     cli.run(["board", "get", "5"])
-    assert capsys.readouterr().out == "5\tRoadmap\n"
+    assert capsys.readouterr().out == "5\t-\tRoadmap\n"
 
 
 # --- gap 1b: `board update` -------------------------------------------------
@@ -2400,7 +2401,7 @@ def test_board_get_never_prints_a_secret_even_if_the_api_returned_one(monkeypatc
         FakeClient(result={**BOARD_WITH_WEBHOOK, "outbound_webhook_secret": FAKE_WEBHOOK_KEY}),
     )
     assert cli.run(["board", "get", "5"]) == 0
-    assert capsys.readouterr().out == "5\tRoadmap\n"
+    assert capsys.readouterr().out == "5\t-\tRoadmap\n"
 
 
 # --- gap 1c: `board delete` -------------------------------------------------
@@ -5515,3 +5516,34 @@ def test_projected_card_list_items_use_board_local_ref():
     falling back to the canonical ticket for an item without one."""
     assert cli._field_item({"ticket_number": "KAN-3", "ref": "ENG-14"}) == "ENG-14"
     assert cli._field_item({"ticket_number": "KAN-3"}) == "KAN-3"
+
+
+def test_board_list_shows_the_key_column_that_board_use_takes(monkeypatch, env, capsys):
+    patch_client(
+        monkeypatch,
+        FakeClient(result={"boards": [{"id": 5, "key": "PAN", "name": "Pandan Roadmap"}]}),
+    )
+    cli.run(["board", "list"])
+    assert capsys.readouterr().out == "5\tPAN\tPandan Roadmap\n1 board\n"
+
+
+def test_retired_board_notice_names_the_fix_and_shows_once_a_day(tmp_path, monkeypatch, capsys):
+    from pandan_cli import config
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(config, "_warned", set())
+    config._warn_retired("board_id", "config file")
+    err = capsys.readouterr().err
+    assert "pandan config unset board_id" in err
+    # a later process (fresh in-memory dedup) within the day stays quiet
+    monkeypatch.setattr(config, "_warned", set())
+    config._warn_retired("board_id", "config file")
+    assert capsys.readouterr().err == ""
+    # …and speaks again once the stamp is older than a day
+    stamp = next((tmp_path / "state" / "pandan" / "notices").iterdir())
+    old = stamp.stat().st_mtime - config._NOTICE_TTL_SECONDS - 5
+    os.utime(stamp, (old, old))
+    monkeypatch.setattr(config, "_warned", set())
+    config._warn_retired("board_id", "config file")
+    assert "pandan config unset board_id" in capsys.readouterr().err
+

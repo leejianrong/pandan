@@ -951,8 +951,16 @@ def _epic_block(epic: dict[str, Any], *, limit: int = DEFAULT_MAX_TEXT_CHARS) ->
 
 
 def _board_line(board: dict[str, Any]) -> str:
-    """One concise line for a board: id, name (tab-separated)."""
-    return "\t".join((str(board.get("id", "?")), _flatten(str(board.get("name", "")))))
+    """One concise line for a board: id, key, name (tab-separated). The key is the
+    value ``pandan board use`` takes, so it belongs next to the id; ``-`` when absent
+    keeps the column count stable."""
+    return "\t".join(
+        (
+            str(board.get("id", "?")),
+            str(board.get("key") or "-"),
+            _flatten(str(board.get("name", ""))),
+        )
+    )
 
 
 def _workspace_line(workspace: dict[str, Any]) -> str:

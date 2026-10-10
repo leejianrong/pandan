@@ -54,6 +54,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,12 +117,40 @@ def _warn_once(key: str, message: str) -> None:
     print(message, file=sys.stderr)
 
 
+_NOTICE_TTL_SECONDS = 24 * 60 * 60  # once a day: an agent runs hundreds of calls a session
+
+
+def _notice_stamp_is_fresh(name: str) -> bool:
+    """True when this notice was already shown within ``_NOTICE_TTL_SECONDS``;
+    otherwise records it as shown now. Any OS error means "show it" — a notice is
+    advisory, and a read-only state dir must not hide it forever or crash a command."""
+    base = os.environ.get("XDG_STATE_HOME", "").strip()
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    stamp = root / "pandan" / "notices" / name.replace("/", "_").replace(" ", "_")
+    try:
+        if stamp.is_file() and time.time() - stamp.stat().st_mtime < _NOTICE_TTL_SECONDS:
+            return True
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.touch()
+    except OSError:
+        pass
+    return False
+
+
 def _warn_retired(key: str, where: str) -> None:
-    """One stderr line for a leftover retired key (the default board)."""
+    """One stderr line for a leftover retired key (the default board), at most once
+    per process and once per day. Names the fix for where the value lives."""
+    if where == "config file":
+        fix = f"Remove it with `pandan config unset {key}`."
+    else:
+        fix = f"Unset it in {where.removeprefix('env ')}."
+    stamp_name = f"retired-{key}-{where}"
+    if _notice_stamp_is_fresh(stamp_name) and f"retired:{key}:{where}" not in _warned:
+        return
     _warn_once(
         f"retired:{key}:{where}",
         f"pandan: {key} ({where}) is ignored — there is no default board any more. "
-        "Pass --board <id>, or pin one with `pandan board use <id|KEY>`.",
+        f"{fix} Pass --board <id>, or pin one with `pandan board use <id|KEY>`.",
     )
 
 
