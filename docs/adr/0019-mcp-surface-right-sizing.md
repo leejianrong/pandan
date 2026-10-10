@@ -749,3 +749,54 @@ match.
 additions and one rename — and each time the mechanism worked exactly as designed: the failing pin
 test forced the change through this document rather than around it. A rename costing +0.3% is the
 cheapest amendment yet, which is the expected shape of "we changed the name, not the thing."
+
+## Amendment: the `use_board` tool and the end of the default board (2026-10-10)
+
+**The freeze's fifth growth, and the first that comes with a removal.** `PANDAN_BOARD_ID` — the
+per-process default board V10 (ADR 0015) introduced — is retired, on the CLI and on MCP alike. A stale
+default on a *read* gives a confusing answer; on `create` it files a card on the wrong board, and with
+ten boards on one account nothing in the output says so. An unset default was no better: `list_*` spanned
+every board and `create_*` landed on the earliest. So board-scoped tools now **require** `board_id`,
+and the error names `list_boards`.
+
+That makes every board-scoped call heavier by one argument, and an agent working one board for a whole
+session would repeat it dozens of times. The CLI answers that with a state file
+(`pandan board use <id|KEY>`, per working directory, 12h idle expiry — each CLI call is a separate
+process, so something has to persist). An MCP stdio server *is* one process per session, so the
+equivalent is just a variable in it.
+
+**Decision: add exactly 1 tool — `use_board(board_id)` — a write only in the sense that it sets
+session state.** It verifies the board through `get_board` (a board you cannot see is an error and
+nothing is set), then later calls may omit `board_id`; an explicit `board_id` still wins. Why the CLI
+alone does not serve this: the whole point is that an agent on MCP should not need a shell to avoid
+repeating an argument, and `list_boards` + a remembered id in the model's own context is exactly the
+unreliable thing a default board was papering over.
+
+**Hosted transport: `use_board` refuses.** One hosted process serves every caller
+(`backend/app/mcp_host.py`), so a module-level "session board" would leak one user's board into
+another's calls. `use_board` raises there, and `_session_board()` returns `None` whenever the per-request
+token override is present, so even a stale stdio value could not be read. Hosted callers pass `board_id`
+on each call. (Keying the pick by MCP session id would work, but it is more machinery than the
+convenience is worth, and a wrong guess in it is a cross-user leak; revisit if hosted usage shows the
+repetition hurts.) Pinned by `test_the_hosted_transport_neither_sets_nor_honours_a_session_board`.
+
+**The one board-less read stays:** `list_cards` with `refs` (a canonical `KAN-<n>` batch read) needs no
+board, since ticket sequences are global — the same carve-out the CLI keeps for `pandan list --refs`.
+
+**Measurement**, via the same harness (`mcp/scripts/measure_tool_schema_tokens.py`), immediately before
+and after on the same commit/interpreter:
+
+| surface | tools | compact | `indent=2` | `outputSchema` alone (compact) |
+|---|---:|---:|---:|---:|
+| before (main) | 57 | 10,636 | 14,383 | 977 |
+| **after (+1 `use_board`, `PANDAN_BOARD_ID` prose removed)** | **58** | **10,787** | **14,567** | **994** |
+| **delta** | **+1** | **+151 (+1.4%)** | **+184** | **+17** |
+
+The delta is net of the ~25 "defaults to PANDAN_BOARD_ID" docstring fragments the change deleted, which
+is why a one-tool addition costs less than the earlier amendments. Re-run the script rather than quoting
+this number forward.
+
+**Both freeze pins were updated in the same PR**: `FROZEN_TOOLS` (+`use_board`) and `FROZEN_TOOL_COUNT`
+(57 → 58) in [`mcp/tests/test_schema.py`](../../mcp/tests/test_schema.py), and
+`pandan-cli/tests/test_parity.py`'s `MCP_TO_CLI` (`use_board` → `board use`) and restated count. The
+CLI-only `board current` (reads the local pin file; no API call) is classified in its `CLI_ONLY`.

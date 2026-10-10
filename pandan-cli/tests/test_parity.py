@@ -128,6 +128,7 @@ MCP_TO_CLI: dict[str, tuple[str, ...]] = {
     "get_board": ("board", "get"),        # KAN-502
     "update_board": ("board", "update"),  # KAN-502 — was MCP-only
     "delete_board": ("board", "delete"),  # KAN-502 — was MCP-only
+    "use_board": ("board", "use"),        # no default board: the session's board pick
     # workspaces (M9 V69, KAN-1058 — the 5-tool group ADR 0019 was amended to admit;
     # renamed from "team" to "workspace" by ADR 0023, KAN-1723 — a further ADR 0019
     # amendment, a rename of the frozen surface rather than growth).
@@ -227,6 +228,7 @@ MCP_ONLY: dict[str, str] = {}
 CLI_ONLY: dict[tuple[str, ...], str] = {
     ("overview",): "the CLI's content-first bare invocation (V46) — board state, no new capability",
     ("login",): "writes the local config file; a PAT never travels over MCP",
+    ("board", "current"): "reads the CLI's local session-pin file (`board use`); no API call",
     # ADR 0024 / KAN-1730: `auth login`/`auth logout` are the device-flow analogue
     # of `login` above — they write/clear the local config file. `auth login`
     # additionally talks to `/auth/device/*`, but those routes aren't board-API
@@ -568,10 +570,11 @@ def test_the_four_gaps_kan_502_closed_are_reachable():
 
 
 def test_the_mcp_surface_is_still_the_frozen_count():
-    """ADR 0019 froze the surface (57 tools as of M8 V59, KAN-980 — up from 56 at
+    """ADR 0019 froze the surface (58 tools as of the no-default-board `use_board`
+    amendment — up from 57 at M8 V59, KAN-980, 56 at
     M8 V57, up from 54 at M9 V69, up from the original 49); ``mcp/tests/test_schema.py``
     is the authoritative pin. Restating the count here is what makes the ``cli``
     job notice a *removal* on the MCP side, which is the direction that would
     break parity from the other end — and it keeps this file's own mapping honest
     about its scope."""
-    assert len(mcp_tool_names()) == 57
+    assert len(mcp_tool_names()) == 58

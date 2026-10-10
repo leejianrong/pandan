@@ -5,7 +5,7 @@ description: >-
   the primary interface — with the `mcp__pandan__*` MCP tools as the fallback. Use whenever the task
   is to look at, create, update, move, or organise cards/epics/boards on Pandan (the board at
   simple-kanban-jian.fly.dev or a self-hosted instance): "add a card", "what's on the board", "move
-  KAN-12 to done", "list my epics", "track this work on kanban". For orchestrating a whole backlog as
+  ENG-12 to done", "list my epics", "track this work on kanban". For orchestrating a whole backlog as
   a scrum-master, see the pandan-pm skill; this skill is the tool reference it builds on.
 ---
 
@@ -39,24 +39,42 @@ Prefer `pandan`. Drop to MCP only when you have to, and say why when you do.
 
 ## Setup
 
-`pandan` needs three config values, and resolves each one independently from the first source that
-supplies it, in this precedence order:
+`pandan` needs two config values (the server and your token), and resolves each one independently from the
+first source that supplies it, in this precedence order:
 
-1. **Environment** — `PANDAN_API_URL` / `PANDAN_TOKEN` / `PANDAN_BOARD_ID`.
+1. **Environment** — `PANDAN_API_URL` / `PANDAN_TOKEN`.
 2. **User config file** — `~/.config/pandan/config.toml` (`$XDG_CONFIG_HOME`-aware), written once by
    `pandan login` / `pandan config set` at mode `0600`. **This is how you authenticate one time and never
    pass the token again** (see below). A pre-rebrand `~/.config/kan/config.toml` is migrated across on
    first use and left in place (V40, KAN-423; `pandan_cli/config.py:100-107`).
 3. **`.mcp.json`** — the nearest one walking up from the CWD, read from `.mcpServers.pandan.env.*`.
 
-The three values:
+The two values:
 
 - `PANDAN_API_URL` — the board origin, e.g. `https://simple-kanban-jian.fly.dev` (or a self-host URL).
 - `PANDAN_TOKEN` — a PAT (`pandan_pat_…`). Minted at the board's **Tokens** tab after logging in.
   It acts as you and reaches boards you own **or are a member of**. `warmup` is the one command that
   needs no token.
-- `PANDAN_BOARD_ID` — the default board id. Set it. Without it, `list`/`create` span all your boards
-  or land on your earliest one, which is an easy way to touch the wrong board.
+
+### Pick a board — there is no default board
+
+A board-scoped verb (`list`, `create`, `next`, `metrics`, `epic list`, `label list`, …) with **no `--board`
+and no pin fails** with `error	board_required	…` listing your boards (`id KEY 'name'`). That is on
+purpose: a default is how an agent files a card on the wrong board. Say which board you mean, once:
+
+```bash
+pandan board list                  # id, key, name of every board you can reach
+pandan board use ENG               # pin it: an id or a board KEY (case-insensitive)
+pandan list                        # …now every board-scoped verb uses it
+pandan list --board 7              # --board always overrides the pin
+pandan board current               # which board is pinned here?   pandan board use --clear
+```
+
+The pin lives in a small state file (`$XDG_STATE_HOME/pandan/pins/`), **per working directory** (a `cd` into
+a subdirectory keeps it), for the server it was made against, and **lapses after 12 hours idle** — so a
+fresh session re-picks rather than inheriting a stale board. `PANDAN_BOARD_ID`, the config-file `board_id`
+and `require_board` are retired: a leftover one is ignored with a one-line stderr notice. Card verbs that
+take a ticket (`get`, `move`, `update`, …) need no board; `pandan list --refs KAN-12` is a global batch read.
 
 Because of the precedence chain, **in a Claude Code project you usually don't have to set anything**:
 `pandan` finds the PAT in the repo's `.mcp.json` on its own (source 3). For a standalone machine or CI,
@@ -69,16 +87,15 @@ it, or paste the literal `pandan_pat_…` value into any command you write — a
 the model context (and the transcript). The value must only ever move *machine-to-machine*.
 
 In a Claude Code project the token already lives in **`.mcp.json`** at the repo root, under
-`.mcpServers.pandan.env.PANDAN_TOKEN` (alongside `PANDAN_API_URL` and `PANDAN_BOARD_ID`). Load it into
+`.mcpServers.pandan.env.PANDAN_TOKEN` (alongside `PANDAN_API_URL`). Load it into
 the shell **by reference** with command substitution, so the value is resolved by the shell at runtime
 and never appears in what you write or in the output. The Bash tool starts a fresh shell each call and
 does **not** persist env vars, so prefix every `pandan` call with the load:
 
 ```bash
-# All three, straight from .mcp.json — the literal token never surfaces:
+# Both, straight from .mcp.json — the literal token never surfaces:
 export PANDAN_TOKEN=$(jq -r '.mcpServers.pandan.env.PANDAN_TOKEN' .mcp.json)
 export PANDAN_API_URL=$(jq -r '.mcpServers.pandan.env.PANDAN_API_URL' .mcp.json)
-export PANDAN_BOARD_ID=$(jq -r '.mcpServers.pandan.env.PANDAN_BOARD_ID' .mcp.json)
 pandan board list
 ```
 
@@ -89,7 +106,7 @@ walking up from the CWD if it isn't in the working directory):
 eval "$(jq -r '.mcpServers.pandan.env | to_entries[] | "export \(.key)=\(.value|@sh)"' .mcp.json)" && pandan board list
 ```
 
-If there is no `.mcp.json` (non–Claude Code shell, CI, self-host), expect the three vars to already be
+If there is no `.mcp.json` (non–Claude Code shell, CI, self-host), expect the two vars to already be
 in the environment — still don't echo `PANDAN_TOKEN`. If the token genuinely isn't reachable any way,
 stop and ask the user rather than requesting they paste it into the chat. (The **MCP fallback** never
 has this problem: the MCP server process inherits the token from `.mcp.json` directly, so
@@ -139,8 +156,7 @@ or your context. Pipe it in from wherever it already lives, by reference:
 # From a Claude Code .mcp.json (token resolved by jq at runtime, never printed):
 jq -r '.mcpServers.pandan.env.PANDAN_TOKEN' .mcp.json \
   | pandan login --token-stdin \
-      --api-url https://simple-kanban-jian.fly.dev \
-      --board-id <your-board-id>     # persists all three to ~/.config/pandan/config.toml (0600)
+      --api-url https://simple-kanban-jian.fly.dev   # persists both to ~/.config/pandan/config.toml (0600)
 ```
 
 If you're setting up by hand and the PAT is in some other secret store, pipe *that* into
@@ -163,13 +179,25 @@ rides out the wake, and exits `0` once the API is up. In a script:
 until pandan warmup; do sleep 2; done
 ```
 
+## Refer to cards by their board-local ref
+
+Every card and epic carries a **board-local `ref`** — `ENG-14` for a card, `ENG-E7` for an epic, built
+from the board's key. **Use it, in your messages, commit/branch names, comments and notes, and as the
+argument to every verb** (`pandan move ENG-14 done`). It is what the human rows and `--json` `.ref`
+show, and it is the name the board's users see in the web UI.
+
+The canonical `KAN-955` (`ticket_number`) still exists and still resolves, but it is a cross-board
+address, not a name: reach for it only when a board-local ref is ambiguous (the CLI's
+`ambiguous_ref` error says so and lists the boards) or when no `ref` was returned. Don't copy
+`ticket_number` out of `--json` into prose. `--fields ticket` stays canonical on purpose.
+
 ## Command surface
 
 Cards are the top-level verbs; `board`, `epic`, `label`, `view`, `template`, `dep`, `link`, and
 `comment` are nested groups. Columns are `todo`, `in_progress`, `done`. Story points are one of
 {1,2,3,5,8,13}. Priority is one of `none`/`low`/`medium`/`high`/`urgent`. Every command takes `--json`
 for machine-readable output you can pipe into `jq`; the human line for a card is
-`ticket  column  title  pts=N` (`pts=-` when unestimated).
+`ref  column  title  pts=N` (`pts=-` when unestimated).
 
 **`--json` output is enveloped for list verbs, bare for single reads — don't guess the shape**
 (KAN-434, verified 2026-07-31). `--json` is a verbatim passthrough of the shared client's return
@@ -191,9 +219,9 @@ differs per verb:
 | `metrics`, `cycle metrics`, `config show` | **bare object** — no envelope |
 
 ```bash
-pandan list --json | jq -r '.cards[] | "\(.ticket_number)\t\(.title)"'   # NOT .[]
-pandan next --json | jq -r '.card.ticket_number // "none ready"'
-pandan get KAN-7 --json | jq -r .title                                   # single reads are BARE
+pandan list --json | jq -r '.cards[] | "\(.ref)\t\(.title)"'            # NOT .[]
+pandan next --json | jq -r '.card.ref // "none ready"'
+pandan get ENG-7 --json | jq -r .title                                   # single reads are BARE
 ```
 
 The envelope is load-bearing (`next_cursor` rides there, and a `summary` field is coming) — treat it
@@ -233,8 +261,9 @@ Cards:
   POST per card and the cards created *before* a rejection stay created. On failure re-run with the
   remainder, not the whole array. Object fields use the API's own names (`title` required, then
   `description`/`column`/`story_points`/`assignee`/`epic_id`/`cycle_id`/`priority`/`due_date`/
-  `label_ids`/`board_id`); `--board` (or `PANDAN_BOARD_ID`) fills in `board_id` for objects that omit
-  it, so a batch can't silently land on your earliest board.
+  `label_ids`/`board_id`); `--board` (or the `board use` pin) fills in `board_id` for objects that omit
+  it; an object with no `board_id` and no board selected is refused, so a batch can't silently land on your
+  earliest board.
 - `pandan claim <card_id> --assignee A [--json]` — claim a **chosen** card in one call: move it to
   `in_progress` **and** set its assignee. Use this when you already know which card you want;
   `next --claim` is the one that picks the card for you. `--assignee` is required (this path has no
@@ -258,6 +287,7 @@ Dependencies, work-links, comments (nested groups):
 Boards, epics, labels, saved views, templates:
 
 - `pandan board list [--json]` · `pandan board get <board_id> [--json]` · `pandan board create "<name>" [--json]`
+- `pandan board use <id|KEY>` · `pandan board use --clear` · `pandan board current` — pin the session's board (above)
 - `pandan board update <board_id> [--name N] [--outbound-webhook-url URL]
   [--outbound-webhook-secret S | --outbound-webhook-secret-stdin]
   [--outbound-webhook-enabled | --outbound-webhook-disabled] [--json]` — **this is how you rename a

@@ -1,22 +1,23 @@
 <!--
 title: "MCP tool reference"
-description: All 57 Pandan MCP tools, grouped by what they touch, plus the fields and full arguments that control payload size.
+description: All 58 Pandan MCP tools, grouped by what they touch, plus the fields and full arguments that control payload size.
 -->
 
 # MCP tool reference
 
-57 tools, one per API capability, identical whether you reach them through the [hosted server or
+58 tools, one per API capability, identical whether you reach them through the [hosted server or
 stdio](mcp-setup.md). Names below are unprefixed. Your client namespaces them by whatever name you gave
 the server: on Claude Code's stdio `.mcp.json` with the recommended `pandan` key, `list_cards` is
 `mcp__pandan__list_cards`.
 
-Every board-scoped tool takes an optional `board_id`. Omit it and it falls back to `PANDAN_BOARD_ID`.
+Every board-scoped tool takes a `board_id`. There is **no default board**: omit it and the call fails, unless you called `use_board` earlier in the session (stdio only). `list_cards` with `refs` is the one board-less read.
 
 ## Boards
 
 | Tool | What it does |
 | --- | --- |
 | `list_boards` | Boards you can reach, with ids. Run this first. |
+| `use_board` | Picks the board this session works on, so later calls can omit `board_id` (an explicit `board_id` still wins). **Stdio only** — the hosted server refuses, since one process serves every caller. |
 | `get_board` | One board, including its auto-sync and webhook settings. |
 | `create_board` | New board, owned by you. |
 | `update_board` | Rename, or change board settings. |
@@ -165,7 +166,7 @@ round trips:
 ```json
 {
   "name": "list_cards",
-  "arguments": { "refs": "KAN-12,45,KAN-9", "fields": ["ticket_number", "title", "column"] }
+  "arguments": { "refs": "ENG-12,45,ENG-9", "board_id": 3, "fields": ["ref", "title", "column"] }
 }
 ```
 
@@ -183,7 +184,7 @@ reference does not cost you the other thirty-nine:
 Capped at 100 selectors, and not combinable with `limit`/`cursor` — a truncated page would report
 real cards as unresolved.
 
-## Why 57 tools
+## Why 58 tools
 
 The surface was measured against two alternatives, a consolidated verb set and a single tool that just
 executes the CLI, and kept as it is. The reasoning: resident schema turned out to be the small half of
@@ -191,15 +192,15 @@ the cost, at roughly 10,000 tokens per session (drifts with every argument or to
 see [token budget](token-budget.md) for how to remeasure it), while a single careless read costs several
 times that. So breadth stays and payload shaping got the attention instead.
 
-The count started at 49 and has grown three times since, each as a decision-record amendment rather than
-an open-ended surface: +5 workspace tools, +2 planning-interval tools, +1 `close_cycle`.
+The count started at 49 and has grown four times since, each as a decision-record amendment rather than
+an open-ended surface: +5 workspace tools, +2 planning-interval tools, +1 `close_cycle`, +1 `use_board`.
 
 The count is frozen by a test. Adding a tool means amending the decision record, not editing a fixture.
 Details in [design decisions](../about/design-decisions.md).
 
 ## Recap
 
-- `list_boards` first, then set `PANDAN_BOARD_ID`.
+- `list_boards` first, then `use_board` (stdio) or pass `board_id` on each call.
 - `dispatch` to take work, not `next` plus `claim_card`.
 - `move_card` to move, `update_card` to edit.
 - `fields` and `full` on the reads that support them.

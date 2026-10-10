@@ -9,6 +9,12 @@ Reading is where you will spend most of your time, and where the token cost live
 doing the reading. This page covers what to ask for. [Output formats](output-formats.md) covers how to
 ask for less of it.
 
+!!! note "Examples assume a pinned board"
+
+    There is no default board, so board-scoped examples like `pandan list --column todo` assume you ran
+    `pandan board use <id|KEY>` first (or add `--board <id>`). See
+    [configuration](configure.md#picking-a-board).
+
 ## The whole board at a glance
 
 ```console
@@ -43,7 +49,7 @@ almost always the question you actually have.
 ## Listing and filtering cards
 
 ```bash
-pandan list                          # every card on the default board
+pandan list --board 5                # every card on board 5 (or pin it: pandan board use 5)
 pandan list --column todo
 pandan list --assignee claude
 pandan list --priority high

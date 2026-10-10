@@ -55,6 +55,7 @@ import pytest
 from toon_decode import decode
 
 from pandan_cli import __version__, cli, config, context
+from pandan_cli.pin import write_pin
 
 HELP_GOLDEN = pathlib.Path(__file__).with_name("help_golden.txt")
 
@@ -153,14 +154,14 @@ def isolate_config(monkeypatch, tmp_path):
 
 @pytest.fixture
 def token(monkeypatch):
-    """A token but **no** default board."""
+    """A token but **no** board selected."""
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_test")
 
 
 @pytest.fixture
 def board(monkeypatch, token):
-    """A token **and** a default board (the normal configured state)."""
-    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
+    """A token **and** a pinned board (the normal configured state)."""
+    write_pin(config.DEFAULT_API_URL, 5)
 
 
 def patch_client(monkeypatch, result=None, results=None) -> list[FakeClient]:
@@ -252,14 +253,14 @@ def test_bare_invocation_makes_exactly_one_request(monkeypatch, capsys, board):
     assert built[0].calls[0][1] == {"board_id": 5, "limit": cli.OVERVIEW_FETCH_LIMIT}
 
 
-def test_no_board_configured_lists_boards(monkeypatch, capsys, token):
-    """The spec's second shape: with no default board the actionable content is the
+def test_no_board_selected_lists_boards(monkeypatch, capsys, token):
+    """The spec's second shape: with no board selected the actionable content is the
     board list — the thing you need in order to pick one — still exit 0."""
     built = patch_client(monkeypatch, result={"boards": [BOARD]})
     assert cli.run([]) == cli.EXIT_OK
     out = capsys.readouterr().out
     assert [name for name, _ in built[0].calls] == ["list_boards"]
-    assert "no default board configured · your boards:" in out
+    assert "no board pinned (`pandan board use <id|KEY>`) · your boards:" in out
     assert "5\tRoadmap" in out or "Roadmap" in out
     assert out.splitlines()[-1] == "1 board"
 
@@ -400,7 +401,7 @@ def test_the_wait_notice_is_stderr_and_tty_only(monkeypatch, capsys):
         def isatty(self) -> bool:
             return True
 
-    cfg = config.Config(api_url="https://example.test", token="t", board_id=None)
+    cfg = config.Config(api_url="https://example.test", token="t")
     tty = Tty()
     monkeypatch.setattr(cli.sys, "stderr", tty)
     cli._announce_wait(cfg)
@@ -547,8 +548,8 @@ def test_an_explicit_board_flag_is_carried_forward(monkeypatch, capsys, token):
     assert f"{cli.HINT_PREFIX} pandan get <id>" in lines
 
 
-def test_a_board_from_the_environment_is_not_carried_forward(monkeypatch, capsys, board):
-    """PANDAN_BOARD_ID resolves the same way for the next command, so spelling it out
+def test_a_pinned_board_is_not_carried_forward(monkeypatch, capsys, board):
+    """A pinned board resolves the same way for the next command, so spelling it out
     would be noise — and would read as though the flag were required."""
     out = run_ok(monkeypatch, capsys, [], result=PAGE)
     assert hints_in(out) == [

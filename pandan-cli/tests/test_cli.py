@@ -21,6 +21,7 @@ import pytest
 from pandan_client import PandanApiError
 
 from pandan_cli import build_info, cli, config
+from pandan_cli.pin import clear_pin, write_pin
 
 # The real find_mcp_json, captured before the autouse fixture patches it out — so
 # the test that exercises the upward walk itself can reach the genuine impl.
@@ -351,12 +352,19 @@ def isolate_config(monkeypatch, tmp_path):
     config._warned.clear()
 
 
+def pin_board(board_id: int) -> None:
+    """Pin a board for the (default-URL) test session, as `pandan board use` would."""
+    write_pin(config.DEFAULT_API_URL, board_id)
+
+
 @pytest.fixture
 def env(monkeypatch):
-    """A valid environment (token set, no default board)."""
+    """A valid environment: token set, board 1 pinned. There is no default board, so
+    board-scoped verbs need either a pin or --board; tests of "no board" call
+    ``clear_pin()``."""
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_test")
-    monkeypatch.delenv("PANDAN_BOARD_ID", raising=False)
     monkeypatch.delenv("PANDAN_API_URL", raising=False)
+    pin_board(1)
 
 
 def patch_client(monkeypatch, fake: FakeClient) -> FakeClient:
@@ -1233,10 +1241,11 @@ def test_metrics_maps_board_and_window(monkeypatch, env):
 
 def test_metrics_requires_a_board(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result=METRICS))
-    assert cli.run(["metrics"]) == 1  # no --board, no PANDAN_BOARD_ID → refused
+    clear_pin()
+    assert cli.run(["metrics"]) == 1  # no --board, no pin → refused
     err = read_error(capsys)
     assert err.code == "board_required"
-    assert "board is required" in err.message
+    assert "no board selected" in err.message
     assert err.arg == "--board"
 
 
@@ -1312,7 +1321,8 @@ def test_activity_maps_board_and_filters(monkeypatch, env):
 
 def test_activity_requires_a_board(monkeypatch, env, capsys):
     patch_client(monkeypatch, FakeClient(result={"activity": []}))
-    assert cli.run(["activity"]) == 1  # no --board, no PANDAN_BOARD_ID → refused
+    clear_pin()
+    assert cli.run(["activity"]) == 1  # no --board, no pin → refused
     err = read_error(capsys)
     assert err.code == "board_required"
     assert err.arg == "--board"
@@ -1626,14 +1636,14 @@ def test_move_defaults_position_to_none(monkeypatch, env):
 
 
 def test_list_uses_board_env_default(monkeypatch, env):
-    monkeypatch.setenv("PANDAN_BOARD_ID", "7")
+    pin_board(7)
     fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
     cli.run(["list"])
     assert fake.calls[0][1]["board_id"] == 7
 
 
 def test_flag_overrides_board_env_default(monkeypatch, env):
-    monkeypatch.setenv("PANDAN_BOARD_ID", "7")
+    pin_board(7)
     fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
     cli.run(["list", "--board", "3"])
     assert fake.calls[0][1]["board_id"] == 3
@@ -2609,7 +2619,7 @@ def test_batch_create_fills_the_board_into_objects_that_omit_it(monkeypatch, env
 
 
 def test_batch_create_uses_the_configured_board(monkeypatch, env):
-    monkeypatch.setenv("PANDAN_BOARD_ID", "4")
+    pin_board(4)
     fake = patch_client(monkeypatch, FakeClient(result=_created(1)))
     assert cli.run(["batch-create", '[{"title": "a"}]']) == 0
     assert fake.calls[0][1]["cards"] == [{"title": "a", "board_id": 4}]
@@ -2704,7 +2714,7 @@ def test_epic_list_maps_board_filter(monkeypatch, env):
 
 
 def test_epic_list_uses_board_env_default(monkeypatch, env):
-    monkeypatch.setenv("PANDAN_BOARD_ID", "7")
+    pin_board(7)
     fake = patch_client(monkeypatch, FakeClient(result={"epics": []}))
     cli.run(["epic", "list"])
     assert fake.calls[0][1]["board_id"] == 7
@@ -2738,7 +2748,7 @@ def test_epic_create_passes_color(monkeypatch, env):
         (
             "create_epic",
             {
-                "name": "Onboarding", "board_id": None, "description": None,
+                "name": "Onboarding", "board_id": 1, "description": None,
                 "target_date": None, "lead": None, "color": "fuchsia",
             },
         )
@@ -2946,7 +2956,6 @@ def test_warmup_needs_no_token(monkeypatch, capsys):
     # No PANDAN_TOKEN set — warmup hits the public /api/health, so it must not
     # error out on a missing token like the other (auth-required) commands do.
     monkeypatch.delenv("PANDAN_TOKEN", raising=False)
-    monkeypatch.delenv("PANDAN_BOARD_ID", raising=False)
     monkeypatch.delenv("PANDAN_API_URL", raising=False)
     patch_client(monkeypatch, FakeClient(result={"status": "ok", "health": {}}))
     assert cli.run(["warmup"]) == cli.EXIT_OK
@@ -3004,7 +3013,6 @@ def test_real_client_warmup_hits_unversioned_health(monkeypatch):
     # No token in the env: warmup must still reach the unversioned /api/health
     # (not /api/v1/...) and send no Authorization header.
     monkeypatch.delenv("PANDAN_TOKEN", raising=False)
-    monkeypatch.delenv("PANDAN_BOARD_ID", raising=False)
     monkeypatch.delenv("PANDAN_API_URL", raising=False)
     seen = {}
 
@@ -3195,10 +3203,9 @@ def _write_mcp_json(monkeypatch, tmp_path, env: dict, server: str = "pandan") ->
 
 def test_token_from_config_file_when_env_unset(monkeypatch):
     monkeypatch.delenv("PANDAN_TOKEN", raising=False)
-    config.write_config_file(token="pandan_pat_fromfile", board_id="9")
+    config.write_config_file(token="pandan_pat_fromfile")
     cfg = config.load_config()
     assert cfg.token == "pandan_pat_fromfile"
-    assert cfg.board_id == 9
 
 
 def test_token_from_mcp_json_when_env_and_file_unset(monkeypatch, tmp_path):
@@ -3209,33 +3216,27 @@ def test_token_from_mcp_json_when_env_and_file_unset(monkeypatch, tmp_path):
         {
             "PANDAN_TOKEN": "pandan_pat_frommcp",
             "PANDAN_API_URL": "https://mcp.example",
-            "PANDAN_BOARD_ID": 42,  # a JSON number — must be coerced to int 42
         },
     )
     cfg = config.load_config()
     assert cfg.token == "pandan_pat_frommcp"
     assert cfg.api_url == "https://mcp.example"
-    assert cfg.board_id == 42
 
 
 def test_env_overrides_config_file_and_mcp_json(monkeypatch, tmp_path):
-    _write_mcp_json(monkeypatch, tmp_path, {"PANDAN_TOKEN": "pandan_pat_mcp", "PANDAN_BOARD_ID": 1})
-    config.write_config_file(token="pandan_pat_file", board_id="2")
+    _write_mcp_json(monkeypatch, tmp_path, {"PANDAN_TOKEN": "pandan_pat_mcp"})
+    config.write_config_file(token="pandan_pat_file")
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_env")
-    monkeypatch.setenv("PANDAN_BOARD_ID", "3")
     cfg = config.load_config()
     assert cfg.token == "pandan_pat_env"
-    assert cfg.board_id == 3
 
 
 def test_config_file_overrides_mcp_json(monkeypatch, tmp_path):
     monkeypatch.delenv("PANDAN_TOKEN", raising=False)
-    monkeypatch.delenv("PANDAN_BOARD_ID", raising=False)
-    _write_mcp_json(monkeypatch, tmp_path, {"PANDAN_TOKEN": "pandan_pat_mcp", "PANDAN_BOARD_ID": 1})
-    config.write_config_file(token="pandan_pat_file", board_id="2")
+    _write_mcp_json(monkeypatch, tmp_path, {"PANDAN_TOKEN": "pandan_pat_mcp"})
+    config.write_config_file(token="pandan_pat_file")
     cfg = config.load_config()
     assert cfg.token == "pandan_pat_file"
-    assert cfg.board_id == 2
 
 
 def test_missing_token_everywhere_raises(monkeypatch):
@@ -3264,14 +3265,13 @@ def test_malformed_sources_are_ignored(monkeypatch, tmp_path):
 
 
 def test_write_config_file_is_owner_only_and_merges(monkeypatch):
-    p1 = config.write_config_file(api_url="https://a.example", board_id="5")
+    p1 = config.write_config_file(api_url="https://a.example")
     assert (p1.stat().st_mode & 0o777) == 0o600
-    # A later write of just the token must preserve api_url + board_id.
+    # A later write of just the token must preserve api_url.
     config.write_config_file(token="pandan_pat_x")
     monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     cfg = config.load_config()
     assert cfg.api_url == "https://a.example"
-    assert cfg.board_id == 5
     assert cfg.token == "pandan_pat_x"
 
 
@@ -3293,15 +3293,17 @@ def test_config_show_redacts_token(monkeypatch, tmp_path, capsys):
 
 def test_config_set_token_stdin_never_needs_argv(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO("pandan_pat_viastdin\n"))
-    assert cli.run(["config", "set", "--token-stdin", "--board-id", "8"]) == cli.EXIT_OK
+    assert cli.run(["config", "set", "--token-stdin"]) == cli.EXIT_OK
     monkeypatch.delenv("PANDAN_TOKEN", raising=False)
     cfg = config.load_config()
     assert cfg.token == "pandan_pat_viastdin"
-    assert cfg.board_id == 8
 
 
-def test_config_set_rejects_non_integer_board_id():
-    assert cli.run(["config", "set", "--board-id", "abc"]) == cli.EXIT_ERROR
+def test_config_set_no_longer_takes_a_default_board():
+    """The default board is gone: the flags that wrote one are removed, not ignored."""
+    for flag in (["--board-id", "8"], ["--require-board"], ["--no-require-board"]):
+        with pytest.raises(SystemExit):
+            cli.run(["config", "set", *flag])
 
 
 # --- batch read: list --refs (issue #254) ----------------------------------
@@ -3399,44 +3401,60 @@ def test_structured_output_carries_unresolved(monkeypatch, env, capsys):
 # to say so.
 
 
-def test_config_unset_clears_a_key_without_touching_the_token(monkeypatch, capsys):
-    """The whole point of the verb: the file also holds the PAT, so "just delete the
-    line" means opening a credential file by hand."""
-    monkeypatch.setattr("sys.stdin", io.StringIO("pandan_pat_keepme\n"))
-    assert cli.run(["config", "set", "--token-stdin", "--board-id", "8"]) == cli.EXIT_OK
-    capsys.readouterr()
+def _write_legacy_board_default(value: str = "8") -> None:
+    """A config file as a pre-removal pandan left it: a token plus a default board."""
+    path = config.config_file_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f'[pandan]\ntoken = "pandan_pat_keepme"\nboard_id = {value}\nrequire_board = true\n',
+        encoding="utf-8",
+    )
 
-    assert cli.run(["config", "unset", "board_id"]) == cli.EXIT_OK
-    assert "board_id\tremoved" in capsys.readouterr().out
+
+def test_config_unset_clears_a_retired_key_without_touching_the_token(monkeypatch, capsys):
+    """The file also holds the PAT, so "just delete the line" means opening a
+    credential file by hand — `unset` still cleans out the retired default board."""
+    _write_legacy_board_default()
+    assert cli.run(["config", "unset", "board_id", "require_board"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "board_id\tremoved" in out
+    assert "require_board\tremoved" in out
 
     monkeypatch.delenv("PANDAN_TOKEN", raising=False)
-    cfg = config.load_config()
-    assert cfg.board_id is None
-    assert cfg.token == "pandan_pat_keepme"  # the neighbouring secret survived
+    assert config.load_config().token == "pandan_pat_keepme"  # the neighbour survived
+    assert "board_id" not in config.config_file_path().read_text(encoding="utf-8")
 
 
 def test_config_unset_distinguishes_cleared_from_never_set(monkeypatch, capsys):
-    """"Cleared it" and "it was never there" are different answers to 'why is this
-    still pointing at board 5?' — the second means the value comes from the
-    environment or .mcp.json, which this verb cannot touch."""
-    assert cli.run(["config", "set", "--board-id", "8"]) == cli.EXIT_OK
-    capsys.readouterr()
+    _write_legacy_board_default()
     assert cli.run(["config", "unset", "board_id", "max_text_chars"]) == cli.EXIT_OK
     out = capsys.readouterr().out
     assert "board_id\tremoved" in out
     assert "max_text_chars\tnot set" in out
 
 
-def test_config_unset_warns_when_the_value_still_resolves(monkeypatch, capsys):
-    """Clearing the file only unmasks the next source. Reporting OK while the value
-    is unchanged is precisely the silent behaviour the issue is about."""
-    assert cli.run(["config", "set", "--board-id", "8"]) == cli.EXIT_OK
-    capsys.readouterr()
-    monkeypatch.setenv("PANDAN_BOARD_ID", "9")
-    assert cli.run(["config", "unset", "board_id"]) == cli.EXIT_OK
-    captured = capsys.readouterr()
-    assert "board_id\tremoved" in captured.out
-    assert "still resolves to 9" in captured.err  # stderr: stdout stays parseable
+def test_a_leftover_default_board_is_ignored_with_a_notice(monkeypatch, capsys):
+    """An old config file / env / .mcp.json must not brick the CLI — and must not be
+    silently honoured either: that is the stale default this change removes."""
+    _write_legacy_board_default()
+    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    cfg = config.load_config()
+    assert cfg.token == "pandan_pat_keepme"
+    assert not hasattr(cfg, "board_id")
+    err = capsys.readouterr().err
+    assert "PANDAN_BOARD_ID" in err and "ignored" in err
+    assert "config file" in err
+
+
+def test_a_leftover_default_board_does_not_select_a_board(monkeypatch, env, capsys):
+    clear_pin()
+    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
+    patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    config.load_config()  # emits the one-line notice (once per process) ...
+    capsys.readouterr()  # ... drained, so read_error sees only the verb's own output
+    assert cli.run(["list"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "board_required"
 
 
 def test_config_unset_rejects_an_unknown_key(capsys):
@@ -3448,65 +3466,179 @@ def test_config_unset_rejects_an_unknown_key(capsys):
     assert err.arg == "boardid"
 
 
-def test_require_board_refuses_a_board_scoped_verb_with_no_board(monkeypatch, env, capsys):
-    patch_client(monkeypatch, FakeClient(result={"cards": []}))
-    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
-    monkeypatch.setenv("PANDAN_REQUIRE_BOARD", "1")
+# --- no default board: the session pin (`pandan board use`) -----------------
+
+BOARDS = {"boards": [
+    {"id": 3, "key": "ENG", "name": "Engineering", "owner_email": "a@x"},
+    {"id": 7, "key": "OPS", "name": "Ops", "owner_email": "a@x"},
+]}
+
+
+class BoardsFake(FakeClient):
+    """Answers ``list_boards`` with BOARDS and every card list with an empty page."""
+
+    def list_boards(self):
+        self._call("list_boards")
+        return BOARDS
+
+
+def test_a_board_scoped_verb_with_no_board_lists_your_boards(monkeypatch, env, capsys):
+    clear_pin()
+    fake = patch_client(monkeypatch, BoardsFake(result={"cards": []}))
     assert cli.run(["list"]) == cli.EXIT_ERROR
     err = read_error(capsys)
     assert err.code == "board_required"
     assert err.arg == "--board"
+    assert "3 ENG 'Engineering'" in err.message and "7 OPS 'Ops'" in err.message
+    assert "pandan board use" in err.message
+    assert not any(name == "list_cards" for name, _ in fake.calls)  # nothing was read
 
 
-def test_require_board_still_allows_an_explicit_board(monkeypatch, env):
-    """The switch makes ``--board`` mandatory, not impossible."""
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["list"], ["create", "t"], ["next"], ["metrics"], ["activity"], ["epic", "list"],
+        ["epic", "create", "e"], ["label", "list"], ["view", "list"], ["cycle", "list"],
+        ["pi", "list"], ["template", "list"],
+    ],
+)
+def test_every_board_scoped_verb_refuses_to_guess(monkeypatch, env, capsys, argv):
+    clear_pin()
+    fake = patch_client(monkeypatch, BoardsFake(result={"cards": []}))
+    assert cli.run(argv) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "board_required"
+    assert [n for n, _ in fake.calls if n != "list_boards"] == []
+
+
+def test_a_pinned_board_is_used_and_the_flag_overrides_it(monkeypatch, env):
+    pin_board(7)
     fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
-    monkeypatch.setenv("PANDAN_REQUIRE_BOARD", "true")
-    assert cli.run(["list", "--board", "7"]) == cli.EXIT_OK
+    assert cli.run(["list"]) == cli.EXIT_OK
+    assert fake.calls[0][1]["board_id"] == 7
+    assert cli.run(["list", "--board", "3"]) == cli.EXIT_OK
+    assert fake.calls[1][1]["board_id"] == 3
+
+
+def test_a_pin_from_another_server_is_ignored(monkeypatch, env, capsys):
+    clear_pin()
+    write_pin("https://elsewhere.example", 7)  # board ids are per-instance
+    patch_client(monkeypatch, BoardsFake(result={"cards": []}))
+    assert cli.run(["list"]) == cli.EXIT_ERROR
+
+
+def test_a_pin_expires_after_twelve_hours_idle(monkeypatch, env, capsys):
+    import time as _time
+
+    from pandan_cli import pin as pin_mod
+
+    pin_board(7)
+    real = _time.time()
+    monkeypatch.setattr(pin_mod.time, "time", lambda: real + pin_mod.PIN_TTL_SECONDS + 5)
+    patch_client(monkeypatch, BoardsFake(result={"cards": []}))
+    assert cli.run(["list"]) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "board_required"
+
+
+def test_using_a_pin_refreshes_its_idle_timer(monkeypatch, env):
+    import time as _time
+
+    from pandan_cli import pin as pin_mod
+
+    pin_board(7)
+    real = _time.time()
+    patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    # Eleven hours in: still live, and the read pushes the expiry out again...
+    monkeypatch.setattr(pin_mod.time, "time", lambda: real + 11 * 3600)
+    assert cli.run(["list"]) == cli.EXIT_OK
+    # ...so eleven more hours (22h after the pin was written) is still inside the window.
+    monkeypatch.setattr(pin_mod.time, "time", lambda: real + 22 * 3600)
+    assert cli.run(["list"]) == cli.EXIT_OK
+
+
+def test_the_pin_is_per_working_directory(monkeypatch, env, tmp_path):
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    pin_board(7)
+    monkeypatch.chdir(other)  # a directory with no pinned ancestor of its own
+    from pandan_cli import pin as pin_mod
+
+    assert pin_mod.read_pin(config.DEFAULT_API_URL, start=other) is None
+
+
+def test_a_pin_covers_subdirectories(monkeypatch, env, tmp_path):
+    from pandan_cli import pin as pin_mod
+
+    root = tmp_path / "proj"
+    sub = root / "a" / "b"
+    sub.mkdir(parents=True)
+    pin_mod.write_pin(config.DEFAULT_API_URL, 9, start=root)
+    assert pin_mod.read_pin(config.DEFAULT_API_URL, start=sub).board_id == 9
+
+
+def test_board_use_resolves_an_id_or_a_key_and_pins_it(monkeypatch, env, capsys):
+    clear_pin()
+    patch_client(monkeypatch, BoardsFake(result={}))
+    assert cli.run(["board", "use", "ops"]) == cli.EXIT_OK  # keys are case-insensitive
+    capsys.readouterr()
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    assert cli.run(["list"]) == cli.EXIT_OK
     assert fake.calls[0][1]["board_id"] == 7
 
-
-def test_require_board_is_off_by_default(monkeypatch, env):
-    """Opt-in: the fallback is genuinely convenient on a single-board account, which
-    is where everyone starts. No existing invocation may change behaviour."""
-    fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
-    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
-    assert cli.run(["list"]) == cli.EXIT_OK
-    assert fake.calls[0][1]["board_id"] == 5
+    patch_client(monkeypatch, BoardsFake(result={}))
+    assert cli.run(["board", "use", "3"]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert cli.run(["board", "current", "--format", "json"]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out)["key"] == "ENG"
 
 
-def test_require_board_rejects_an_unparseable_value(monkeypatch, env, capsys):
-    """The one setting whose job is preventing a misfiled write must not read
-    ``ture`` as "off" and hand back the exact fallback the user disabled."""
-    patch_client(monkeypatch, FakeClient(result={"cards": []}))
-    monkeypatch.setenv("PANDAN_REQUIRE_BOARD", "ture")
-    assert cli.run(["list"]) == cli.EXIT_ERROR
+def test_board_use_rejects_an_unknown_board_and_an_ambiguous_key(monkeypatch, env, capsys):
+    clear_pin()
+    patch_client(monkeypatch, BoardsFake(result={}))
+    assert cli.run(["board", "use", "NOPE"]) == cli.EXIT_NOT_FOUND
+    assert read_error(capsys).code == "not_found"
+
+    class Dupes(FakeClient):
+        def list_boards(self):
+            return {"boards": [
+                {"id": 1, "key": "ENG", "name": "Mine"},
+                {"id": 2, "key": "ENG", "name": "Theirs"},
+            ]}
+
+    patch_client(monkeypatch, Dupes(result={}))
+    assert cli.run(["board", "use", "ENG"]) == cli.EXIT_ERROR
     err = read_error(capsys)
-    assert err.code == "config"
-    assert "ture" in err.message
+    assert err.code == "ambiguous_ref"
+    assert "1 ENG" in err.message and "2 ENG" in err.message
+    assert cli.run(["board", "current"]) == cli.EXIT_OK
+    assert capsys.readouterr().out.strip() == "(none)"  # nothing was pinned
 
 
-def test_require_board_round_trips_through_the_config_file(monkeypatch, capsys):
-    """Written as a real TOML bool, not a quoted string, so anything else reading the
-    file sees a boolean."""
-    assert cli.run(["config", "set", "--require-board"]) == cli.EXIT_OK
-    capsys.readouterr()
-    assert "require_board = true" in config.config_file_path().read_text(encoding="utf-8")
-    monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_x")
-    assert config.load_config().require_board is True
-
-    assert cli.run(["config", "set", "--no-require-board"]) == cli.EXIT_OK
-    capsys.readouterr()
-    assert config.load_config().require_board is False
+def test_board_use_clear_removes_the_pin_without_a_token(monkeypatch, capsys):
+    monkeypatch.delenv("PANDAN_TOKEN", raising=False)
+    pin_board(7)
+    assert cli.run(["board", "use", "--clear"]) == cli.EXIT_OK
+    assert capsys.readouterr().out.strip() == "cleared"
+    assert cli.run(["board", "use", "--clear"]) == cli.EXIT_OK
+    assert capsys.readouterr().out.strip() == "no pin"
 
 
-def test_require_board_off_in_the_file_is_written_not_dropped(monkeypatch, capsys):
-    """``--no-require-board`` must persist ``false`` rather than removing the key: the
-    file is the middle source, so a vanished key would fall through to .mcp.json and
-    the override would not stick."""
-    assert cli.run(["config", "set", "--no-require-board"]) == cli.EXIT_OK
-    capsys.readouterr()
-    assert "require_board = false" in config.config_file_path().read_text(encoding="utf-8")
+def test_ticket_refs_and_batch_reads_need_no_board(monkeypatch, env):
+    """Canonical refs are global, so the global batch read may omit a board; the
+    board-less path must not become a loophole for the rest."""
+    clear_pin()
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": []}))
+    assert cli.run(["list", "--refs", "KAN-12"]) == cli.EXIT_OK
+    assert fake.calls[0][1]["board_id"] is None
+
+
+def test_batch_create_refuses_an_object_that_would_land_on_no_board(monkeypatch, env, capsys):
+    clear_pin()
+    fake = patch_client(monkeypatch, BoardsFake(result={"created": []}))
+    assert cli.run(["batch-create", '[{"title": "a"}]']) == cli.EXIT_ERROR
+    assert read_error(capsys).code == "board_required"
+    assert not any(n == "create_cards" for n, _ in fake.calls)
+    # An object that names its own board needs no selected one.
+    assert cli.run(["batch-create", '[{"title": "a", "board_id": 3}]']) == cli.EXIT_OK
 
 
 # --- next / dispatch (M5 V12, KAN-245) -------------------------------------
@@ -3530,10 +3662,11 @@ def test_next_claim_dispatches(monkeypatch, env):
 
 def test_next_requires_a_board(monkeypatch, env):
     fake = patch_client(monkeypatch, FakeClient(result={"card": CARD}))
+    clear_pin()
     code = cli.run(["next"])
-    # No --board and no PANDAN_BOARD_ID → config error, no client call.
+    # No --board and no pin → board_required, and no board-scoped call was made.
     assert code == cli.EXIT_ERROR
-    assert fake.calls == []
+    assert [name for name, _ in fake.calls if name != "list_boards"] == []
 
 
 def test_next_humanizes_empty(monkeypatch, env, capsys):
@@ -3911,14 +4044,11 @@ def test_pandan_env_wins_over_kanban_env(monkeypatch, capsys):
     monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_old")
     monkeypatch.setenv("PANDAN_API_URL", "https://new.example")
     monkeypatch.setenv("KANBAN_API_URL", "https://old.example")
-    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
-    monkeypatch.setenv("KANBAN_BOARD_ID", "9")
 
     cfg = config.load_config()
 
     assert cfg.token == "pandan_pat_new"
     assert cfg.api_url == "https://new.example"
-    assert cfg.board_id == 5
     # Nothing resolved from a deprecated name, so nothing is warned about.
     assert capsys.readouterr().err == ""
 
@@ -3926,15 +4056,13 @@ def test_pandan_env_wins_over_kanban_env(monkeypatch, capsys):
 def test_kanban_env_alone_still_resolves_and_warns(monkeypatch, capsys):
     monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_old")
     monkeypatch.setenv("KANBAN_API_URL", "https://old.example")
-    monkeypatch.setenv("KANBAN_BOARD_ID", "9")
 
     cfg = config.load_config()
 
     assert cfg.token == "kanban_pat_old"
     assert cfg.api_url == "https://old.example"
-    assert cfg.board_id == 9
     err = capsys.readouterr().err
-    for name in ("KANBAN_TOKEN", "KANBAN_API_URL", "KANBAN_BOARD_ID"):
+    for name in ("KANBAN_TOKEN", "KANBAN_API_URL"):
         assert name in err
         assert name.replace("KANBAN_", "PANDAN_") in err
     assert "deprecated" in err
@@ -3950,12 +4078,12 @@ def test_deprecation_notice_is_emitted_once_per_process(monkeypatch, capsys):
 
 
 def test_mixed_env_resolves_per_value(monkeypatch):
-    """A half-migrated env: new token, old board id. Both must land."""
+    """A half-migrated env: new token, old API URL. Both must land."""
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_new")
-    monkeypatch.setenv("KANBAN_BOARD_ID", "9")
+    monkeypatch.setenv("KANBAN_API_URL", "https://old.example")
     cfg = config.load_config()
     assert cfg.token == "pandan_pat_new"
-    assert cfg.board_id == 9
+    assert cfg.api_url == "https://old.example"
 
 
 def test_no_token_from_either_spelling_is_a_config_error(monkeypatch, capsys):
@@ -3980,8 +4108,7 @@ def test_mcp_json_falls_back_to_legacy_server_key_and_env_names(monkeypatch, tmp
         server="kanban",
     )
     cfg = config.load_config()
-    assert cfg.token == "kanban_pat_mcp"
-    assert cfg.board_id == 3
+    assert cfg.token == "kanban_pat_mcp"  # the leftover board id is ignored, not fatal
 
 
 def test_mcp_json_prefers_pandan_server_over_kanban(monkeypatch, tmp_path):
@@ -4015,7 +4142,6 @@ def test_legacy_config_dir_is_migrated_on_read(capsys):
     cfg = config.load_config()
 
     assert cfg.token == "kanban_pat_legacydir"
-    assert cfg.board_id == 4
     new = config.config_file_path()
     assert new.is_file()
     assert legacy.is_file()  # left in place, so an old binary keeps working
@@ -4033,7 +4159,7 @@ def test_existing_new_config_is_not_overwritten_by_the_legacy_one():
 
 
 def test_write_config_file_renders_the_pandan_table():
-    path = config.write_config_file(token="pandan_pat_x", board_id="2")
+    path = config.write_config_file(token="pandan_pat_x")
     body = path.read_text(encoding="utf-8")
     assert body.startswith("[pandan]")
     # And it round-trips through the reader.
@@ -4684,7 +4810,7 @@ def test_two_visible_eng_boards_with_no_active_board_is_ambiguous(monkeypatch, e
 def test_the_active_board_settles_an_otherwise_ambiguous_ref(monkeypatch, env):
     """With PANDAN_BOARD_ID set, only that board is even queried — ambiguity is the
     exception the error exists for, not the common path."""
-    monkeypatch.setenv("PANDAN_BOARD_ID", "6")
+    pin_board(6)
     card = _card_on(6, "KAN-207", 14, "ENG")
     fake = patch_client(
         monkeypatch,
@@ -5311,13 +5437,6 @@ def test_config_set_errors_are_structured(monkeypatch, capsys):
     assert "nothing to set" in err.message
 
 
-def test_config_set_rejects_non_integer_board_id_structured(capsys):
-    assert cli.run(["config", "set", "--board-id", "abc"]) == cli.EXIT_ERROR
-    err = read_error(capsys)
-    assert err.code == "invalid_input"
-    assert err.arg == "--board-id"
-
-
 # --- every raised code is a mapped code (KAN-982 follow-up) ------------------
 
 
@@ -5374,3 +5493,25 @@ def test_every_cli_error_code_raised_in_the_source_is_in_error_codes():
         "the user as `error unexpected KeyError: ...` instead of the intended code:\n"
         + "\n".join(f"  cli.py:{line}  code={code!r}" for code, line in sorted(unmapped.items()))
     )
+
+
+def test_metrics_aging_row_shows_board_local_ref(monkeypatch, env, capsys):
+    """The aging-WIP rows of ``pandan metrics`` name a card by its board-local ``ref``
+    (attached by the API since M8 V54), not the canonical ``KAN-`` ticket — the one
+    human surface that still printed the canonical form."""
+    import copy
+
+    metrics = copy.deepcopy(METRICS)
+    metrics["aging_wip"]["items"][0]["ref"] = "ENG-14"
+    patch_client(monkeypatch, FakeClient(result=metrics))
+    assert cli.run(["metrics", "--board", "2"]) == 0
+    out = data_out(capsys)
+    assert "  ENG-14\tagent-b\t" in out
+    assert "KAN-3" not in out
+
+
+def test_projected_card_list_items_use_board_local_ref():
+    """A list-of-cards cell in a ``--fields`` row shows each card's ``ref`` first,
+    falling back to the canonical ticket for an item without one."""
+    assert cli._field_item({"ticket_number": "KAN-3", "ref": "ENG-14"}) == "ENG-14"
+    assert cli._field_item({"ticket_number": "KAN-3"}) == "KAN-3"
