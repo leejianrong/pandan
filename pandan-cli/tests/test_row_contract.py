@@ -159,7 +159,11 @@ def without_hints(out: str) -> list[str]:
                 "percent": 60, "done": 3, "total": 5}},
             "EPIC-7\tSharpen\t60% (3/5)",
         ),
-        ("_board_line", {"id": 5, "key": "PAN", "name": "Pandan Roadmap"}, "5\tPAN\tPandan Roadmap"),
+        (
+            "_board_line",
+            {"id": 5, "key": "PAN", "name": "Pandan Roadmap"},
+            "5\tPAN\tPandan Roadmap",
+        ),
         # KAN-614. A principal's id is a UUID, not an int — the row is still id-first,
         # tab-separated, one line.
         (
