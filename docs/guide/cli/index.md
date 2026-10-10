@@ -10,7 +10,13 @@ the API the single source of truth and stops the CLI from growing its own ideas 
 works.
 
 It uses only `argparse` from the standard library, so the binary starts fast and has nothing to
-configure beyond the three settings from [first steps](../first-steps.md).
+configure beyond the settings from [first steps](../first-steps.md).
+
+!!! note "Examples assume a pinned board"
+
+    There is no default board, so board-scoped examples like `pandan list --column todo` assume you ran
+    `pandan board use <id|KEY>` first (or add `--board <id>`). See
+    [configuration](configure.md#picking-a-board).
 
 ## How the commands are organised
 

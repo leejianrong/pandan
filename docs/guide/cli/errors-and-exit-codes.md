@@ -114,8 +114,8 @@ pandan --board 6 get ENG-14        # name the board for this call
 pandan get alice/ENG-14            # qualify by the board's owner
 ```
 
-Setting `PANDAN_BOARD_ID` removes the question entirely, which is why most people never see this: with
-an active board, a board-local reference resolves against it.
+Pinning a board (`pandan board use ENG`) removes the question entirely, which is why most people never see
+this: with an active board, a board-local reference resolves against it.
 
 ## Structured errors
 

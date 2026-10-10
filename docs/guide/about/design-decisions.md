@@ -63,7 +63,7 @@ created it and is permission-checked identically.
 
 Earlier versions did have a shared token list with a privileged bypass. It was removed, because a
 credential that is not a user is a credential nobody can audit. The cost is that an agent's token carries
-your access to every board you can reach, so mint one per agent and scope it with a default board.
+your access to every board you can reach, so mint one per agent and have it name its board.
 
 ## Three columns
 
@@ -83,7 +83,7 @@ default and the complete read explicit is the right way round.
 
 ## Breadth in the MCP surface, frozen against growth
 
-The MCP server has 57 tools, which sounds like a lot to keep resident in every session.
+The MCP server has 58 tools, which sounds like a lot to keep resident in every session.
 
 It was measured against two alternatives, a consolidated verb set and a single tool that shells out to the
 CLI. The finding was that resident schema is the smaller cost, at around 10,000 tokens per session, while a

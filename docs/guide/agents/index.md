@@ -33,7 +33,7 @@ why" is far more useful than one that guesses or stops.
 -   **Hosted MCP server**
 
     For any spec-compliant remote-MCP client: Claude.ai, Claude Desktop, Claude Code, ChatGPT, Cursor.
-    Add a URL, approve an OAuth prompt, no local install. 57 tools, one per API capability.
+    Add a URL, approve an OAuth prompt, no local install. 58 tools, one per API capability.
 
     [Connect it](mcp-setup.md#connect-the-hosted-server)
 
@@ -98,7 +98,7 @@ soft within a few seconds, so a cold-starting API cannot delay a session. Detail
 
 -   **[Tool reference](mcp-tools.md)**
 
-    All 57 tools, grouped, with the arguments that shape their output.
+    All 58 tools, grouped, with the arguments that shape their output.
 
 -   **[Agent workflows](workflows.md)**
 

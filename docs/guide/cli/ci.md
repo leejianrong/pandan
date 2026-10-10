@@ -5,7 +5,7 @@ description: Run the pandan CLI from a CI job: warm the API, keep the token secr
 
 # In CI
 
-The CLI is a single binary with three settings and no interactive prompts, which is most of what a CI
+The CLI is a single binary with two settings and no interactive prompts, which is most of what a CI
 job needs. This page covers the rest.
 
 ## Install it in a job
@@ -42,8 +42,11 @@ natively.
 env:
   PANDAN_API_URL: https://simple-kanban-jian.fly.dev
   PANDAN_TOKEN: ${{ secrets.PANDAN_TOKEN }}
-  PANDAN_BOARD_ID: "5"
 ```
+
+CI has no default board either. A job that touches a board-scoped verb names it per command
+(`pandan list --board 5`) or pins it in one step (`pandan board use 5`), which holds for the rest of the
+job. The ticket-addressed verbs in the example below (`get`, `move`, `link add`) need none.
 
 Mint a token specifically for CI, name it after the pipeline, and revoke it when the pipeline goes
 away. A token authenticates as the user who created it, so a CI token can reach every board that user
@@ -106,8 +109,7 @@ jobs:
     env:
       PANDAN_API_URL: https://simple-kanban-jian.fly.dev
       PANDAN_TOKEN: ${{ secrets.PANDAN_TOKEN }}
-      PANDAN_BOARD_ID: "5"
-    steps:
+        steps:
       - name: Install pandan
         run: |
           curl -fsSL -o /usr/local/bin/pandan \

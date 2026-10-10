@@ -18,7 +18,7 @@ uv run --project mcp mcp/scripts/measure_read_payload_tokens.py
 
 ## Where the cost actually is
 
-The intuition is that 57 tools must be expensive, because their schemas sit in context for the whole
+The intuition is that 58 tools must be expensive, because their schemas sit in context for the whole
 session. That turns out to be the smaller half of the problem.
 
 | Cost | Tokens | When you pay it |

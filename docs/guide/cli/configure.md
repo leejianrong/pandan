@@ -1,30 +1,30 @@
 <!--
 title: "Configuration"
-description: How the CLI resolves its three settings, how to save a token safely, and how to give an agent session ambient board context.
+description: How the CLI resolves its settings, picks a board for the session, how to save a token safely, and how to give an agent session ambient board context.
 -->
 
 # Configuration
 
-The CLI needs three values: an API origin, a token, and (optionally but strongly recommended) a
-default board id.
+The CLI needs two values: an API origin and a token. It has **no default board** — you name the board
+you mean, once per session (see [Picking a board](#picking-a-board)).
 
 ## Where settings come from
 
 Three sources, checked in this order, first non-empty value wins:
 
-1. Environment variables: `PANDAN_API_URL`, `PANDAN_TOKEN`, `PANDAN_BOARD_ID`
+1. Environment variables: `PANDAN_API_URL`, `PANDAN_TOKEN`
 2. The config file: `~/.config/pandan/config.toml`
 3. The nearest `.mcp.json` up the directory tree, from `.mcpServers.pandan.env`
 
 Resolution is **per value**, not per source. So you can keep a token in the config file and override
-just the board id for one command:
+just the origin for one command:
 
 ```bash
-PANDAN_BOARD_ID=7 pandan list --column todo
+PANDAN_API_URL=http://localhost:8000 pandan list --board 7 --column todo
 ```
 
 That third source is convenient in a repository checkout: the `.mcp.json` you wrote for your agent
-already carries the origin and board id, so the CLI picks them up with no extra setup.
+already carries the origin and token, so the CLI picks them up with no extra setup.
 
 !!! tip "Most commands also take `--board`"
 
@@ -46,12 +46,11 @@ To script it, pipe the token in:
 printf %s 'pandan_pat_…' | pandan login --token-stdin
 ```
 
-`login` can save all three settings at once, which is the fastest way to set up a new machine:
+`login` can save the origin and token together, which is the fastest way to set up a new machine:
 
 ```bash
 printf %s 'pandan_pat_…' | pandan login --token-stdin \
-  --api-url https://simple-kanban-jian.fly.dev \
-  --board-id 5
+  --api-url https://simple-kanban-jian.fly.dev
 ```
 
 !!! danger "Do not pass a token as an argument"
@@ -66,9 +65,8 @@ printf %s 'pandan_pat_…' | pandan login --token-stdin \
 $ pandan config show
 api_url	https://simple-kanban-jian.fly.dev
 token	set (…c_DE)
-board_id	5
 max_text_chars	500
-require_board	false
+pinned_board	5
 config_file	/home/you/.config/pandan/config.toml
 mcp_json	None
 ```
@@ -104,12 +102,11 @@ you keep more than one PAT around.
 ```bash
 pandan config path                                    # just the file path
 pandan config set --api-url https://board.example.com # write one value
-pandan config set --board-id 7
-pandan config unset board_id                          # clear one value
+pandan config unset api_url                           # clear one value
 ```
 
-`config unset` takes one or more keys — `api_url`, `token`, `board_id`, `max_text_chars`,
-`require_board` — and tells you per key whether it removed something or the key was never set. That
+`config unset` takes one or more keys — `api_url`, `token`, `max_text_chars`, plus the retired
+`board_id` and `require_board` so a leftover one can be cleaned out of the file — and tells you per key whether it removed something or the key was never set. That
 distinction matters: the config file is only the middle source, so clearing a key there can simply
 unmask an environment variable or `.mcp.json` entry. When that happens, `config unset` says so on
 stderr rather than reporting success while nothing changed.
@@ -119,39 +116,51 @@ The file is plain TOML and you can edit it by hand:
 ```toml
 [pandan]
 api_url = "https://simple-kanban-jian.fly.dev"
-board_id = 5
 token = "pandan_pat_…"
 ```
 
 Prefer `config set` and `config unset` to hand-editing, though — the file holds your PAT, so every
 hand-edit is a text editor open on a live credential.
 
-## Requiring an explicit board
+## Picking a board
 
-By default, a board-scoped command with no `--board` falls back to your default board, and with no
-default set, to whatever the API picks. On a single-board account that is just convenient. Once you
-have several boards it is a sharp edge: a stale default makes a read give a confusing answer, and
-makes `create` file a card on the wrong board with nothing in the output to say so.
-
-Turn the fallback off and make `--board` mandatory:
-
-```bash
-pandan config set --require-board      # or: export PANDAN_REQUIRE_BOARD=1
-```
+There is no default board. A board-scoped command (`list`, `create`, `next`, `metrics`, `activity`,
+`epic list/create`, `label list/create`, `batch-create`, and the `view`, `cycle`, `pi` and `template`
+verbs) with no `--board` and no pin fails, and tells you which boards it could have meant:
 
 ```console
 $ pandan list
-error	board_required	--board is required (require_board is set). Pass --board <id>, or turn the
-check off with `pandan config unset require_board`.	--board
+error	board_required	no board selected — there is no default board. Pass --board <id>, or pin one for this session with `pandan board use <id|KEY>`. Your boards: 5 PAN 'Pandan Roadmap'; 6 ENG 'Engine Room'.	--board
 ```
 
-It is opt-in, so nothing changes until you ask for it, and `--board` still works exactly as before —
-the setting makes it required, not different. Commands that aren't board-scoped (`board list`,
-`config show`, `warmup`) are unaffected, as is looking a card up by ticket, since `KAN-` numbers are
-unique across every board.
+A default is a sharp edge once you have several boards: a stale one makes a read give a confusing
+answer, and makes `create` file a card on the wrong board with nothing in the output to say so. So name
+the board, either per call or once per session:
 
-To turn it back off, either `pandan config set --no-require-board` (writes `false`) or
-`pandan config unset require_board` (removes the key so another source can supply it).
+```bash
+pandan list --board 5          # per call; always wins
+pandan board use ENG           # pin it: a board id or key
+pandan list                    # now uses the pinned board
+pandan board current           # which board is pinned here?
+pandan board use --clear       # forget it
+```
+
+The pin is a small state file under `$XDG_STATE_HOME/pandan/pins/` (`~/.local/state/pandan/pins/`),
+kept **per working directory** — a `cd` into a subdirectory keeps it — and per server, so a pin made
+against one instance is ignored against another. It **expires after 12 hours idle**; every command that
+uses it pushes the expiry out. That is deliberate: it is meant to last a working session, not to become
+the stale default this replaced. `pandan overview` (a bare `pandan`) with no pin shows your boards
+instead of a board's cards.
+
+Looking a card up by ticket (`pandan get KAN-12`) needs no board, since `KAN-` numbers are unique across
+every board, and neither does a canonical batch read (`pandan list --refs KAN-12,KAN-45`).
+
+!!! note "Upgrading"
+
+    `PANDAN_BOARD_ID`, the `board_id` config key and `require_board` are retired. A leftover one is
+    ignored with a one-line notice on stderr rather than breaking the command; `pandan config unset
+    board_id require_board` cleans the file. `pandan config set --board-id`, `pandan login --board-id`
+    and `--require-board` are gone.
 
 ## Truncation limit
 
@@ -190,7 +199,6 @@ Pandan used to be called simple-kanban, and the old variable names still work:
 | --- | --- |
 | `PANDAN_API_URL` | `KANBAN_API_URL` |
 | `PANDAN_TOKEN` | `KANBAN_TOKEN` |
-| `PANDAN_BOARD_ID` | `KANBAN_BOARD_ID` |
 
 Each key is read under its `PANDAN_*` name first, then the `KANBAN_*` one, and using the old spelling
 prints a one-line notice on stderr. Because resolution is per value, a half-migrated environment still
@@ -210,7 +218,7 @@ The same applies elsewhere: a `kanban_pat_…` token still authenticates, a `kan
 ```bash
 # one-time setup on a new machine
 printf %s 'pandan_pat_…' | pandan login --token-stdin \
-  --api-url https://simple-kanban-jian.fly.dev --board-id 5
+  --api-url https://simple-kanban-jian.fly.dev
 
 # check it
 pandan config show
