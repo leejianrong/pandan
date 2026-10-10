@@ -2,8 +2,8 @@
   "//": "Copy to .mcp.json (repo root) for Claude Code, then keep ONE of the two 'pandan' servers below and delete the other. See mcp/README.md.",
   "//tool-names": "The mcpServers key is what MCP tool names are namespaced with, so this server being called 'pandan' makes its tools 'mcp__pandan__*' (they were 'mcp__kanban__*' before the V40 rebrand, ADR 0018). Anything referencing a tool by name — skills, prompts, a settings.json allowlist — must use the same key you choose here.",
   "//token": "Since V8 (ADR 0013) /api/v1 is auth-required, and V10 (ADR 0015) removed the shared API_TOKENS bypass. Create a personal access token in the SPA (Tokens tab, V9) and put the pandan_pat_... secret in PANDAN_TOKEN. It acts as your user and is owner-gated. An empty/invalid token yields 401. A pre-rebrand kanban_pat_... token still authenticates.",
-  "//legacy-env": "PANDAN_API_URL / PANDAN_TOKEN / PANDAN_BOARD_ID are the current names. The pre-rebrand KANBAN_* spellings still work as a deprecated fallback (read second, with a one-line notice on stderr) so an existing .mcp.json keeps working through the cutover; they will be removed in a later milestone.",
-  "//boards": "PANDAN_BOARD_ID sets the default board (an integer id) for calls that omit board_id — it is preset to 1 (the seeded default board) so a wired agent doesn't accidentally target the wrong board. Call list_boards to find your board id and change 1 to it. Leave it empty to fall back to the API default (list = all your boards, create = your earliest).",
+  "//legacy-env": "PANDAN_API_URL / PANDAN_TOKEN are the current names. The pre-rebrand KANBAN_* spellings still work as a deprecated fallback (read second, with a one-line notice on stderr) so an existing .mcp.json keeps working through the cutover; they will be removed in a later milestone.",
+  "//boards": "There is no default board (PANDAN_BOARD_ID is retired; a leftover one is ignored with a stderr notice). Board-scoped tools need board_id per call, or call use_board once per session after list_boards.",
   "//prod": "Set PANDAN_API_URL to https://simple-kanban-jian.fly.dev and PANDAN_TOKEN to your pandan_pat_... secret. (That origin keeps the old name on purpose — the Fly app rename is deferred, see ADR 0018 and KAN-424.)",
   "//run-modes": "Two ways to run the server: (1) 'pandan' runs it from source with uv (needs a checkout + uv). (2) 'pandan-docker' runs the prebuilt image from ghcr.io (KAN-47) — no Python/uv/checkout, just Docker. Pick one; rename it to whatever you like — but see //tool-names first.",
   "mcpServers": {
@@ -12,8 +12,7 @@
       "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
         "PANDAN_API_URL": "http://localhost:8000",
-        "PANDAN_TOKEN": "",
-        "PANDAN_BOARD_ID": "1"
+        "PANDAN_TOKEN": ""
       }
     },
     "pandan-docker": {
@@ -24,13 +23,11 @@
         "run", "-i", "--rm",
         "-e", "PANDAN_API_URL",
         "-e", "PANDAN_TOKEN",
-        "-e", "PANDAN_BOARD_ID",
         "ghcr.io/leejianrong/pandan-mcp:latest"
       ],
       "env": {
         "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
-        "PANDAN_TOKEN": "",
-        "PANDAN_BOARD_ID": "1"
+        "PANDAN_TOKEN": ""
       }
     }
   }

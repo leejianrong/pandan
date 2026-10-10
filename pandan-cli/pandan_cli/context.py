@@ -71,7 +71,8 @@ from pandan_client import PandanClient
 
 from . import __version__
 from .build_info import BUILD_SHA
-from .config import resolve_values
+from .config import DEFAULT_API_URL, resolve_values
+from .pin import read_pin
 
 # The hook event we install into. Verified against the shipped settings schema's
 # `hooks` propertyNames enum — a typo here would silently never fire.
@@ -350,7 +351,9 @@ def _self_argv() -> list[str]:
     return [sys.executable, "-m", "pandan_cli"]
 
 
-def _hook_command(argv_prefix: list[str], *, timeout: float, limit: int) -> str:
+def _hook_command(
+    argv_prefix: list[str], *, timeout: float, limit: int, board: str | None = None
+) -> str:
     """The shell command string the hook entry runs.
 
     A plain ``command`` string, not the schema's newer ``args`` exec-form: the
@@ -368,6 +371,9 @@ def _hook_command(argv_prefix: list[str], *, timeout: float, limit: int) -> str:
         "--limit",
         str(limit),
     ]
+    if board:
+        # No default board exists, so the hook names its own.
+        parts += ["--board", str(board)]
     return " ".join(shlex.quote(part) for part in parts)
 
 
@@ -530,32 +536,35 @@ def _strip_ours(settings: dict[str, Any]) -> int:
 # --- config resolution -----------------------------------------------------
 
 
-def _resolved_board() -> tuple[str, str, str]:
-    """``(api_url, token, board_id)`` from the normal config chain, or a
-    ``ContextError`` naming exactly what's missing.
+def _resolved_board(board_arg: int | None = None) -> tuple[str, str, str]:
+    """``(api_url, token, board_id)`` — the board from ``--board``, else the session
+    pin (``pandan board use``) — or a ``ContextError`` naming exactly what's missing.
 
-    Both a token and a **default board** are required: a hook with no board would
-    span every board the user owns, which is a lot of context and, per ADR 0015,
-    an easy way to look at the wrong board."""
+    Both a token and a board are required: a hook with no board would span every
+    board the user owns, which is a lot of context and, per ADR 0015, an easy way to
+    look at the wrong board. There is no default board, so the hook command carries
+    its own ``--board`` (baked in by ``context install``)."""
     resolved = resolve_values()
     token = resolved.get("token", "")
-    board_id = resolved.get("board_id", "")
+    api_url = resolved.get("api_url") or DEFAULT_API_URL
+    board_id = str(board_arg) if board_arg is not None else ""
+    if not board_id:
+        pinned = read_pin(api_url)
+        board_id = str(pinned.board_id) if pinned else ""
     missing = []
     if not board_id:
-        missing.append("PANDAN_BOARD_ID")
+        missing.append("board")
     if not token:
         missing.append("PANDAN_TOKEN")
     if missing:
         raise ContextError(
             f"no board configured ({' and '.join(missing)} unset) — nothing was changed. "
-            "Set a default board first: `pandan login --board-id <id>`, "
-            "`pandan config set --board-id <id>`, or .mcpServers.pandan.env in .mcp.json. "
+            "There is no default board: pass `--board <id>`, or pin one first with "
+            "`pandan board use <id|KEY>`. "
             "`pandan config show` prints what resolved.",
             code="config",
         )
-    from .config import DEFAULT_API_URL
-
-    return resolved.get("api_url") or DEFAULT_API_URL, token, board_id
+    return api_url, token, board_id
 
 
 # --- the ambient block -----------------------------------------------------
@@ -625,8 +634,7 @@ def fetch_block(*, board_arg: int | None, limit: int, timeout: float) -> str:
     exactly once (``client.py:123-150``) — halving it keeps the worst case inside
     ``timeout``, and ``retry_backoff=0`` removes the extra second the retry would
     otherwise sleep."""
-    api_url, token, configured_board = _resolved_board()
-    board_id = str(board_arg) if board_arg is not None else configured_board
+    api_url, token, board_id = _resolved_board(board_arg)
     per_request = max(0.5, timeout / 2)
     with PandanClient(
         api_url,
@@ -701,11 +709,11 @@ def cmd_install(args: argparse.Namespace) -> int:
     """
     # Resolve config FIRST, so the unconfigured case is provably a no-op: the
     # settings file is not opened, let alone written.
-    _resolved_board()
+    _, _, board = _resolved_board(getattr(args, "board", None))
 
     path = _settings_arg(args)
     argv_prefix = [args.exec] if getattr(args, "exec", None) else _self_argv()
-    command = _hook_command(argv_prefix, timeout=args.timeout, limit=args.limit)
+    command = _hook_command(argv_prefix, timeout=args.timeout, limit=args.limit, board=board)
     desired = hook_entry(command=command, timeout=args.timeout)
 
     settings = read_settings(path)
@@ -773,7 +781,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"command\t{hook.get('command')}")
         print(f"timeout\t{hook.get('timeout')}")
     resolved = resolve_values()
-    print(f"board_id\t{resolved.get('board_id') or '(unset)'}")
+    pinned = read_pin(resolved.get("api_url") or DEFAULT_API_URL, touch=False)
+    print(f"pinned_board\t{pinned.board_id if pinned else '(none)'}")
     print(f"token\t{'set' if resolved.get('token') else '(unset)'}")
     skill = skill_target_path()
     for line in _skill_status_lines(skill):
@@ -982,7 +991,7 @@ def add_parser(sub: Any, common: argparse.ArgumentParser) -> None:
         "context",
         help="ambient board context for an agent session (install / uninstall / show / status)",
         description=(
-            "Wire the default board's state into an agent session before it acts, as a "
+            "Wire a board's state into an agent session before it acts, as a "
             f"Claude Code {HOOK_EVENT} hook. `install` is idempotent, `uninstall` is clean, "
             "and the hook soft-fails inside a few seconds so a cold-started API can never "
             "delay a session."
@@ -996,6 +1005,11 @@ def add_parser(sub: Any, common: argparse.ArgumentParser) -> None:
         help=f"add the {HOOK_EVENT} hook to settings.json (idempotent)",
     )
     _add_settings_arg(p_install)
+    p_install.add_argument(
+        "--board",
+        type=int,
+        help="board id the hook shows (default: the board pinned with `pandan board use`)",
+    )
     p_install.add_argument(
         "--exec",
         metavar="PATH",
@@ -1048,7 +1062,9 @@ def add_parser(sub: Any, common: argparse.ArgumentParser) -> None:
         parents=[common],
         help="print the ambient block (what the hook runs)",
     )
-    p_show.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_show.add_argument(
+        "--board", type=int, help="board id (default: the board pinned with `pandan board use`)"
+    )
     p_show.add_argument(
         "--hook",
         action="store_true",

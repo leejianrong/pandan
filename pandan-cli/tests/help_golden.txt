@@ -22,7 +22,8 @@ positional arguments:
     activity      a board's activity feed, newest-first (filter by --actor /
                   --action)
     notify        your notification inbox (list / read)
-    board         manage boards (list / get / create / update / delete)
+    board         manage boards (list / get / create / update / delete / use /
+                  current)
     workspace     manage workspaces (list / get / create / update / delete /
                   member)
     epic          manage epics (list / get / create / update / delete)
@@ -53,11 +54,13 @@ options:
   -h, --help      show this help message and exit
   -v, --version   print the CLI version + build commit and exit
 
-Configuration keys (api_url / token / board_id), resolved per value in
+Configuration keys (api_url / token), resolved per value in
 this order — first non-empty wins:
-  1. env vars   PANDAN_API_URL / PANDAN_TOKEN / PANDAN_BOARD_ID
+  1. env vars   PANDAN_API_URL / PANDAN_TOKEN
   2. config file  ~/.config/pandan/config.toml  (see `pandan login`)
   3. .mcp.json    nearest up the tree, .mcpServers.pandan.env.*
+There is no default board: pass --board <id> or pin one for the session
+with `pandan board use <id|KEY>`.
 So the PAT can stay in a file and never touch the command line. Run
 `pandan login` once to save it; `pandan config show` prints the effective config.
 

@@ -8,6 +8,12 @@ description: Choose between human, json and toon output, cut a read down with --
 Three formats, and two flags that change how much comes back. If an agent is doing the reading, this
 page is the one that matters, because an unshaped read is where the tokens go.
 
+!!! note "Examples assume a pinned board"
+
+    There is no default board, so board-scoped examples like `pandan list --column todo` assume you ran
+    `pandan board use <id|KEY>` first (or add `--board <id>`). See
+    [configuration](configure.md#picking-a-board).
+
 ## human, the default
 
 Tab-separated rows with no keys. It is the cheapest output the CLI produces, and it is designed to be

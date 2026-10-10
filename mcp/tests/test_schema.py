@@ -58,6 +58,9 @@ from pandan_mcp.server import mcp
 #: ``get_team``/``update_team``/``delete_team`` -> ``list_workspaces``/
 #: ``create_workspace``/``get_workspace``/``update_workspace``/``delete_workspace``,
 #: the M9 Team tier's end-to-end rename to Workspace. Count unchanged at 57.
+#: **Amended again 2026-10-10 (no default board)**: +1 tool (``use_board``) — with
+#: ``PANDAN_BOARD_ID`` retired, a stdio session needs one call to name its board
+#: instead of repeating ``board_id`` on every tool call. Stdio only; hosted refuses.
 FROZEN_TOOLS = frozenset(
     {
         "list_boards", "create_board", "get_board", "update_board", "delete_board",
@@ -77,11 +80,11 @@ FROZEN_TOOLS = frozenset(
         "list_templates", "create_template", "delete_template", "apply_template",
         "list_cycles", "create_cycle", "delete_cycle", "cycle_metrics", "close_cycle",
         "list_planning_intervals", "planning_interval_metrics",
-        "warmup",
+        "warmup", "use_board",
     }
 )
 
-FROZEN_TOOL_COUNT = 57
+FROZEN_TOOL_COUNT = 58
 
 _WHY_FROZEN = """
 The MCP tool surface is FROZEN at {count} tools by ADR 0019 (V49, amended M9 V69,
@@ -95,7 +98,8 @@ grow SILENTLY: new board capability lands in the `pandan` CLI by default, which
 costs a session nothing until it is used. M9 V69 (KAN-1058) amended the freeze to
 add exactly 5 team tools, mirroring the board CRUD group; M8 V57 (KAN-978) amended
 it again to add exactly 2 read-only planning-interval tools; M8 V59 (KAN-980)
-amended it again to add exactly 1 tool, `close_cycle`.
+amended it again to add exactly 1 tool, `close_cycle`; the no-default-board change
+added exactly 1 tool, `use_board`.
 
 If you are ADDING a tool: that is an ADR amendment, not a test edit. Say why the
 CLI cannot serve the need, update docs/adr/0019-mcp-surface-right-sizing.md, and

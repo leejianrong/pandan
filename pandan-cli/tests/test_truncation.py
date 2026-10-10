@@ -32,6 +32,7 @@ import pytest
 from toon_decode import decode
 
 from pandan_cli import cli, config
+from pandan_cli.pin import write_pin
 
 LIMIT = config.DEFAULT_MAX_TEXT_CHARS
 
@@ -91,6 +92,7 @@ def isolate_config(monkeypatch, tmp_path):
             monkeypatch.delenv(name, raising=False)
     config._warned.clear()
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_test")
+    write_pin(config.DEFAULT_API_URL, 1)
 
 
 def run_capture(monkeypatch, capsys, argv, result, *, exit_code=cli.EXIT_OK) -> str:
@@ -491,14 +493,14 @@ def test_a_bad_limit_is_a_clean_config_error(monkeypatch, capsys, bad):
 def test_config_set_preserves_a_hand_written_limit(tmp_path, monkeypatch):
     """``max_text_chars`` has no ``config set`` flag (you set the env var or edit the
     file), so the file-merge path has to preserve a key it cannot write — otherwise
-    `pandan config set --board-id 5` would silently delete the user's limit."""
+    `pandan config set --api-url …` would silently delete the user's limit."""
     path = config.config_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('[pandan]\ntoken = "pandan_pat_file"\nmax_text_chars = 42\n')
-    config.write_config_file(board_id="9")
+    config.write_config_file(api_url="https://a.example")
     assert "max_text_chars = 42" in path.read_text()
     assert config.load_config().max_text_chars == 42
-    assert config.load_config().board_id == 9
+    assert config.load_config().api_url == "https://a.example"
 
 
 def test_config_show_reports_the_effective_limit(capsys):
