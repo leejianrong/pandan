@@ -1183,7 +1183,7 @@ def _metrics_block(result: dict[str, Any]) -> str:
     for item in aging.get("items", []):
         assignee = _flatten(str(item.get("assignee") or "(unassigned)"))
         lines.append(
-            f"  {item.get('ticket_number', '?')}\t{assignee}\t"
+            f"  {_display_ref(item)}\t{assignee}\t"
             f"{_fmt_duration(item.get('age_seconds'))}"
         )
     by_assignee = result.get("by_assignee", [])
@@ -1431,9 +1431,10 @@ def _field_value(value: Any) -> str:
 
 def _field_item(item: Any) -> str:
     """One element of a projected list: an object shows its most identifying key
-    (``name`` for labels, ``ticket_number`` for cards, else ``id``)."""
+    (``name`` for labels, the board-local ``ref`` for cards — ``ticket_number`` when
+    none was attached — else ``id``)."""
     if isinstance(item, dict):
-        for key in ("name", "ticket_number", "id"):
+        for key in ("name", "ref", "ticket_number", "id"):
             if item.get(key) is not None:
                 return str(item[key])
         return json.dumps(item, default=str, sort_keys=True, separators=(",", ":"))
