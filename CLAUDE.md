@@ -185,8 +185,13 @@ Measured the same tight way: **9,665 → 10,085** compact (+420, +4.3%), `output
 unfinished work is a step in the same create→work→close loop `create_cycle` already sits on the frozen
 surface for, per [the amendment note](docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-m8-v59-close_cycle-tool-2026-09-02-kan-980).
 Measured the same tight way: **10,085 → 10,417** compact (+585, +5.9%, the priciest single-tool addition
-of the three), `outputSchema` alone **960 → 977**. **Re-run the script rather than quoting this line** —
-six recorded drifts (three from arguments, three from an actual tool-count change) is enough to treat
+of the three), `outputSchema` alone **960 → 977**. **The count moved a fourth time** (no-default-board,
+2026-10-10): **57 → 58 tools**, exactly one — `use_board`, which sets a stdio session's board now that
+`PANDAN_BOARD_ID` is retired (hosted refuses it: one process, every caller), per
+[the amendment note](docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-use_board-tool-and-the-end-of-the-default-board-2026-10-10).
+Measured the same tight way: **10,636 → 10,787** compact (+151, net of the deleted `PANDAN_BOARD_ID`
+prose), `outputSchema` alone **977 → 994**. **Re-run the script rather than quoting this line** —
+seven recorded drifts (three from arguments, four from an actual tool-count change) is enough to treat
 any number here as an order of
 magnitude and nothing finer. The other six
 read-tools stay raw *on measurement*, at 7–474 tokens each: shaping a small payload is the opposite of
@@ -198,8 +203,8 @@ folded into the headline and deliberately **not** compacted, because unlike `inp
 `outputSchema` is the very object the SDK validates every tool result against.
 Both measurements are re-runnable —
 `mcp/scripts/measure_tool_schema_tokens.py` for the resident schema,
-`mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The surface (57 tools as of M8
-V59) is pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit**
+`mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The surface (58 tools as of the
+no-default-board `use_board` amendment) is pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit**
 (adding an *argument*, as KAN-501 and V67's `workspace_id` (originally `team_id`) did, is not). **Per-slice status goes stale here
 faster than anywhere else in this file; read [docs/milestone-8/SLICES.md](docs/milestone-8/SLICES.md)/
 [docs/milestone-9/SLICES.md](docs/milestone-9/SLICES.md) and the board, not this paragraph.**
@@ -223,7 +228,7 @@ Three things the rebrand deliberately did **not** rename, so don't "finish" it:
   localStorage keys, and the `kanban:kanban@…/kanban` local Postgres credentials. Each would log
   users out, break a consumer, or reset local state for no gain.
 
-The pre-rebrand **`KANBAN_API_URL` / `KANBAN_TOKEN` / `KANBAN_BOARD_ID` still work as a deprecated
+The pre-rebrand **`KANBAN_API_URL` / `KANBAN_TOKEN` still work as a deprecated
 fallback** (read second, with a one-line notice on stderr), and a `kanban_pat_…` PAT still
 authenticates indefinitely. Both are dead weight carried on purpose, scheduled for removal.
 
@@ -339,9 +344,9 @@ PANDAN_API_URL=http://localhost:8000 PANDAN_TOKEN=pandan_pat_… uv run python -
 > endpoint, giving **full CRUD parity across boards, cards, and epics** (list / get / create /
 > update / delete + card `move`) plus `list_boards`/`create_board` discovery; no DB of its own.
 > Config via `PANDAN_API_URL` + `PANDAN_TOKEN` (a **required** per-user PAT since `/api/v1` is
-> auth-required) + optional `PANDAN_BOARD_ID` (the default board for calls that omit `board_id`;
-> unset → list spans all your boards / create lands on the earliest, so set it in `.mcp.json` to
-> avoid targeting the wrong board; V10, ADR 0015). Wire into Claude Code by copying
+> auth-required). **There is no default board** (`PANDAN_BOARD_ID` was retired 2026-10-10): board-scoped
+> tools need `board_id` per call, or one `use_board` call per stdio session (the hosted transport
+> refuses it — one process serves every caller). Wire into Claude Code by copying
 > `.mcp.json.example` → `.mcp.json`; see [mcp/README.md](mcp/README.md). CI runs it as the `mcp` job.
 
 **Full local dev loop:** `docker compose up -d db` → backend `uv run alembic upgrade head` +
@@ -561,7 +566,7 @@ SERVICE bypass was removed in V10 (ADR 0015). (Ops: the `API_TOKENS` Fly secret 
 
 **Client config env vars (V40, KAN-423, ADR 0018)** — for the CLI ([pandan-cli/pandan_cli/config.py](pandan-cli/pandan_cli/config.py))
 and the MCP server ([mcp/pandan_mcp/config.py](mcp/pandan_mcp/config.py)), *not* the backend:
-`PANDAN_API_URL` / `PANDAN_TOKEN` / `PANDAN_BOARD_ID`. The pre-rebrand `KANBAN_*` spellings are a
+`PANDAN_API_URL` / `PANDAN_TOKEN`. The pre-rebrand `KANBAN_*` spellings are a
 **deprecated fallback**: each key is read under its `PANDAN_*` name first and only then the `KANBAN_*`
 one, emitting a one-line notice on **stderr** (never stdout — the CLI's stdout is machine-readable and
 the MCP server's is the JSON-RPC channel). Precedence is **per value**, so a half-migrated environment
@@ -569,6 +574,16 @@ resolves correctly. The CLI additionally migrates `~/.config/kan/config.toml` �
 `~/.config/pandan/config.toml` on first use (leaving the old file in place), still reads a legacy
 `[kan]` table, and still honours a `kanban` server key in `.mcp.json`. All of this is dead weight
 carried on purpose and is deleted in a later milestone.
+
+**No default board (2026-10-10).** `PANDAN_BOARD_ID` / `KANBAN_BOARD_ID`, the config-file `board_id` and
+the older opt-in `require_board` are **retired** on both clients: a leftover one is *ignored with a
+one-line stderr notice*, never an error, so an old `.mcp.json` keeps launching. A board-scoped CLI verb
+with no `--board` and no pin fails `board_required` (exit 1) listing your boards; the pin is
+`pandan board use <id|KEY>` — a state file under `$XDG_STATE_HOME/pandan/pins/`, keyed by working
+directory (ancestors inherit), tied to the API origin, expiring after 12h idle
+([pandan-cli/pandan_cli/pin.py](pandan-cli/pandan_cli/pin.py)). `context install` bakes `--board` into the
+hook command, since a session-start hook has no pin. Global reads by canonical ref (`list --refs KAN-12`)
+and ticket-addressed verbs still need no board. The MCP `use_board` sticks in-process on stdio only.
 
 **PAT prefix (V40).** `TOKEN_PREFIX` in [backend/app/tokens.py](backend/app/tokens.py) is now
 `pandan_pat_`, with `LEGACY_TOKEN_PREFIXES = ("kanban_pat_",)`. The resolver's fast-path guard

@@ -133,6 +133,7 @@ from pandan_client import PandanApiError, PandanClient, split_card_selectors
 from . import build_info, context, toon
 from .config import (
     _CONFIG_KEYS,
+    _RETIRED_KEYS,
     DEFAULT_API_URL,
     DEFAULT_MAX_TEXT_CHARS,
     Config,
@@ -141,11 +142,11 @@ from .config import (
     config_file_path,
     find_mcp_json,
     load_config,
-    parse_require_board,
     resolve_values,
     unset_config_keys,
     write_config_file,
 )
+from .pin import clear_pin, read_pin, write_pin
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -1698,7 +1699,7 @@ def _summary_line(kind: str, summary: dict[str, Any]) -> str:
 #   that the placeholder survives AND that no identifier from the result leaked in.
 # * **Fixed flags are carried forward.** Exactly one: an explicit `--board <n>`,
 #   substituted into the `{board}` slot of the templates that accept it. A board
-#   that resolved from `PANDAN_BOARD_ID` is deliberately NOT carried — the next
+#   that resolved from the session pin is deliberately NOT carried — the next
 #   command resolves it the same way, so spelling it out would be noise. Only
 #   templates carrying the `{board}` slot are board-scoped, so a hint can never
 #   grow a flag its verb doesn't accept.
@@ -1763,7 +1764,7 @@ _HINTS: dict[str, tuple[str, ...]] = {
     "resolve": ("pandan move <id> done",),
     "comment add": ("pandan comment list <id>",),
     "board create": (
-        "pandan config set --board-id <id>",
+        "pandan board use <id>",
         'pandan create "<title>" --board <id>',
     ),
     "epic create": ('pandan create "<title>" --epic <id>{board}',),
@@ -1873,7 +1874,9 @@ def _tool_banner(tool: dict[str, Any]) -> str:
     ]
     board = tool.get("board_id")
     if board is None:
-        lines.append(f"{tool['api_url']} · no default board configured · your boards:")
+        lines.append(
+            f"{tool['api_url']} · no board pinned (`pandan board use <id|KEY>`) · your boards:"
+        )
     else:
         lines.append(
             f"{tool['api_url']} · board {board} · open cards "
@@ -1899,7 +1902,7 @@ def _announce_wait(config: Config) -> None:
 
 
 def _cmd_overview(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    """The bare invocation's content: identity + the default board's open cards.
+    """The bare invocation's content: identity + the selected board's open cards.
 
     Two shapes, one call each. With a board: the open rows of one page, so V44's
     aggregate below them counts **the rows actually printed** (the filter is applied
@@ -1907,7 +1910,7 @@ def _cmd_overview(client: PandanClient, config: Config, args: argparse.Namespace
     printed rows would be a number the reader can't reconcile). The page's
     ``next_cursor`` is carried through unchanged, so "there are more" is still said
     out loud. Without a board: the board list, because that is the content a caller
-    with no default board actually needs, and it costs the same single request.
+    with no board selected actually needs, and it costs the same single request.
 
     **No ``--fields``, permanently (KAN-591).** Both shapes are recognised list
     envelopes and ``_humanize`` already threads a projection through the banner, so
@@ -1923,7 +1926,7 @@ def _cmd_overview(client: PandanClient, config: Config, args: argparse.Namespace
     day this stops being true."""
     _announce_wait(config)
     tool = _tool_identity(config)
-    board = _resolve_board(args.board, config)
+    board = _resolve_board(args.board, config, client, required=False)
     if board is None:
         return {"tool": {**tool, "board_id": None}, **client.list_boards()}
     page = client.list_cards(board_id=board, limit=args.limit)
@@ -1966,28 +1969,65 @@ def _is_bare_invocation(argv: list[str]) -> bool:
 # --- board resolution -------------------------------------------------------
 
 
-def _resolve_board(arg_board: int | None, config: Config) -> int | None:
-    """The per-call ``--board`` wins, else ``PANDAN_BOARD_ID``, else None (let the
-    API apply its own fallback). Mirrors the MCP server's ``_board`` helper.
+def _board_menu(client: PandanClient | None) -> str:
+    """``3 ENG 'Engineering'; 7 OPS 'Ops'`` — your boards, for a ``board_required``
+    error. Best-effort: a failed lookup must not mask the error it decorates."""
+    if client is None:
+        return ""
+    try:
+        boards = client.list_boards().get("boards") or []
+    except Exception:  # noqa: BLE001 - decoration only
+        return ""
+    shown = [
+        f"{b.get('id', '?')} {b.get('key', '?')} {b.get('name', '?')!r}"
+        for b in boards[:10]
+        if isinstance(b, dict)
+    ]
+    if not shown:
+        return ""
+    more = f" (+{len(boards) - 10} more: `pandan board list`)" if len(boards) > 10 else ""
+    return " Your boards: " + "; ".join(shown) + more + "."
 
-    With ``require_board`` set (issue #277), the two fallbacks are refused instead:
-    an absent ``--board`` is an error, so a verb can never act on a board the user
-    did not name. This is the single chokepoint for the "default board" path — the
-    handful of calls that pass ``board_id=None`` *deliberately* (ticket lookup, which
-    spans every board because ticket sequences are globally unique) don't come
-    through here, so they keep working with the switch on.
+
+def _pinned_board(config: Config) -> int | None:
+    """The board pinned for this working directory (``pandan board use``), if any.
+    Refreshes the pin's idle timer."""
+    pin = read_pin(config.api_url)
+    return pin.board_id if pin else None
+
+
+def _resolve_board(
+    arg_board: int | None,
+    config: Config,
+    client: PandanClient | None = None,
+    *,
+    required: bool = True,
+) -> int | None:
+    """The per-call ``--board`` wins, else the board pinned for this working directory
+    with ``pandan board use``, else — there is **no default board** — a
+    ``board_required`` error that lists your boards.
+
+    A stale default on a *read* is a confusing answer, but on ``create`` it is a card
+    filed on the wrong board, and with ten boards on one account nothing in the output
+    says so; so the caller has to name one, once per session at most. This is the single
+    chokepoint for that. The few calls that pass ``board_id=None`` *deliberately* (ticket
+    lookup, which spans every board because ticket sequences are globally unique) don't
+    come through here. ``required=False`` is for the verbs where "no board" is itself
+    meaningful (the bare overview shows your boards instead).
     """
     if arg_board is not None:
         return arg_board
-    if config.require_board:
-        raise CliError(
-            "--board is required (require_board is set). "
-            "Pass --board <id>, or turn the check off with "
-            "`pandan config unset require_board`.",
-            code="board_required",
-            arg="--board",
-        )
-    return config.board_id
+    pinned = _pinned_board(config)
+    if pinned is not None:
+        return pinned
+    if not required:
+        return None
+    raise CliError(
+        "no board selected — there is no default board. Pass --board <id>, or pin one "
+        "for this session with `pandan board use <id|KEY>`." + _board_menu(client),
+        code="board_required",
+        arg="--board",
+    )
 
 
 # --- id / reference resolution (KAN-285; three forms since V53, KAN-974) ------
@@ -2007,7 +2047,7 @@ def _resolve_board(arg_board: int | None, config: Config) -> int | None:
 #                                           different card for two people
 #   alice/ENG-14    board-local, owner-qualified
 #
-# A board-local ref uses the active board (``--board`` / ``PANDAN_BOARD_ID``) when
+# A board-local ref uses the active board (``--board`` / the session pin) when
 # there is one. With none, it resolves across every visible board and **more than one
 # match is an ``ambiguous_ref`` error naming the candidates** — never a silent pick.
 #
@@ -2083,12 +2123,12 @@ def _active_board(config: Config, args: argparse.Namespace) -> int | None:
     """The board a board-local reference resolves against, or ``None``.
 
     Deliberately **not** routed through :func:`_resolve_board`: this is a
-    disambiguation hint rather than a target, so ``require_board`` must not fire here.
-    A verb that takes no ``--board`` still gets the configured one, which is how
-    ``pandan get ENG-42`` works with ``PANDAN_BOARD_ID`` set and no flag.
+    disambiguation hint rather than a target, so a missing board must not be an error
+    here. A verb that takes no ``--board`` still gets the pinned one, which is how
+    ``pandan get ENG-42`` works after ``pandan board use ENG`` and no flag.
     """
     board = getattr(args, "board", None)
-    return board if board is not None else config.board_id
+    return board if board is not None else _pinned_board(config)
 
 
 def _id_or_ticket_arg(value: str) -> str:
@@ -2132,7 +2172,7 @@ def _candidate_boards(client: PandanClient, ref: _Ref, board_id: int | None) -> 
        nothing — it is a constraint, not a hint.
     3. **The active board wins outright** when it is among the candidates. That is
        what makes ``pandan get ENG-42`` unambiguous for anyone with
-       ``PANDAN_BOARD_ID`` set, which is the normal case; ambiguity is the exception
+       a pinned board (or --board), which is the normal case; ambiguity is the exception
        this exists to report, not the common path.
     """
     boards = client.list_boards().get("boards", [])
@@ -2310,8 +2350,10 @@ def _cmd_list(client: PandanClient, config: Config, args: argparse.Namespace) ->
     ids = refs = None
     if getattr(args, "refs", None):
         ids, refs = split_card_selectors(args.refs)
+    # A batch read by canonical ref is global (ticket sequences are), so it alone may
+    # run without naming a board.
     return client.list_cards(
-        board_id=_resolve_board(args.board, config),
+        board_id=_resolve_board(args.board, config, client, required=not (ids or refs)),
         ids=ids,
         refs=refs,
         column=args.column,
@@ -2339,7 +2381,7 @@ def _cmd_get(client: PandanClient, config: Config, args: argparse.Namespace) -> 
 def _cmd_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_card(
         args.title,
-        board_id=_resolve_board(args.board, config),
+        board_id=_resolve_board(args.board, config, client),
         description=args.description,
         column=args.column,
         story_points=args.points,
@@ -2395,13 +2437,7 @@ def _cmd_next(client: PandanClient, config: Config, args: argparse.Namespace) ->
     """Peek at (or, with ``--claim``, atomically dispatch) the next ready card on a
     board (M5 V12, KAN-245). Both need a board — the dispatch endpoints are
     path-scoped with no API-side fallback."""
-    board = _resolve_board(args.board, config)
-    if board is None:
-        raise CliError(
-            "a board is required; pass --board or set PANDAN_BOARD_ID",
-            code="board_required",
-            arg="--board",
-        )
+    board = _resolve_board(args.board, config, client)
     if args.claim:
         return client.dispatch(
             board, assignee=args.assignee, label=args.label, priority=args.priority
@@ -2438,28 +2474,16 @@ def _cmd_resolve(client: PandanClient, config: Config, args: argparse.Namespace)
 def _cmd_metrics(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Report derived flow metrics for a board (M5 V17, KAN-250). The metrics
     endpoint is path-scoped with no API-side fallback, so a board is required
-    (``--board`` or PANDAN_BOARD_ID)."""
-    board = _resolve_board(args.board, config)
-    if board is None:
-        raise CliError(
-            "a board is required; pass --board or set PANDAN_BOARD_ID",
-            code="board_required",
-            arg="--board",
-        )
+    (``--board`` or the session pin)."""
+    board = _resolve_board(args.board, config, client)
     return client.board_metrics(board, since=args.since, window=args.window)
 
 
 def _cmd_activity(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Read a board's activity feed (KAN-18), newest-first (M5 V16, KAN-261). The
     activity endpoint is path-scoped with no API-side fallback, so a board is
-    required (``--board`` or PANDAN_BOARD_ID)."""
-    board = _resolve_board(args.board, config)
-    if board is None:
-        raise CliError(
-            "a board is required; pass --board or set PANDAN_BOARD_ID",
-            code="board_required",
-            arg="--board",
-        )
+    required (``--board`` or the session pin)."""
+    board = _resolve_board(args.board, config, client)
     return client.list_activity(
         board,
         limit=args.limit,
@@ -2517,6 +2541,90 @@ def _cmd_warmup(client: PandanClient, config: Config, args: argparse.Namespace) 
 
 def _cmd_board_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_boards()
+
+
+def _resolve_board_target(boards: list[dict[str, Any]], target: str) -> dict[str, Any]:
+    """Match ``pandan board use``'s argument — a numeric id or a board key (``ENG``,
+    case-insensitive) — against the boards you can see. A key shared by two visible
+    boards (yours and a board shared with you by someone who also uses it) is an
+    ``ambiguous_ref`` error that names them, never a silent pick."""
+    target = target.strip()
+    if target.isdigit():
+        hits = [b for b in boards if str(b.get("id")) == target]
+    else:
+        hits = [b for b in boards if str(b.get("key", "")).upper() == target.upper()]
+    if not hits:
+        menu = "; ".join(f"{b.get('id')} {b.get('key')}" for b in boards[:10])
+        raise CliError(
+            f"no board you can see matches {target!r}" + (f" (yours: {menu})" if menu else ""),
+            code="not_found",
+            arg=target,
+        )
+    if len(hits) > 1:
+        names = "; ".join(f"{b.get('id')} {b.get('key')} {b.get('name')!r}" for b in hits)
+        raise CliError(
+            f"{target!r} matches {len(hits)} boards: {names}. Use the numeric id",
+            code="ambiguous_ref",
+            arg=target,
+        )
+    return hits[0]
+
+
+def _cmd_board_use(args: argparse.Namespace) -> int:
+    """Pin a board for this working directory so later verbs can omit ``--board``
+    (``pandan/pin.py``). ``--clear`` removes the pin and needs no token or network."""
+    if args.clear:
+        if args.target is not None:
+            raise CliError("--clear takes no board", code="usage", arg="--clear")
+        print("cleared" if clear_pin() else "no pin")
+        return EXIT_OK
+    if args.target is None:
+        raise CliError(
+            "name a board: `pandan board use <id|KEY>` (or --clear)",
+            code="usage",
+            arg="BOARD",
+        )
+    try:
+        config = load_config()
+    except ConfigError as exc:
+        raise CliError(str(exc), code="config") from exc
+    with PandanClient(config.api_url, config.token, **_client_options(args)) as client:
+        boards = [b for b in client.list_boards().get("boards") or [] if isinstance(b, dict)]
+    board = _resolve_board_target(boards, args.target)
+    write_pin(
+        config.api_url, int(board["id"]), key=board.get("key"), name=board.get("name")
+    )
+    print(
+        f"pinned board {board['id']} ({board.get('key', '?')}) for this directory; "
+        "expires after 12h idle, --board overrides, `pandan board use --clear` removes it",
+        file=sys.stderr,
+    )
+    _emit(
+        board,
+        fmt=args.output_format,
+        noun="board",
+        fields=None,
+        full=False,
+        limit=config.max_text_chars,
+        hints=[],
+    )
+    return EXIT_OK
+
+
+def _cmd_board_current(args: argparse.Namespace) -> int:
+    """Print the board pinned for this directory, or ``(none)``. Looking does not
+    refresh the pin's idle timer."""
+    resolved = resolve_values()
+    pin = read_pin(resolved.get("api_url") or DEFAULT_API_URL, touch=False)
+    if pin is None:
+        print("(none)")
+        return EXIT_OK
+    out = {"board_id": pin.board_id, "key": pin.key, "name": pin.name}
+    if args.output_format in STRUCTURED_FORMATS:
+        print(_render_structured(out, args.output_format))
+    else:
+        print(f"{pin.board_id}\t{pin.key or '?'}\t{pin.name or '?'}")
+    return EXIT_OK
 
 
 def _cmd_board_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -2677,11 +2785,11 @@ def _cmd_workspace_member_rm(client: PandanClient, config: Config, args: argpars
 
 
 # --- epic handlers ----------------------------------------------------------
-# Epics are board-scoped, so list/create honour --board / PANDAN_BOARD_ID.
+# Epics are board-scoped, so list/create honour --board / the session pin.
 
 
 def _cmd_epic_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.list_epics(board_id=_resolve_board(args.board, config))
+    return client.list_epics(board_id=_resolve_board(args.board, config, client))
 
 
 def _cmd_epic_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -2694,7 +2802,7 @@ def _cmd_epic_get(client: PandanClient, config: Config, args: argparse.Namespace
 def _cmd_epic_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_epic(
         args.name,
-        board_id=_resolve_board(args.board, config),
+        board_id=_resolve_board(args.board, config, client),
         description=args.description,
         target_date=args.target_date,
         lead=args.lead,
@@ -2724,29 +2832,17 @@ def _cmd_epic_delete(client: PandanClient, config: Config, args: argparse.Namesp
 
 
 # --- label handlers ---------------------------------------------------------
-# Labels are board-scoped: list/create honour --board / PANDAN_BOARD_ID; delete
+# Labels are board-scoped: list/create honour --board / the session pin; delete
 # is addressed by the label's own id (authorized via its board).
 
 
 def _cmd_label_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    board = _resolve_board(args.board, config)
-    if board is None:
-        raise CliError(
-            "a board is required; pass --board or set PANDAN_BOARD_ID",
-            code="board_required",
-            arg="--board",
-        )
+    board = _resolve_board(args.board, config, client)
     return client.list_labels(board)
 
 
 def _cmd_label_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    board = _resolve_board(args.board, config)
-    if board is None:
-        raise CliError(
-            "a board is required; pass --board or set PANDAN_BOARD_ID",
-            code="board_required",
-            arg="--board",
-        )
+    board = _resolve_board(args.board, config, client)
     # KAN-288: color accepts either the positional or the --color flag (flag wins),
     # falling back to a neutral default so it can be omitted entirely.
     color = args.color_opt or args.color_pos or DEFAULT_LABEL_COLOR
@@ -2780,7 +2876,7 @@ def _cmd_label_delete(client: PandanClient, config: Config, args: argparse.Names
 
 
 # --- view handlers ----------------------------------------------------------
-# Saved views are board-scoped: list/create/delete honour --board / PANDAN_BOARD_ID.
+# Saved views are board-scoped: list/create/delete honour --board / the session pin.
 # ``view create`` reuses the same filter/sort flags as ``list`` to assemble the
 # stored query (the filter+sort grammar), so a view is "the current list, saved".
 
@@ -2814,24 +2910,22 @@ def _build_view_query(
     return query
 
 
-def _require_view_board(args: argparse.Namespace, config: Config) -> int:
-    board = _resolve_board(args.board, config)
-    if board is None:
-        raise CliError(
-            "a board is required; pass --board or set PANDAN_BOARD_ID",
-            code="board_required",
-            arg="--board",
-        )
+def _require_view_board(
+    args: argparse.Namespace, config: Config, client: PandanClient
+) -> int:
+    board = _resolve_board(args.board, config, client)
     return board
 
 
 def _cmd_view_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.list_views(_require_view_board(args, config))
+    return client.list_views(_require_view_board(args, config, client))
 
 
 def _cmd_view_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_view(
-        _require_view_board(args, config), args.name, _build_view_query(client, config, args)
+        _require_view_board(args, config, client),
+        args.name,
+        _build_view_query(client, config, args),
     )
 
 
@@ -2842,21 +2936,21 @@ def _cmd_view_delete(client: PandanClient, config: Config, args: argparse.Namesp
             code="confirmation_required",
             arg="--yes",
         )
-    return client.delete_view(_require_view_board(args, config), args.view_id)
+    return client.delete_view(_require_view_board(args, config, client), args.view_id)
 
 
 # --- cycle handlers (V33 / KAN-297) -----------------------------------------
-# Cycles are board-scoped: list/create/delete honour --board / PANDAN_BOARD_ID.
+# Cycles are board-scoped: list/create/delete honour --board / the session pin.
 # Assigning a card to a cycle is a field edit — `pandan update <card> --cycle <id>`.
 
 
 def _cmd_cycle_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.list_cycles(_require_view_board(args, config))
+    return client.list_cycles(_require_view_board(args, config, client))
 
 
 def _cmd_cycle_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_cycle(
-        _require_view_board(args, config),
+        _require_view_board(args, config, client),
         args.name,
         starts_on=args.starts_on,
         ends_on=args.ends_on,
@@ -2883,7 +2977,7 @@ def _cmd_cycle_update(client: PandanClient, config: Config, args: argparse.Names
             arg="--name/--starts-on/--ends-on/--pi",
         )
     return client.update_cycle(
-        _require_view_board(args, config),
+        _require_view_board(args, config, client),
         args.cycle_id,
         name=args.name,
         starts_on=args.starts_on,
@@ -2899,19 +2993,19 @@ def _cmd_cycle_delete(client: PandanClient, config: Config, args: argparse.Names
             code="confirmation_required",
             arg="--yes",
         )
-    return client.delete_cycle(_require_view_board(args, config), args.cycle_id)
+    return client.delete_cycle(_require_view_board(args, config, client), args.cycle_id)
 
 
 def _cmd_cycle_metrics(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Derived burndown / velocity metrics for a cycle (V34, KAN-298)."""
-    return client.cycle_metrics(_require_view_board(args, config), args.cycle_id)
+    return client.cycle_metrics(_require_view_board(args, config, client), args.cycle_id)
 
 
 def _cmd_cycle_generate(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Generate a run of back-to-back cycles in one call (M8 V58, KAN-979) — "two
     weeks per sprint, six sprints" as one command instead of six ``cycle create``s."""
     return client.generate_cycles(
-        _require_view_board(args, config),
+        _require_view_board(args, config, client),
         start=args.start,
         length_days=args.length_days,
         count=args.count,
@@ -2929,7 +3023,7 @@ def _cmd_cycle_close(client: PandanClient, config: Config, args: argparse.Namesp
     where unfinished work goes is refused by argparse before a request is even made."""
     rollover_to = None if args.backlog else args.rollover_to
     return client.close_cycle(
-        _require_view_board(args, config), args.cycle_id, rollover_to=rollover_to
+        _require_view_board(args, config, client), args.cycle_id, rollover_to=rollover_to
     )
 
 
@@ -2940,12 +3034,12 @@ def _cmd_cycle_close(client: PandanClient, config: Config, args: argparse.Namesp
 
 
 def _cmd_pi_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.list_planning_intervals(_require_view_board(args, config))
+    return client.list_planning_intervals(_require_view_board(args, config, client))
 
 
 def _cmd_pi_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.create_planning_interval(
-        _require_view_board(args, config),
+        _require_view_board(args, config, client),
         args.name,
         starts_on=args.starts_on,
         ends_on=args.ends_on,
@@ -2953,7 +3047,7 @@ def _cmd_pi_create(client: PandanClient, config: Config, args: argparse.Namespac
 
 
 def _cmd_pi_get(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.get_planning_interval(_require_view_board(args, config), args.pi_id)
+    return client.get_planning_interval(_require_view_board(args, config, client), args.pi_id)
 
 
 def _cmd_pi_update(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -2967,7 +3061,7 @@ def _cmd_pi_update(client: PandanClient, config: Config, args: argparse.Namespac
             arg="--name/--starts-on/--ends-on",
         )
     return client.update_planning_interval(
-        _require_view_board(args, config),
+        _require_view_board(args, config, client),
         args.pi_id,
         name=args.name,
         starts_on=args.starts_on,
@@ -2982,13 +3076,13 @@ def _cmd_pi_delete(client: PandanClient, config: Config, args: argparse.Namespac
             code="confirmation_required",
             arg="--yes",
         )
-    return client.delete_planning_interval(_require_view_board(args, config), args.pi_id)
+    return client.delete_planning_interval(_require_view_board(args, config, client), args.pi_id)
 
 
 def _cmd_pi_metrics(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     """Rolled-up committed/completed/velocity across a planning interval's
     member cycles (M8 V57, KAN-978) — a sum, not a series."""
-    return client.planning_interval_metrics(_require_view_board(args, config), args.pi_id)
+    return client.planning_interval_metrics(_require_view_board(args, config, client), args.pi_id)
 
 
 # --- batch update + card templates (M5 V19 API / KAN-252 adapter) ----------
@@ -3018,9 +3112,10 @@ def _cmd_batch_create(client: PandanClient, config: Config, args: argparse.Names
     Each object takes the same fields as ``create``'s flags, under the API's own names
     (``title`` required; ``description``/``column``/``story_points``/``assignee``/
     ``epic_id``/``cycle_id``/``priority``/``due_date``/``label_ids``/``board_id``).
-    ``board_id`` is filled in from ``--board`` / ``PANDAN_BOARD_ID`` for any object that
+    ``board_id`` is filled in from ``--board`` / the session pin for any object that
     omits it, because a card dict with no board lands on your **earliest** board — the
-    footgun every other verb's board resolution exists to avoid. An object that names
+    footgun every other verb's board resolution exists to avoid; an object with no
+    ``board_id`` and no board selected is refused. An object that names
     its own ``board_id`` keeps it, so one batch can span boards."""
     cards = _load_json_arg(args.cards)
     if not isinstance(cards, list):
@@ -3029,7 +3124,7 @@ def _cmd_batch_create(client: PandanClient, config: Config, args: argparse.Names
             code="invalid_input",
             arg="JSON",
         )
-    board = _resolve_board(args.board, config)
+    board = _resolve_board(args.board, config, client, required=False)
     prepared: list[dict[str, Any]] = []
     for index, card in enumerate(cards):
         if not isinstance(card, dict):
@@ -3044,9 +3139,11 @@ def _cmd_batch_create(client: PandanClient, config: Config, args: argparse.Names
                 code="invalid_input",
                 arg="JSON",
             )
+        if card.get("board_id") is None and board is None:
+            # Re-resolve with required=True purely to raise the standard error.
+            _resolve_board(None, config, client)
         prepared.append(
-            card if card.get("board_id") is not None or board is None
-            else {**card, "board_id": board}
+            card if card.get("board_id") is not None else {**card, "board_id": board}
         )
     return client.create_cards(prepared)
 
@@ -3063,7 +3160,7 @@ def _cmd_batch_update(client: PandanClient, config: Config, args: argparse.Names
 
 
 def _cmd_template_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.list_templates(_require_view_board(args, config))
+    return client.list_templates(_require_view_board(args, config, client))
 
 
 def _cmd_template_create(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -3074,7 +3171,7 @@ def _cmd_template_create(client: PandanClient, config: Config, args: argparse.Na
             code="invalid_input",
             arg="--cards",
         )
-    return client.create_template(_require_view_board(args, config), args.name, cards)
+    return client.create_template(_require_view_board(args, config, client), args.name, cards)
 
 
 def _cmd_template_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
@@ -3084,11 +3181,11 @@ def _cmd_template_delete(client: PandanClient, config: Config, args: argparse.Na
             code="confirmation_required",
             arg="--yes",
         )
-    return client.delete_template(_require_view_board(args, config), args.template_id)
+    return client.delete_template(_require_view_board(args, config, client), args.template_id)
 
 
 def _cmd_template_apply(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
-    return client.apply_template(_require_view_board(args, config), args.template_id)
+    return client.apply_template(_require_view_board(args, config, client), args.template_id)
 
 
 # --- dependency / link / comment handlers (KAN-270) -------------------------
@@ -3190,22 +3287,24 @@ def _cmd_config_path(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _pinned_board_label(resolved: dict[str, str]) -> str | None:
+    pin = read_pin(resolved.get("api_url") or DEFAULT_API_URL, touch=False)
+    return None if pin is None else str(pin.board_id)
+
+
 def _cmd_config_show(args: argparse.Namespace) -> int:
     """Print the *effective* config after the env → file → .mcp.json chain, with
-    the token redacted. Handy for 'why is pandan hitting the wrong board?'."""
+    the token redacted. Handy for 'why is pandan hitting the wrong server?'."""
     resolved = resolve_values()
     mcp = find_mcp_json()
     out = {
         "api_url": resolved.get("api_url") or DEFAULT_API_URL,
         "token": _redact_token(resolved.get("token", "")),
-        "board_id": resolved.get("board_id"),
         # The effective truncation limit (V45, KAN-428) — reported here because
         # "why is my description cut off?" is otherwise unanswerable from outside.
         "max_text_chars": resolved.get("max_text_chars") or str(DEFAULT_MAX_TEXT_CHARS),
-        # Issue #277 — reported for the same reason as max_text_chars: with it on,
-        # "why did that fail?" is otherwise unanswerable from outside, and with it
-        # off, "am I actually protected?" is the question that prompted the issue.
-        "require_board": str(parse_require_board(resolved.get("require_board", ""))).lower(),
+        # There is no default board; what a verb would act on is the session pin.
+        "pinned_board": _pinned_board_label(resolved),
         "config_file": str(config_file_path()),
         "mcp_json": str(mcp) if mcp else None,
     }
@@ -3220,19 +3319,9 @@ def _cmd_config_show(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _validate_board_id_arg(raw: str | None) -> None:
-    if raw is not None and raw.strip() and not raw.strip().lstrip("-").isdigit():
-        raise CliError(
-            f"--board-id must be an integer, got {raw!r}",
-            code="invalid_input",
-            arg="--board-id",
-        )
-
-
 def _cmd_config_set(args: argparse.Namespace) -> int:
-    """Write api_url/board_id/token to the user config file (0600). ``--token-stdin``
+    """Write api_url/token to the user config file (0600). ``--token-stdin``
     reads the PAT from stdin so it never lands in argv / shell history."""
-    _validate_board_id_arg(args.board_id)
     token: str | None = None
     if getattr(args, "token_stdin", False):
         token = sys.stdin.readline().strip()
@@ -3240,24 +3329,12 @@ def _cmd_config_set(args: argparse.Namespace) -> int:
             raise CliError("no token read from stdin", code="no_token", arg="--token-stdin")
     elif args.token is not None:
         token = args.token
-    require_board = getattr(args, "require_board", None)
-    if (
-        args.api_url is None
-        and args.board_id is None
-        and token is None
-        and require_board is None
-    ):
+    if args.api_url is None and token is None:
         raise CliError(
-            "nothing to set (pass --api-url / --board-id / --token[-stdin] / "
-            "--require-board)",
+            "nothing to set (pass --api-url / --token[-stdin])",
             code="invalid_input",
         )
-    path = write_config_file(
-        api_url=args.api_url,
-        token=token,
-        board_id=args.board_id,
-        require_board=require_board,
-    )
+    path = write_config_file(api_url=args.api_url, token=token)
     print(f"wrote {path}")
     return EXIT_OK
 
@@ -3275,11 +3352,13 @@ def _cmd_config_unset(args: argparse.Namespace) -> int:
     second one means the value is coming from the environment or ``.mcp.json``, which
     this command cannot and should not touch.
     """
-    unknown = [k for k in args.keys if k not in _CONFIG_KEYS]
+    valid = _CONFIG_KEYS + _RETIRED_KEYS
+    unknown = [k for k in args.keys if k not in valid]
     if unknown:
         raise CliError(
             f"unknown config key(s): {', '.join(unknown)}. "
-            f"Valid keys: {', '.join(_CONFIG_KEYS)}.",
+            f"Valid keys: {', '.join(_CONFIG_KEYS)} "
+            f"(and the retired {', '.join(_RETIRED_KEYS)}, which only unset accepts).",
             code="invalid_input",
             arg=unknown[0],
         )
@@ -3319,7 +3398,6 @@ def _cmd_login(args: argparse.Namespace) -> int:
     Otherwise the token is read as one line from stdin (``… | pandan login``), and if
     nothing arrives the command fails with a structured error rather than blocking on a
     prompt no one can answer."""
-    _validate_board_id_arg(args.board_id)
     from_stdin = getattr(args, "token_stdin", False) or not _stdin_is_tty()
     if from_stdin:
         token = sys.stdin.readline().strip()
@@ -3338,7 +3416,7 @@ def _cmd_login(args: argparse.Namespace) -> int:
             code="no_token",
             arg="--token-stdin" if from_stdin else None,
         )
-    path = write_config_file(api_url=args.api_url, token=token, board_id=args.board_id)
+    path = write_config_file(api_url=args.api_url, token=token)
     print(f"saved token to {path} (mode 0600)")
     return EXIT_OK
 
@@ -3487,11 +3565,13 @@ def build_parser() -> argparse.ArgumentParser:
         # Shared with the bare invocation's banner (V46) so the two can't drift.
         description=TOOL_DESCRIPTION,
         epilog=(
-            "Configuration keys (api_url / token / board_id), resolved per value in\n"
+            "Configuration keys (api_url / token), resolved per value in\n"
             "this order — first non-empty wins:\n"
-            "  1. env vars   PANDAN_API_URL / PANDAN_TOKEN / PANDAN_BOARD_ID\n"
+            "  1. env vars   PANDAN_API_URL / PANDAN_TOKEN\n"
             "  2. config file  ~/.config/pandan/config.toml  (see `pandan login`)\n"
             "  3. .mcp.json    nearest up the tree, .mcpServers.pandan.env.*\n"
+            "There is no default board: pass --board <id> or pin one for the session\n"
+            "with `pandan board use <id|KEY>`.\n"
             "So the PAT can stay in a file and never touch the command line. Run\n"
             "`pandan login` once to save it; `pandan config show` prints the effective config.\n"
             "\n"
@@ -3628,7 +3708,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="live board state (what bare pandan prints)",
     )
-    p_overview.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_overview.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_overview.add_argument(
         "--limit", type=int, default=OVERVIEW_FETCH_LIMIT, help="max cards to fetch"
     )
@@ -3652,7 +3732,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_warmup.set_defaults(func=_cmd_warmup, require_token=False, is_warmup=True)
 
     p_list = sub.add_parser("list", parents=[common], help="list / query cards")
-    p_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_list.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_list.add_argument(
         "--refs",
         metavar="REFS",
@@ -3736,7 +3816,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_create = sub.add_parser("create", parents=[common], help="create a card")
     p_create.add_argument("title")
-    p_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_create.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_create.add_argument("--description")
     p_create.add_argument("--column", choices=COLUMNS, help="starting column (default: todo)")
     p_create.add_argument(
@@ -3824,7 +3904,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="show the next ready card (--claim to atomically dispatch it)",
     )
-    p_next.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_next.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_next.add_argument(
         "--claim", action="store_true", help="atomically claim it (move to in_progress + assign)"
     )
@@ -3880,7 +3960,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="derived flow metrics for a board (throughput / cycle time / aging / by-assignee)",
     )
-    p_metrics.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_metrics.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_metrics.add_argument(
         "--since", metavar="ISO", help="lower bound of the period (ISO-8601 timestamp)"
     )
@@ -3897,7 +3977,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="a board's activity feed, newest-first (filter by --actor / --action)",
     )
-    p_activity.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_activity.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_activity.add_argument(
         "--actor", metavar="LABEL",
         help="only rows by this actor (exact match on email / agent handle)",
@@ -3945,7 +4025,7 @@ def build_parser() -> argparse.ArgumentParser:
     # webhook — was reachable only from MCP or a raw ``curl`` (ADR 0019 rejected
     # "let the CLI be the surface" partly on this).
     p_board = sub.add_parser(
-        "board", help="manage boards (list / get / create / update / delete)"
+        "board", help="manage boards (list / get / create / update / delete / use / current)"
     )
     board_sub = p_board.add_subparsers(
         dest="board_command", metavar="<subcommand>", required=True
@@ -3954,6 +4034,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_board_list = board_sub.add_parser("list", parents=[common], help="list your boards")
     _add_fields_arg(p_board_list, "id,name,owner_id")
     p_board_list.set_defaults(func=_cmd_board_list, noun="board")
+
+    p_board_use = board_sub.add_parser(
+        "use",
+        parents=[common],
+        help="pin a board for this directory so later verbs can omit --board",
+    )
+    p_board_use.add_argument("target", nargs="?", metavar="BOARD", help="a board id or key (ENG)")
+    p_board_use.add_argument("--clear", action="store_true", help="remove the pin")
+    p_board_use.set_defaults(local_func=_cmd_board_use)
+
+    p_board_current = board_sub.add_parser(
+        "current", parents=[common], help="show the board pinned for this directory"
+    )
+    p_board_current.set_defaults(local_func=_cmd_board_current)
 
     p_board_get = board_sub.add_parser("get", parents=[common], help="get a single board by id")
     p_board_get.add_argument("board_id", type=int, metavar="BOARD", help="a board id")
@@ -4211,7 +4305,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_epic_list = epic_sub.add_parser("list", parents=[common], help="list / query epics")
-    p_epic_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_epic_list.add_argument("--board", type=int, help="board id (default: the pinned board)")
     _add_fields_arg(p_epic_list, "ticket,name,lead,target_date")
     p_epic_list.set_defaults(func=_cmd_epic_list, noun="epic")
 
@@ -4226,7 +4320,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_epic_create = epic_sub.add_parser("create", parents=[common], help="create an epic")
     p_epic_create.add_argument("name")
-    p_epic_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_epic_create.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_epic_create.add_argument("--description")
     p_epic_create.add_argument(
         "--target-date", dest="target_date", metavar="ISO",
@@ -4282,7 +4376,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_label_list = label_sub.add_parser("list", parents=[common], help="list a board's labels")
-    p_label_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_label_list.add_argument("--board", type=int, help="board id (default: the pinned board)")
     _add_fields_arg(p_label_list, "id,name,color,usage_count")
     p_label_list.set_defaults(func=_cmd_label_list, noun="label")
 
@@ -4310,7 +4404,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--emoji", metavar="EMOJI",
         help="a single emoji (optional), e.g. 🐛 — a second visual cue distinct from colour",
     )
-    p_label_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_label_create.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_label_create.set_defaults(func=_cmd_label_create, noun="label")
 
     p_label_update = label_sub.add_parser(
@@ -4345,7 +4439,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_view_list = view_sub.add_parser("list", parents=[common], help="list a board's saved views")
-    p_view_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_view_list.add_argument("--board", type=int, help="board id (default: the pinned board)")
     _add_fields_arg(p_view_list, "id,name,query")
     p_view_list.set_defaults(func=_cmd_view_list, noun="view")
 
@@ -4353,7 +4447,7 @@ def build_parser() -> argparse.ArgumentParser:
         "create", parents=[common], help="save the given filters/sort as a named view"
     )
     p_view_create.add_argument("name")
-    p_view_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_view_create.add_argument("--board", type=int, help="board id (default: the pinned board)")
     # The same filter/sort grammar as `list` — assembled into the stored query.
     p_view_create.add_argument("--column", choices=COLUMNS, help="filter by column")
     p_view_create.add_argument(
@@ -4379,7 +4473,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_view_delete = view_sub.add_parser("delete", parents=[common], help="delete a saved view")
     p_view_delete.add_argument("view_id", type=int)
-    p_view_delete.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_view_delete.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_view_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     p_view_delete.set_defaults(func=_cmd_view_delete, noun="view")
 
@@ -4395,13 +4489,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p_cycle_list = cycle_sub.add_parser("list", parents=[common], help="list a board's cycles")
-    p_cycle_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_cycle_list.add_argument("--board", type=int, help="board id (default: the pinned board)")
     _add_fields_arg(p_cycle_list, "id,name,starts_on,ends_on")
     p_cycle_list.set_defaults(func=_cmd_cycle_list, noun="cycle")
 
     p_cycle_create = cycle_sub.add_parser("create", parents=[common], help="create a cycle")
     p_cycle_create.add_argument("name")
-    p_cycle_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_cycle_create.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_cycle_create.add_argument(
         "--starts-on", dest="starts_on", metavar="ISO",
         help="iteration start (ISO-8601 timestamp)",
@@ -4420,7 +4514,7 @@ def build_parser() -> argparse.ArgumentParser:
         "update", parents=[common], help="rename a cycle or correct its dates"
     )
     p_cycle_update.add_argument("cycle_id", type=int)
-    p_cycle_update.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_cycle_update.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_cycle_update.add_argument("--name", help="new cycle name")
     p_cycle_update.add_argument(
         "--starts-on", dest="starts_on", metavar="ISO",
@@ -4438,7 +4532,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_cycle_delete = cycle_sub.add_parser("delete", parents=[common], help="delete a cycle")
     p_cycle_delete.add_argument("cycle_id", type=int)
-    p_cycle_delete.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_cycle_delete.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_cycle_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     p_cycle_delete.set_defaults(func=_cmd_cycle_delete, noun="cycle")
 
@@ -4448,7 +4542,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="burndown / velocity for a cycle (committed vs completed + per-day burndown)",
     )
     p_cycle_metrics.add_argument("cycle_id", type=int)
-    p_cycle_metrics.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_cycle_metrics.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_cycle_metrics.set_defaults(func=_cmd_cycle_metrics, noun="cycle")
 
     p_cycle_generate = cycle_sub.add_parser(
@@ -4456,7 +4550,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="generate a run of back-to-back cycles in one call (M8 V58)",
     )
-    p_cycle_generate.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_cycle_generate.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_cycle_generate.add_argument(
         "--start", required=True, metavar="ISO", help="first cycle's start date (ISO-8601 date)"
     )
@@ -4484,7 +4578,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="close a cycle, freezing its numbers and rolling over unfinished work (M8 V59)",
     )
     p_cycle_close.add_argument("cycle_id", type=int)
-    p_cycle_close.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_cycle_close.add_argument("--board", type=int, help="board id (default: the pinned board)")
     rollover_group = p_cycle_close.add_mutually_exclusive_group(required=True)
     rollover_group.add_argument(
         "--rollover-to", dest="rollover_to", type=int, metavar="CYCLE_ID",
@@ -4508,13 +4602,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_pi_list = pi_sub.add_parser(
         "list", parents=[common], help="list a board's planning intervals"
     )
-    p_pi_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_list.add_argument("--board", type=int, help="board id (default: the pinned board)")
     _add_fields_arg(p_pi_list, "id,name,starts_on,ends_on")
     p_pi_list.set_defaults(func=_cmd_pi_list, noun="planning interval")
 
     p_pi_create = pi_sub.add_parser("create", parents=[common], help="create a planning interval")
     p_pi_create.add_argument("name")
-    p_pi_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_create.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_pi_create.add_argument(
         "--starts-on", dest="starts_on", metavar="ISO",
         help="planning interval start (ISO-8601 timestamp)",
@@ -4527,14 +4621,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_pi_get = pi_sub.add_parser("get", parents=[common], help="read one planning interval")
     p_pi_get.add_argument("pi_id", type=int)
-    p_pi_get.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_get.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_pi_get.set_defaults(func=_cmd_pi_get, noun="planning interval")
 
     p_pi_update = pi_sub.add_parser(
         "update", parents=[common], help="rename a planning interval or correct its dates"
     )
     p_pi_update.add_argument("pi_id", type=int)
-    p_pi_update.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_update.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_pi_update.add_argument("--name", help="new planning interval name")
     p_pi_update.add_argument(
         "--starts-on", dest="starts_on", metavar="ISO",
@@ -4548,7 +4642,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_pi_delete = pi_sub.add_parser("delete", parents=[common], help="delete a planning interval")
     p_pi_delete.add_argument("pi_id", type=int)
-    p_pi_delete.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_delete.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_pi_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     p_pi_delete.set_defaults(func=_cmd_pi_delete, noun="planning interval")
 
@@ -4558,7 +4652,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="rolled-up committed vs completed across a planning interval's member cycles",
     )
     p_pi_metrics.add_argument("pi_id", type=int)
-    p_pi_metrics.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_pi_metrics.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_pi_metrics.set_defaults(func=_cmd_pi_metrics, noun="planning interval")
 
     # --- batch create (KAN-502): N creates in one invocation -----------------
@@ -4593,7 +4687,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_batch_create.add_argument(
         "--board", type=int,
-        help="board id filled into objects that omit board_id (default: PANDAN_BOARD_ID)",
+        help="board id filled into objects that omit board_id (default: the pinned board)",
     )
     # KAN-583: the response is `{"created": [<card>, …]}`, a recognised card
     # envelope since KAN-502 — so `_project_rows` already serves a projection here.
@@ -4633,7 +4727,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_template_list = template_sub.add_parser(
         "list", parents=[common], help="list a board's card templates"
     )
-    p_template_list.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_template_list.add_argument("--board", type=int, help="board id (default: the pinned board)")
     _add_fields_arg(p_template_list, "id,name,cards")
     p_template_list.set_defaults(func=_cmd_template_list, noun="template")
 
@@ -4647,14 +4741,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="JSON",
         help="a JSON array of card objects (title required), or '-' to read stdin",
     )
-    p_template_create.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_template_create.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_template_create.set_defaults(func=_cmd_template_create, noun="template")
 
     p_template_delete = template_sub.add_parser(
         "delete", parents=[common], help="delete a card template"
     )
     p_template_delete.add_argument("template_id", type=int)
-    p_template_delete.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_template_delete.add_argument("--board", type=int, help="board id (default: the pinned board)")
     p_template_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     p_template_delete.set_defaults(func=_cmd_template_delete, noun="template")
 
@@ -4662,7 +4756,7 @@ def build_parser() -> argparse.ArgumentParser:
         "apply", parents=[common], help="instantiate a template's cards on the board"
     )
     p_template_apply.add_argument("template_id", type=int)
-    p_template_apply.add_argument("--board", type=int, help="board id (default: PANDAN_BOARD_ID)")
+    p_template_apply.add_argument("--board", type=int, help="board id (default: the pinned board)")
     # KAN-583: `apply_template` returns `batch-create`'s own `created` envelope, so
     # the rows are cards and the projection noun is "card" — not this parser's
     # ``noun="template"``, which only names the *single*-entity render it never hits.
@@ -4697,7 +4791,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="save your PAT to the config file (prompts; never on the command line)",
     )
     p_login.add_argument("--api-url", help="also save the API origin")
-    p_login.add_argument("--board-id", help="also save a default board id")
     p_login.add_argument(
         "--token-stdin",
         action="store_true",
@@ -4755,28 +4848,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_config_set = config_sub.add_parser(
         "set",
         parents=[common],
-        help="write api_url / board_id / token / require_board to the config file",
+        help="write api_url / token to the config file",
     )
     p_config_set.add_argument("--api-url")
-    p_config_set.add_argument("--board-id")
-    require_grp = p_config_set.add_mutually_exclusive_group()
-    require_grp.add_argument(
-        "--require-board",
-        dest="require_board",
-        action="store_true",
-        default=None,
-        help=(
-            "fail any board-scoped verb given no --board, instead of falling back to "
-            "the default board (safer with several boards on one account)"
-        ),
-    )
-    require_grp.add_argument(
-        "--no-require-board",
-        dest="require_board",
-        action="store_false",
-        default=None,
-        help="allow the default-board fallback again (the default)",
-    )
     token_grp = p_config_set.add_mutually_exclusive_group()
     token_grp.add_argument(
         "--token", help="the PAT (discouraged — ends up in shell history; prefer --token-stdin)"
@@ -4795,7 +4869,7 @@ def build_parser() -> argparse.ArgumentParser:
         "keys",
         nargs="+",
         metavar="KEY",
-        help=f"one or more of: {', '.join(_CONFIG_KEYS)}",
+        help=f"one or more of: {', '.join(_CONFIG_KEYS + _RETIRED_KEYS)}",
     )
     p_config_unset.set_defaults(local_func=_cmd_config_unset)
 

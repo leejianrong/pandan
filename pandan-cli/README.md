@@ -101,14 +101,15 @@ rather than spot-fixing it.
 | `pandan cycle create <name> [--board N] [--starts-on ISO] [--ends-on ISO]` | `POST /boards/{id}/cycles` |
 | `pandan cycle delete <cycle_id> [--board N] --yes` | `DELETE /boards/{id}/cycles/{cycle_id}` (cards are detached, not deleted) |
 | `pandan cycle metrics <cycle_id> [--board N]` | `GET /boards/{id}/cycles/{cycle_id}/metrics` (V34, KAN-298 — burndown / velocity) |
-| `pandan batch-create <JSON \| -> [--board N]` | `POST /cards` **× N** — several cards in one invocation. **Fail-fast, NOT atomic** (there is no batch-create endpoint, so cards created before a rejection stay created; contrast `batch-update`, which is one transaction). `--board`/`PANDAN_BOARD_ID` fills `board_id` into objects that omit it |
+| `pandan batch-create <JSON \| -> [--board N]` | `POST /cards` **× N** — several cards in one invocation. **Fail-fast, NOT atomic** (there is no batch-create endpoint, so cards created before a rejection stay created; contrast `batch-update`, which is one transaction). `--board` (or the `board use` pin) fills `board_id` into objects that omit it; one with no board at all is refused |
 | `pandan batch-update <JSON \| ->` | `PATCH /cards/batch` (atomic multi-card edit) |
 | `pandan template list [--board N]` | `GET /boards/{id}/templates` |
 | `pandan template create <name> --cards <JSON \| -> [--board N]` | `POST /boards/{id}/templates` |
 | `pandan template delete <template_id> [--board N] --yes` | `DELETE /boards/{id}/templates/{template_id}` |
 | `pandan template apply <template_id> [--board N]` | `POST /boards/{id}/templates/{template_id}/apply` |
-| `pandan login [--api-url U] [--board-id N] [--token-stdin]` | *(local — saves the PAT to the config file)* |
-| `pandan config set [--api-url U] [--board-id N] [--token-stdin \| --token T]` | *(local — writes the config file)* |
+| `pandan board use <id\|KEY>` / `--clear` / `pandan board current` | *(local pin file — the session's board; see Configuration)* |
+| `pandan login [--api-url U] [--token-stdin]` | *(local — saves the PAT to the config file)* |
+| `pandan config set [--api-url U] [--token-stdin \| --token T]` | *(local — writes the config file)* |
 | `pandan config show` | *(local — prints the effective config, token redacted)* |
 | `pandan config path` | *(local — prints the config file path)* |
 | `pandan context install [--settings PATH] [--exec PATH] [--timeout SECONDS] [--limit N] [--no-skill] [--force-skill]` | *(local — wires a Claude Code `SessionStart` hook; see [Ambient context](#ambient-context-v48-kan-431))* |
@@ -162,7 +163,7 @@ done
 
 Running `pandan` with **no arguments** prints live, actionable state and exits **0** — not
 usage. You get which build and which executable is answering, one line on what the tool
-is, then the default board's open cards with [V44's aggregate](#aggregates-on-every-list-verb-v44-kan-427):
+is, then the selected board's open cards with [V44's aggregate](#aggregates-on-every-list-verb-v44-kan-427):
 
 ```
 $ pandan
@@ -350,7 +351,7 @@ varies by verb, so pick the right key from this table:
 | `warmup` | `{"status": "ok"\|"waking"\|"unreachable"\|"error", "origin": "<url tried>", …}` |
 | **single-entity verbs** — `get`, `create`, `update`, `move`, `needs-human`, `resolve`, `comment add`, `notify read`, `board create`, `epic create`, `epic update`, `label create`, `view create`, `template create`, `cycle create` | the **bare entity object** (`{"id": …, "ticket_number": "KAN-7", …}`) — no envelope |
 | `metrics`, `cycle metrics` | the **bare metrics object** (`board_id`, `throughput`, `cycle_time`, `aging_wip`, `by_assignee`; the cycle one is `committed`/`completed`/`velocity`/`burndown`) |
-| `config show` | the bare local-config object (`api_url`, `token` *(redacted)*, `board_id`, `max_text_chars`, `config_file`, `mcp_json`) |
+| `config show` | the bare local-config object (`api_url`, `token` *(redacted)*, `max_text_chars`, `pinned_board`, `config_file`, `mcp_json`) |
 
 Worked `jq` one-liners (`jq` wants JSON, so these use `--json`, not `toon`):
 
@@ -464,7 +465,7 @@ its counts are structurally out of reach.
 
 ### Ambient context (V48, KAN-431)
 
-`pandan context install` wires the default board's state into an agent session **before
+`pandan context install` wires a board's state (`--board`, else the pinned one — baked into the hook) into an agent session **before
 it acts**, as a Claude Code `SessionStart` hook — so a fresh session already knows the
 open cards instead of spending a tool call to find out.
 
@@ -645,7 +646,7 @@ renamed and never remapped to a different exit code.
 | `config` | `1` | no token, or config that can't be read |
 | `board_required` | `1` | the verb needs a board and none was given or configured |
 | `confirmation_required` | `1` | a destructive verb without `--yes` |
-| `invalid_input` | `1` | a value parsed but unusable (bad JSON, wrong shape, non-integer `--board-id`) |
+| `invalid_input` | `1` | a value parsed but unusable (bad JSON, wrong shape, non-integer `--board`) |
 | `invalid_ref` | `1` | an `EPIC-` ticket where a card is wanted (or the reverse) |
 | `unknown_field` | `1` | `--fields` named a field the row doesn't have |
 | `no_token` | `1` | `login` / `config set` got no token to save |
@@ -720,15 +721,15 @@ value at runtime → `1`.**
 
 ## Configuration
 
-The three settings below are each resolved **independently**, first non-empty
+The two settings below (plus the optional text limit) are each resolved **independently**, first non-empty
 source wins:
 
-1. **Environment** — `PANDAN_API_URL` / `PANDAN_TOKEN` / `PANDAN_BOARD_ID`.
+1. **Environment** — `PANDAN_API_URL` / `PANDAN_TOKEN`.
 2. **Config file** — `~/.config/pandan/config.toml` (`$XDG_CONFIG_HOME` aware; mode
-   `0600`), a `[pandan]` table with `api_url` / `token` / `board_id`. Write it with
+   `0600`), a `[pandan]` table with `api_url` / `token`. Write it with
    `pandan login` or `pandan config set`.
 3. **`.mcp.json`** — the nearest one walking up from the current directory, read
-   from `.mcpServers.pandan.env.{PANDAN_API_URL,PANDAN_TOKEN,PANDAN_BOARD_ID}`.
+   from `.mcpServers.pandan.env.{PANDAN_API_URL,PANDAN_TOKEN}`.
    This is Claude Code's convention — the PAT already lives there for the MCP
    server, so the CLI reuses it with no extra setup.
 
@@ -736,11 +737,21 @@ source wins:
 |---------|---------|---------|---------|
 | API origin | `PANDAN_API_URL` | `http://localhost:8000` | The `/api/v1` prefix is added for you |
 | Token | `PANDAN_TOKEN` | *(unset)* | **Required.** A per-user **PAT** (`pandan_pat_…`, from the SPA top-bar **Tokens** tab, V9/ADR 0014). Unresolved from every source → a clean error before any request |
-| Default board | `PANDAN_BOARD_ID` | *(unset)* | Optional default for board-scoped commands (`list`/`create`, `epic list`/`epic create`) when they omit `--board`. Unset → the API's fallback (list = all your boards; create = your earliest) |
 | Long-text limit | `PANDAN_MAX_TEXT_CHARS` | `500` | Character budget for long free-text fields before they truncate with a hint (V45, below). `0` disables truncation entirely — the same thing `--full` does for one command. Config-file key: `max_text_chars` |
 
+> **There is no default board.** `PANDAN_BOARD_ID`, the config-file `board_id` and `require_board`
+> are retired. A board-scoped verb (`list`, `create`, `next`, `metrics`, `activity`, `epic list/create`,
+> `label list/create`, `view`/`cycle`/`pi`/`template` verbs, `batch-create`) with no `--board` and no pin
+> fails with `board_required`, which lists your boards. Name a board once per session with
+> `pandan board use <id|KEY>` — a state file under `$XDG_STATE_HOME/pandan/pins/`, **per working directory**
+> (subdirectories inherit it), for the server it was made against, expiring after **12 hours idle**.
+> `--board` always overrides it; `pandan board current` shows it; `pandan board use --clear` removes it.
+> A leftover `PANDAN_BOARD_ID` / `board_id` is ignored with a one-line stderr notice (`pandan config
+> unset board_id` cleans the file). `pandan list --refs KAN-12` (a canonical-ref batch read) and the
+> id/ticket card verbs need no board.
+
 > **Deprecated fallback (V40, [ADR 0018](../docs/adr/0018-pandan-rebrand.md)).** The pre-rebrand
-> `KANBAN_API_URL` / `KANBAN_TOKEN` / `KANBAN_BOARD_ID` still resolve — each key is read under its
+> `KANBAN_API_URL` / `KANBAN_TOKEN` still resolve — each key is read under its
 > `PANDAN_*` name **first**, falling back to the `KANBAN_*` spelling with a one-line notice on
 > **stderr** (stdout stays clean so `--json | jq` never breaks). Precedence is per *value*, so a
 > half-migrated environment works. A pre-rebrand `~/.config/kan/config.toml` is copied to
@@ -911,7 +922,7 @@ two binaries with the same name in different `PATH` entries is the classic way t
 ```bash
 # One-time: save the PAT to ~/.config/pandan/config.toml without it touching argv/history.
 # (Skip this entirely in a Claude Code repo — pandan reads the token from .mcp.json.)
-pandan login --api-url http://localhost:8000 --board-id 1   # prompts for the token (hidden)
+pandan login --api-url http://localhost:8000   # prompts for the token (hidden)
 #   …or pipe it:  printf '%s' "$PAT" | pandan login --token-stdin
 pandan config show                       # confirm the effective config (token redacted)
 

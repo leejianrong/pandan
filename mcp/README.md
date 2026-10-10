@@ -65,9 +65,13 @@ source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 **Board scoping (V10, ADR 0015).** Call `list_boards` to discover the boards you
 own, then target any of them per call:
 
-- The board-scoped tools take an optional **`board_id`**. Omit it and the server
-  uses **`PANDAN_BOARD_ID`** if set, else the API's own fallback (`list_*` = all
-  your boards; `create_*` = your earliest board).
+- The board-scoped tools take a **`board_id`**, and **there is no default board**:
+  omit it and the call fails, naming `list_boards`. To avoid repeating it, call
+  **`use_board`** once and the (stdio) session remembers it — an explicit `board_id`
+  on a call still wins. `use_board` is **stdio only**: the hosted endpoint serves
+  every caller from one process, so it refuses there and you pass `board_id` per call.
+  `PANDAN_BOARD_ID` is retired (a leftover one is ignored with a stderr notice).
+  `list_cards` with `refs` (a global `KAN-<n>` batch read) is the one board-less read.
 - Card-id-addressed tools (`get_card`/`update_card`/`move_card`/`delete_card`) need
   no `board_id` — the server authorizes via the card's own board.
 - Access is bounded to boards **you** own: a `board_id` you don't own returns `403`
@@ -236,11 +240,10 @@ rejects `null`), and `title` is both an annotation and a real argument name on
 |-----|---------|---------|
 | `PANDAN_API_URL` | `http://localhost:8000` | API origin (the `/api/v1` prefix is added for you) |
 | `PANDAN_TOKEN` | *(unset)* | **Required.** A per-user **PAT** (`pandan_pat_…`, created in the Tokens UI, V9/ADR 0014). Empty → `401` |
-| `PANDAN_BOARD_ID` | *(unset)* | Optional default board id for board-scoped tools when a call omits `board_id`. Unset → the API's fallback (list = all your boards; create = earliest) |
 | `PANDAN_MAX_TEXT_CHARS` | `500` | Character cap for a long free-text field on a read (KAN-501). `0` disables truncation everywhere — the deployment-wide form of `full=true`. Same name and default as the CLI's |
 
 > **Deprecated fallback (V40, [ADR 0018](../docs/adr/0018-pandan-rebrand.md)).** The pre-rebrand
-> `KANBAN_API_URL` / `KANBAN_TOKEN` / `KANBAN_BOARD_ID` still work: each key is read under its
+> `KANBAN_API_URL` / `KANBAN_TOKEN` still work: each key is read under its
 > `PANDAN_*` name **first** and only falls back to the `KANBAN_*` spelling, emitting a one-line notice
 > on **stderr** (never stdout — that's the JSON-RPC channel). Precedence is per *value*, so a
 > half-migrated `.mcp.json` resolves correctly. They will be removed in a later milestone.
@@ -299,7 +302,6 @@ via `-e`:
 docker run -i --rm \
   -e PANDAN_API_URL=https://simple-kanban-jian.fly.dev \
   -e PANDAN_TOKEN=pandan_pat_… \
-  -e PANDAN_BOARD_ID=1 \
   ghcr.io/leejianrong/pandan-mcp:latest
 ```
 
@@ -468,8 +470,7 @@ every case set `PANDAN_TOKEN` to a `pandan_pat_…` you created in the SPA Token
       "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
         "PANDAN_API_URL": "http://localhost:8000",
-        "PANDAN_TOKEN": "pandan_pat_…",
-        "PANDAN_BOARD_ID": "1"
+        "PANDAN_TOKEN": "pandan_pat_…"
       }
     }
   }
@@ -486,8 +487,7 @@ every case set `PANDAN_TOKEN` to a `pandan_pat_…` you created in the SPA Token
       "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
       "env": {
         "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
-        "PANDAN_TOKEN": "pandan_pat_…",
-        "PANDAN_BOARD_ID": "1"
+        "PANDAN_TOKEN": "pandan_pat_…"
       }
     }
   }
@@ -505,13 +505,11 @@ every case set `PANDAN_TOKEN` to a `pandan_pat_…` you created in the SPA Token
         "run", "-i", "--rm",
         "-e", "PANDAN_API_URL",
         "-e", "PANDAN_TOKEN",
-        "-e", "PANDAN_BOARD_ID",
         "ghcr.io/leejianrong/pandan-mcp:latest"
       ],
       "env": {
         "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
-        "PANDAN_TOKEN": "pandan_pat_…",
-        "PANDAN_BOARD_ID": "1"
+        "PANDAN_TOKEN": "pandan_pat_…"
       }
     }
   }
@@ -525,11 +523,9 @@ keep `:latest` for trying the server out. See
 [Which build am I running?](#which-build-am-i-running-kan-452) for how to check
 what a given image actually contains.
 
-`PANDAN_BOARD_ID` pins the default board for calls that omit `board_id`; the
-snippets above (and [`.mcp.json.example`](../.mcp.json.example)) preset it to `1`,
-the seeded default board — **change it to your own board id** (from `list_boards`)
-so the agent doesn't target the wrong board, or leave it empty to fall back to the
-API default (list = all your boards, create = your earliest). `--directory ./mcp`
+There is **no default board** — the snippets above carry no `PANDAN_BOARD_ID` (it is
+retired). Ask the agent to call `list_boards`, then `use_board` with the id, and the
+session stays on it. `--directory ./mcp`
 is relative to the repo root (where Claude Code launches it); use an absolute path
 if you run the client from elsewhere. Once
 connected, ask the agent to *"list my boards"*, then *"create an epic and a couple
