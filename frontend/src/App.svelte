@@ -248,7 +248,7 @@
       <Search size={15} aria-hidden="true" />
       <input
         type="search"
-        placeholder="Search cards…"
+        placeholder="Search cards or ticket (ENG-14)…"
         aria-label="Search cards"
         value={searchText}
         oninput={(e) => onSearchInput(e.currentTarget.value)}

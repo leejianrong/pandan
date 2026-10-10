@@ -590,6 +590,15 @@ def test_list_maps_q_search(monkeypatch, env):
     assert fake.calls[0][1]["q"] == "login flow"
 
 
+def test_list_q_passes_a_ticket_ref_through_and_help_says_so(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result={"cards": [CARD]}))
+    assert cli.run(["list", "--q", "ENG-14"]) == 0
+    assert fake.calls[0][1]["q"] == "ENG-14"
+    with pytest.raises(SystemExit):
+        cli.run(["list", "--help"])
+    assert "ENG-14" in capsys.readouterr().out
+
+
 # --- keyset pagination: list --cursor (KAN-615) -----------------------------
 #
 # Under `--limit`, `list` printed `(more — next cursor: …)` and then defined no
