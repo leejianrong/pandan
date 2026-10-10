@@ -318,8 +318,10 @@ def list_cards(
     assigned to a cycle), parked (true/false — the stored "deliberately parked" flag,
     independent of backlog), and assignee (exact match). ``q`` is a free-text full-text search over
     title+description (websearch grammar: bare terms AND-ed, "quoted" = phrase,
-    ``-term`` = exclude); with no explicit ``sort`` it ranks by relevance (best
-    first, a title hit above a description-only hit). ``sort`` re-orders the result —
+    ``-term`` = exclude). A ``q`` that is exactly a ticket reference (``KAN-12``, ``ENG-14``,
+    ``alice/ENG-14``) also finds that card, ranked first; with no explicit ``sort`` it
+    ranks by relevance (best first, a title hit above a description-only hit).
+    ``sort`` re-orders the result —
     comma-separated keys with an optional ``-`` for descending (e.g. ``-priority``,
     ``-due_date,position``; fields: position/priority/due_date/created_at/updated_at/
     story_points/assignee/title/column/id). ``priority`` sorts by rank (none→urgent);

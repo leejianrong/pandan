@@ -3697,8 +3697,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--q", metavar="TEXT",
         help=(
             "full-text search over title+description (websearch grammar: bare terms "
-            "AND-ed, \"quoted\" = phrase, -term = exclude). Ranks by relevance unless "
-            "--sort is given"
+            "AND-ed, \"quoted\" = phrase, -term = exclude). A ticket reference "
+            "(KAN-12, ENG-14, alice/ENG-14) finds that card, ranked first. Ranks by "
+            "relevance unless --sort is given"
         ),
     )
     p_list.add_argument(
