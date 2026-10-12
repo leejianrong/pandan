@@ -42,6 +42,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from .errors import ToolValueError
+
 #: Default cap for a single free-text value, in characters. Matches the CLI's V45
 #: default so an agent sees the same shape whichever adapter it drives.
 DEFAULT_MAX_TEXT_CHARS = 500
@@ -239,15 +241,15 @@ def _available(rows: list[Any]) -> list[str]:
 def _validate(names: list[str], rows: list[Any], noun: str) -> None:
     """Reject an unknown field name, naming the offender and listing what is valid.
 
-    Raised as a plain ``ValueError``, which the SDK surfaces to the model as a tool
-    error — so a wrong guess costs one cheap round trip and teaches the vocabulary,
-    instead of silently returning rows full of nulls.
+    Raised as a ``ToolValueError`` (a ``ValueError`` the SDK shows the model verbatim; a
+    plain one is withheld as a crash) — so a wrong guess costs one cheap round trip
+    and teaches the vocabulary, instead of silently returning rows full of nulls.
     """
     available = _available(rows)
     known = set(available)
     for name in names:
         if _resolve(name) not in known:
-            raise ValueError(
+            raise ToolValueError(
                 f"unknown field {name!r} for {noun}; available: {', '.join(available)}"
             )
 
