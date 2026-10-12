@@ -246,6 +246,41 @@ def test_api_errors_carry_status_and_detail(monkeypatch, status, detail, tool, a
     assert detail in str(err)
 
 
+@pytest.mark.parametrize(
+    "tool,args,expect",
+    [
+        # PAN-230: `list_cards(limit=5)` with no board used to read as a bare
+        # "Error executing tool list_cards" — the SDK withheld the plain ValueError.
+        ("list_cards", {"limit": 5}, "board_id is required"),
+        ("list_cards", {"limit": 5}, "list_boards"),
+        ("list_cards", {"board_id": 5, "fields": ["nope"]}, "unknown field 'nope'"),
+        ("use_board", {"board_id": 5}, "not available on the hosted transport"),
+    ],
+)
+def test_caller_mistakes_are_shown_to_the_model(monkeypatch, tool, args, expect):
+    import asyncio
+
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+
+    from pandan_mcp.request_auth import clear_request_token, set_request_token
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"cards": [{"id": 1, "title": "t"}]})
+
+    client = server._McpClient("http://test", transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(server, "_client", client)
+    monkeypatch.setattr(server, "_session_board_id", None)
+    if tool == "use_board":
+        set_request_token("pandan_pat_hosted")
+    try:
+        with pytest.raises(ToolError) as excinfo:
+            asyncio.run(server.mcp.call_tool(tool, args))
+    finally:
+        clear_request_token()
+    assert not isinstance(excinfo.value, UnexpectedToolError)
+    assert expect in str(excinfo.value)
+
+
 def test_non_api_crashes_stay_generic(monkeypatch):
     """Only *API* errors are anticipated; anything else is still withheld."""
     import asyncio

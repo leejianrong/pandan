@@ -69,6 +69,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pandan_client import PandanApiError, PandanClient, split_card_selectors
 
 from .config import load_config
+from .errors import ToolValueError
 from .request_auth import get_request_token
 from .schema import compact_advertised_schemas
 from .shaping import shape
@@ -150,11 +151,11 @@ def _session_board() -> int | None:
 
 def _require_board(board_id: int | None) -> int:
     """The target board: the per-call ``board_id`` wins, else the session's
-    ``use_board`` pick, else a ``ValueError`` — there is **no default board**, so a
+    ``use_board`` pick, else a ``ToolValueError`` — there is **no default board**, so a
     call that names none is an error rather than a guess."""
     resolved = board_id if board_id is not None else _session_board()
     if resolved is None:
-        raise ValueError(
+        raise ToolValueError(
             "board_id is required — there is no default board. Pass board_id on the "
             "call, or call use_board once for this session (stdio). list_boards shows "
             "your boards."
@@ -170,7 +171,7 @@ def use_board(board_id: int) -> dict[str, Any]:
     hosted endpoint serves every caller from one process and refuses, so pass
     ``board_id`` on each call there."""
     if get_request_token() is not None:
-        raise ValueError(
+        raise ToolValueError(
             "use_board is not available on the hosted transport (one process serves "
             "every caller, so a session board would leak between them) — pass "
             "board_id on each call"
