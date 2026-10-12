@@ -256,6 +256,14 @@ pandan comment add ENG-9 --body "Confirmed: activity takes --cursor, list does n
 pandan comment list ENG-9
 ```
 
+`comment list` prints each note's id first. Use it to fix or remove one of **your own** notes (someone
+else's is a `403`); deleting is permanent and needs `--yes`:
+
+```bash
+pandan comment edit ENG-9 12 --body "Confirmed: activity takes --cursor; list does not."
+pandan comment delete ENG-9 12 --yes
+```
+
 ## Recap
 
 A complete agent cycle, start to finish:

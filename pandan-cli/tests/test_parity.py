@@ -282,6 +282,17 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
         "and untouched. Re-opening this is an ADR 0019 amendment, not an edit "
         "here."
     ),
+    ("comment", "edit"): (
+        "reason 2 (KAN-1738): `PATCH /cards/{id}/comments/{cid}` IS a board API call, "
+        "so this is a declined tool and not a missing one. ADR 0019 freezes the MCP "
+        "surface and `mcp/tests/test_schema.py` pins it by name and count; correcting "
+        "a typo'd note is a human-ergonomics affordance, and an agent that got a note "
+        "wrong can post a follow-up with `add_comment`. Re-opening this is an ADR 0019 "
+        "amendment, not an edit here."
+    ),
+    ("comment", "delete"): (
+        "reason 2 (KAN-1738) — see (\"comment\", \"edit\")"
+    ),
     ("workspace", "member", "add"): (
         "reason 2 (M9 V69, KAN-1058): `POST /workspaces/{id}/members` IS a board API "
         "call, so this is a declined tool and not a missing one. ADR 0019 freezes "

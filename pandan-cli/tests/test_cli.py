@@ -319,6 +319,12 @@ class FakeClient:
     def add_comment(self, card_id, body):
         return self._call("add_comment", card_id=card_id, body=body)
 
+    def edit_comment(self, card_id, comment_id, body):
+        return self._call("edit_comment", card_id=card_id, comment_id=comment_id, body=body)
+
+    def delete_comment(self, card_id, comment_id):
+        return self._call("delete_comment", card_id=card_id, comment_id=comment_id)
+
     def list_comments(self, card_id):
         return self._call("list_comments", card_id=card_id)
 
@@ -3161,6 +3167,66 @@ def test_comment_add_human_output(monkeypatch, env, capsys):
     )
     assert cli.run(["comment", "add", "7", "--body", "looks good"]) == 0
     assert "looks good" in capsys.readouterr().out
+
+
+def test_comment_edit_maps_args(monkeypatch, env):
+    fake = patch_client(
+        monkeypatch, FakeClient(result={"id": 5, "body": "fixed", "author_id": None})
+    )
+    assert cli.run(["comment", "edit", "7", "5", "--body", "fixed"]) == 0
+    assert fake.calls == [
+        ("edit_comment", {"card_id": 7, "comment_id": 5, "body": "fixed"})
+    ]
+
+
+def test_comment_edit_human_and_json_output(monkeypatch, env, capsys):
+    comment = {
+        "id": 5,
+        "body": "fixed",
+        "author_id": None,
+        "created_at": "2026-07-20T00:00:00Z",
+    }
+    patch_client(monkeypatch, FakeClient(result=comment))
+    assert cli.run(["comment", "edit", "7", "5", "--body", "fixed"]) == 0
+    assert "5\t2026-07-20T00:00:00Z\tfixed" in capsys.readouterr().out
+    assert cli.run(["comment", "edit", "7", "5", "--body", "fixed", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == comment
+
+
+def test_comment_edit_requires_body(monkeypatch, env):
+    fake = patch_client(monkeypatch, FakeClient(result={}))
+    with pytest.raises(SystemExit):
+        cli.run(["comment", "edit", "7", "5"])
+    assert fake.calls == []
+
+
+def test_comment_delete_requires_yes(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result={"deleted": 5}))
+    assert cli.run(["comment", "delete", "7", "5"]) == 1  # no --yes → refused
+    assert fake.calls == []
+    assert read_error(capsys).code == "confirmation_required"
+
+
+def test_comment_delete_with_yes(monkeypatch, env, capsys):
+    fake = patch_client(monkeypatch, FakeClient(result={"deleted": 5}))
+    assert cli.run(["comment", "delete", "7", "5", "--yes"]) == 0
+    assert fake.calls == [("delete_comment", {"card_id": 7, "comment_id": 5})]
+    assert capsys.readouterr().out.strip() == "deleted comment 5"
+
+
+@pytest.mark.parametrize(
+    "verb", [["edit", "7", "5", "--body", "x"], ["delete", "7", "5", "--yes"]]
+)
+@pytest.mark.parametrize(
+    "status,code,exit_code",
+    [(403, "forbidden", cli.EXIT_FORBIDDEN), (404, "not_found", cli.EXIT_NOT_FOUND)],
+)
+def test_comment_edit_delete_api_errors(
+    monkeypatch, env, capsys, verb, status, code, exit_code
+):
+    patch_client(monkeypatch, FakeClient(error=PandanApiError(status, "nope")))
+    assert cli.run(["comment", *verb]) == exit_code
+    assert read_error(capsys).code == code
 
 
 def test_comment_list_calls_client(monkeypatch, env):

@@ -334,7 +334,9 @@ Dependencies, work-links, comments (nested groups):
 - `pandan dep add <card_id> --blocked-by <other_id>` · `pandan dep rm <card_id> --blocked-by <other_id>` ·
   `pandan dep list <card_id>`
 - `pandan link add <card_id> --url <url> --label <label>` · `pandan link rm <card_id> --link-id <id>`
-- `pandan comment add <card_id> --body "…"` · `pandan comment list <card_id>`
+- `pandan comment add <card_id> --body "…"` · `pandan comment list <card_id>` ·
+  `pandan comment edit <card_id> <comment_id> --body "…"` · `pandan comment delete <card_id> <comment_id> --yes`
+  (comment ids are the first column of `comment list`; you can only edit/delete your own; CLI-only, no MCP tool)
 
 Boards, epics, labels, saved views, templates:
 

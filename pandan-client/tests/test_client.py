@@ -623,6 +623,25 @@ def test_add_comment_posts_body_and_returns_comment():
     assert out == {"id": 3, "body": "hi", "author_id": None}
 
 
+def test_edit_comment_patches_body_and_returns_comment():
+    import json
+
+    handler, seen = capture(httpx.Response(200, json={"id": 3, "body": "new"}))
+    out = make_client(handler).edit_comment(5, 3, "new")
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/cards/5/comments/3"
+    assert json.loads(seen["content"]) == {"body": "new"}
+    assert out == {"id": 3, "body": "new"}
+
+
+def test_delete_comment_returns_deleted_id_on_204():
+    handler, seen = capture(httpx.Response(204))
+    out = make_client(handler).delete_comment(5, 3)
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/api/v1/cards/5/comments/3"
+    assert out == {"deleted": 3}
+
+
 def test_list_comments_reads_and_wraps_result():
     handler, seen = capture(httpx.Response(200, json=[{"id": 3, "body": "hi"}]))
     out = make_client(handler).list_comments(5)
