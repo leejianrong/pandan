@@ -800,3 +800,41 @@ this number forward.
 (57 → 58) in [`mcp/tests/test_schema.py`](../../mcp/tests/test_schema.py), and
 `pandan-cli/tests/test_parity.py`'s `MCP_TO_CLI` (`use_board` → `board use`) and restated count. The
 CLI-only `board current` (reads the local pin file; no API call) is classified in its `CLI_ONLY`.
+
+## Amendment: the comment edit/delete tools (2026-10-12)
+
+**The freeze's sixth growth: +2 write tools, `edit_comment` and `delete_comment`, 58 → 60.** The API
+already had an own-only `DELETE /cards/{id}/comments/{cid}`; the same change added the missing own-only
+`PATCH` (a body replacement, no schema change), plus `pandan comment edit|delete <card> <comment_id>` on
+the CLI. The maintainer asked for the MCP surface to match, so the CLI-only disposition first drafted for
+these two verbs in `pandan-cli/tests/test_parity.py` (a reason-2 "declined tool") was reversed before it
+shipped.
+
+**Why the CLI alone does not serve this.** Comments are the channel an agent uses for progress and
+handoff notes, and `add_comment`/`list_comments` were already on the frozen surface. An agent that
+posts a wrong or stale note — a mis-pasted secret, a superseded plan — and can only add a follow-up
+leaves the wrong text in the thread for every later reader. Fixing it should not require a shell,
+which is the same argument `close_cycle` made. The permission model is unchanged and conservative: both
+tools act only on the caller's own comments (`403` otherwise, `404` if the comment is not on that card),
+so they widen nothing an agent could not already do through the API with its PAT.
+
+**Deferred, on purpose: an "edited" marker.** An edit overwrites the body with no trace. Recording
+`edited_at` would need a migration (which lands alone) and a `CommentRead` field; it is parked as a
+follow-up rather than bundled here.
+
+**Measurement**, via `mcp/scripts/measure_tool_schema_tokens.py`, immediately before and after on the
+same commit/interpreter:
+
+| surface | tools | compact | `indent=2` | `outputSchema` alone (compact) |
+|---|---:|---:|---:|---:|
+| before | 58 | 10,613 | 14,393 | 994 |
+| **after (+`edit_comment`, +`delete_comment`)** | **60** | **10,823** | **14,696** | **1,028** |
+| **delta** | **+2** | **+210 (+2.0%)** | **+303** | **+34** |
+
+About 105 tokens per tool: both docstrings are deliberately short (ownership rule, error codes, where the
+id comes from). Re-run the script rather than quoting this number forward.
+
+**Both freeze pins were updated in the same PR**: `FROZEN_TOOLS` (+2 names) and `FROZEN_TOOL_COUNT`
+(58 → 60) in [`mcp/tests/test_schema.py`](../../mcp/tests/test_schema.py), and
+`pandan-cli/tests/test_parity.py`'s `MCP_TO_CLI` (`edit_comment` → `comment edit`, `delete_comment` →
+`comment delete`) and restated count. `mcp/README.md` and the user guide's tool tables were updated to match.

@@ -55,6 +55,8 @@ source of truth (API-first, ADR 0005). Milestone 2 slice **V5**; board-scoped in
 | `add_link(card_id, label, url)` | `POST /cards/{id}/links` | — (by card id) |
 | `remove_link(card_id, link_id)` | `DELETE /cards/{id}/links/{link_id}` | — (by card id) |
 | `add_comment(card_id, body)` | `POST /cards/{id}/comments` | — (by card id) |
+| `edit_comment(card_id, comment_id, body)` | `PATCH /cards/{id}/comments/{comment_id}` (own notes only) | — (by card id) |
+| `delete_comment(card_id, comment_id)` | `DELETE /cards/{id}/comments/{comment_id}` (own notes only; permanent) | — (by card id) |
 | `list_comments(card_id, fields?, full?)` | `GET /cards/{id}/comments` (wraps in `comments`) | — (by card id) |
 
 > Work-links (KAN-32) are also inlined on every card read — `list_cards`/`get_card`
@@ -170,6 +172,8 @@ none of them a side effect of a CLI card. A fourth change, **ADR 0023 (KAN-1723,
 2026-09-25), renamed the 5 M9 team tools to `list_workspace`/etc. — count unchanged
 at 57** (a rename of the frozen surface, not growth; the amendment note above stays
 team-named as the historical record of what the count actually was on 2026-09-01).
+**The count moved again 2026-10-12: `edit_comment`/`delete_comment`, 58 → 60** (see [*Amendment: the comment edit/delete
+tools*](../docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-comment-editdelete-tools-2026-10-12)).
 Recorded here because the resident-cost headline
 invites the wrong conclusion, and this decision should not be re-litigated from it.
 

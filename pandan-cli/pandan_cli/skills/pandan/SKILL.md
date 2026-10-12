@@ -334,7 +334,9 @@ Dependencies, work-links, comments (nested groups):
 - `pandan dep add <card_id> --blocked-by <other_id>` · `pandan dep rm <card_id> --blocked-by <other_id>` ·
   `pandan dep list <card_id>`
 - `pandan link add <card_id> --url <url> --label <label>` · `pandan link rm <card_id> --link-id <id>`
-- `pandan comment add <card_id> --body "…"` · `pandan comment list <card_id>`
+- `pandan comment add <card_id> --body "…"` · `pandan comment list <card_id>` ·
+  `pandan comment edit <card_id> <comment_id> --body "…"` · `pandan comment delete <card_id> <comment_id> --yes`
+  (comment ids are the first column of `comment list`; you can only edit/delete your own; MCP: `edit_comment` / `delete_comment`)
 
 Boards, epics, labels, saved views, templates:
 
@@ -434,7 +436,7 @@ ADR 0019 for why the surface is frozen rather than trimmed):
   `update_card`, `move_card`, `claim_card`, `delete_card`.
 - **Dispatch & handoff:** `dispatch`, `next`, `needs_human`, `resolve`.
 - **Dependencies / links / comments:** `add_dependency` / `remove_dependency` / `list_dependencies`,
-  `add_link` / `remove_link`, `add_comment` / `list_comments`. (Card reads include
+  `add_link` / `remove_link`, `add_comment` / `edit_comment` / `delete_comment` / `list_comments`. (Card reads include
   `blocked_by`/`blocks`/`blocked` and `links` either way.)
 - **Boards / epics / labels / views / templates:** `list_boards` / `create_board` / `get_board` /
   `update_board` / `delete_board`, and the parallel `*_epic`, `*_label`, `*_view`, and `*_template`

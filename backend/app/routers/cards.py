@@ -59,6 +59,7 @@ from ..schemas import (
     ColumnEnum,
     CommentCreate,
     CommentRead,
+    CommentUpdate,
     DependencyCreate,
     LinkCreate,
     NeedsHumanRequest,
@@ -1583,6 +1584,49 @@ def add_comment(
     return comment
 
 
+def _get_own_comment(
+    db: Session, card: Card, comment_id: int, principal: User, verb: str
+) -> CardComment:
+    """Resolve ``comment_id`` on ``card`` for an edit/delete: **404** if it isn't
+    on the card, **403** if someone else wrote it (own-only, KAN-33)."""
+    comment = db.scalars(
+        select(CardComment).where(
+            CardComment.id == comment_id,
+            CardComment.card_id == card.id,
+        )
+    ).first()
+    if comment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
+        )
+    if comment.author_id != principal.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"you can only {verb} your own comments",
+        )
+    return comment
+
+
+@router.patch("/{card_id}/comments/{comment_id}", response_model=CommentRead)
+def edit_comment(
+    card_id: int,
+    comment_id: int,
+    payload: CommentUpdate,
+    db: Session = Depends(get_db),
+    principal: User = Depends(get_principal),
+) -> CardComment:
+    """Edit **your own** note's body. **404** if no such comment belongs to the
+    card; **403** if someone else authored it (edit-own-only, like delete).
+    Owner-gated on the card's board. Returns the updated comment."""
+    card = _get_or_404(db, card_id)
+    authorize_board(db, principal, card.board_id, Access.WRITE)
+    comment = _get_own_comment(db, card, comment_id, principal, "edit")
+    comment.body = payload.body
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
 @router.delete(
     "/{card_id}/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT
 )
@@ -1597,21 +1641,7 @@ def remove_comment(
     Owner-gated on the card's board."""
     card = _get_or_404(db, card_id)
     authorize_board(db, principal, card.board_id, Access.WRITE)
-    comment = db.scalars(
-        select(CardComment).where(
-            CardComment.id == comment_id,
-            CardComment.card_id == card.id,
-        )
-    ).first()
-    if comment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
-        )
-    if comment.author_id != principal.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="you can only delete your own comments",
-        )
+    comment = _get_own_comment(db, card, comment_id, principal, "delete")
     db.delete(comment)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

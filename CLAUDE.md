@@ -190,7 +190,11 @@ of the three), `outputSchema` alone **960 → 977**. **The count moved a fourth 
 `PANDAN_BOARD_ID` is retired (hosted refuses it: one process, every caller), per
 [the amendment note](docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-use_board-tool-and-the-end-of-the-default-board-2026-10-10).
 Measured the same tight way: **10,636 → 10,787** compact (+151, net of the deleted `PANDAN_BOARD_ID`
-prose), `outputSchema` alone **977 → 994**. **Re-run the script rather than quoting this line** —
+prose), `outputSchema` alone **977 → 994**. **The count moved a fifth time** (comment edit/delete,
+2026-10-12): **58 → 60 tools**, `edit_comment`/`delete_comment` (own-comments-only writes; the API's
+`PATCH` was added alongside the pre-existing `DELETE`), per
+[the amendment note](docs/adr/0019-mcp-surface-right-sizing.md#amendment-the-comment-editdelete-tools-2026-10-12).
+Measured: **10,613 → 10,823** compact (+210), `outputSchema` alone **994 → 1,028**. **Re-run the script rather than quoting this line** —
 seven recorded drifts (three from arguments, four from an actual tool-count change) is enough to treat
 any number here as an order of
 magnitude and nothing finer. The other six
@@ -203,8 +207,8 @@ folded into the headline and deliberately **not** compacted, because unlike `inp
 `outputSchema` is the very object the SDK validates every tool result against.
 Both measurements are re-runnable —
 `mcp/scripts/measure_tool_schema_tokens.py` for the resident schema,
-`mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The surface (58 tools as of the
-no-default-board `use_board` amendment) is pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit**
+`mcp/scripts/measure_read_payload_tokens.py` for per-read payloads. **The surface (60 tools as of the
+comment edit/delete amendment) is pinned by `mcp/tests/test_schema.py` — adding a tool is an ADR amendment, not a fixture edit**
 (adding an *argument*, as KAN-501 and V67's `workspace_id` (originally `team_id`) did, is not). **Per-slice status goes stale here
 faster than anywhere else in this file; read [docs/milestone-8/SLICES.md](docs/milestone-8/SLICES.md)/
 [docs/milestone-9/SLICES.md](docs/milestone-9/SLICES.md) and the board, not this paragraph.**

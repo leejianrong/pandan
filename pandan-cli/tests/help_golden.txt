@@ -48,7 +48,7 @@ positional arguments:
                   uninstall / show / status)
     dep           manage card dependencies (add / rm / list blocking edges)
     link          manage card work-links (add / rm)
-    comment       manage card notes (add / list)
+    comment       manage card notes (add / list / edit / delete)
 
 options:
   -h, --help      show this help message and exit

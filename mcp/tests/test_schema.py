@@ -61,6 +61,9 @@ from pandan_mcp.server import mcp
 #: **Amended again 2026-10-10 (no default board)**: +1 tool (``use_board``) — with
 #: ``PANDAN_BOARD_ID`` retired, a stdio session needs one call to name its board
 #: instead of repeating ``board_id`` on every tool call. Stdio only; hosted refuses.
+#: **Amended again 2026-10-12 (comment edit/delete)**: +2 write tools
+#: (``edit_comment``/``delete_comment``), completing ``add_comment``/``list_comments``
+#: into a full CRUD set; both are own-comments-only on the API.
 FROZEN_TOOLS = frozenset(
     {
         "list_boards", "create_board", "get_board", "update_board", "delete_board",
@@ -71,7 +74,7 @@ FROZEN_TOOLS = frozenset(
         "list_epics", "get_epic", "create_epic", "update_epic", "delete_epic",
         "add_dependency", "remove_dependency", "list_dependencies",
         "add_link", "remove_link",
-        "add_comment", "list_comments",
+        "add_comment", "list_comments", "edit_comment", "delete_comment",
         "list_labels", "create_label", "delete_label",
         "dispatch", "next", "needs_human", "resolve",
         "metrics", "activity",
@@ -84,7 +87,7 @@ FROZEN_TOOLS = frozenset(
     }
 )
 
-FROZEN_TOOL_COUNT = 58
+FROZEN_TOOL_COUNT = 60
 
 _WHY_FROZEN = """
 The MCP tool surface is FROZEN at {count} tools by ADR 0019 (V49, amended M9 V69,

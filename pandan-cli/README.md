@@ -123,6 +123,8 @@ rather than spot-fixing it.
 | `pandan link rm <card_id> --link-id ID` | `DELETE /cards/{id}/links/{link_id}` |
 | `pandan comment add <card_id> --body B` | `POST /cards/{id}/comments` |
 | `pandan comment list <card_id>` | `GET /cards/{id}/comments` |
+| `pandan comment edit <card_id> <comment_id> --body B` | `PATCH /cards/{id}/comments/{comment_id}` (your own notes only; ids are the first column of `comment list`) |
+| `pandan comment delete <card_id> <comment_id> --yes` | `DELETE /cards/{id}/comments/{comment_id}` (your own notes only; permanent) |
 | `pandan --version` (or `-v`) | *(local — a top-level **flag**, not a subcommand, so it has no place in the ordering above; prints the version **and the build's provenance**, then exits — see [Is my `pandan` stale?](#is-my-pandan-stale))* |
 
 Valid columns are `todo`, `in_progress`, `done`; valid priorities are `none`, `low`,

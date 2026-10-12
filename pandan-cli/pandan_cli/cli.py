@@ -3254,6 +3254,27 @@ def _cmd_comment_add(client: PandanClient, config: Config, args: argparse.Namesp
     )
 
 
+def _cmd_comment_edit(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    return client.edit_comment(
+        _resolve_card_id(client, args.card_id, _active_board(config, args)),
+        args.comment_id,
+        args.body,
+    )
+
+
+def _cmd_comment_delete(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
+    if not args.yes:
+        raise CliError(
+            f"refusing to delete comment {args.comment_id} without confirmation; pass --yes",
+            code="confirmation_required",
+            arg="--yes",
+        )
+    return client.delete_comment(
+        _resolve_card_id(client, args.card_id, _active_board(config, args)),
+        args.comment_id,
+    )
+
+
 def _cmd_comment_list(client: PandanClient, config: Config, args: argparse.Namespace) -> Any:
     return client.list_comments(_resolve_card_id(client, args.card_id, _active_board(config, args)))
 
@@ -4982,7 +5003,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_link_rm.set_defaults(func=_cmd_link_rm)
 
     # --- comment subcommands (KAN-270): card notes ---------------------------
-    p_comment = sub.add_parser("comment", help="manage card notes (add / list)")
+    p_comment = sub.add_parser("comment", help="manage card notes (add / list / edit / delete)")
     comment_sub = p_comment.add_subparsers(
         dest="comment_command", metavar="<subcommand>", required=True
     )
@@ -4996,6 +5017,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_comment_add.add_argument("--body", required=True, help="the note text (non-empty)")
     p_comment_add.set_defaults(func=_cmd_comment_add, hints=_HINTS["comment add"])
+
+    p_comment_edit = comment_sub.add_parser(
+        "edit", parents=[common], help="replace the body of one of your own notes"
+    )
+    p_comment_edit.add_argument(
+        "card_id", type=_id_or_ticket_arg, metavar="CARD",
+        help="a card id or KAN-<n> ticket",
+    )
+    p_comment_edit.add_argument(
+        "comment_id", type=int, metavar="COMMENT_ID",
+        help="the note's id (the first column of `pandan comment list`)",
+    )
+    p_comment_edit.add_argument("--body", required=True, help="the new note text (non-empty)")
+    p_comment_edit.set_defaults(func=_cmd_comment_edit)
+
+    p_comment_delete = comment_sub.add_parser(
+        "delete", parents=[common], help="delete one of your own notes"
+    )
+    p_comment_delete.add_argument(
+        "card_id", type=_id_or_ticket_arg, metavar="CARD",
+        help="a card id or KAN-<n> ticket",
+    )
+    p_comment_delete.add_argument(
+        "comment_id", type=int, metavar="COMMENT_ID",
+        help="the note's id (the first column of `pandan comment list`)",
+    )
+    p_comment_delete.add_argument("--yes", action="store_true", help="confirm the deletion")
+    p_comment_delete.set_defaults(func=_cmd_comment_delete, noun="comment")
 
     p_comment_list = comment_sub.add_parser(
         "list", parents=[common], help="list a card's notes, oldest-first"

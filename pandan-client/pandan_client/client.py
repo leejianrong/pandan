@@ -778,6 +778,20 @@ class PandanClient:
             "POST", f"/cards/{card_id}/comments", json={"body": body}
         ).json()
 
+    def edit_comment(self, card_id: int, comment_id: int, body: str) -> dict[str, Any]:
+        """Replace the body of **your own** note ``comment_id`` on card ``card_id``.
+        Returns the updated comment. 404 if it isn't on that card, 403 if someone
+        else wrote it."""
+        return self._request(
+            "PATCH", f"/cards/{card_id}/comments/{comment_id}", json={"body": body}
+        ).json()
+
+    def delete_comment(self, card_id: int, comment_id: int) -> dict[str, Any]:
+        """Delete **your own** note ``comment_id`` (hard delete). 204 No Content, so
+        returns ``{"deleted": comment_id}`` like ``delete_card``."""
+        self._request("DELETE", f"/cards/{card_id}/comments/{comment_id}")
+        return {"deleted": comment_id}
+
     def list_comments(self, card_id: int) -> dict[str, Any]:
         """List a card's notes, oldest-first (creation order). Returns
         ``{"comments": [<comment>, ...]}``."""
