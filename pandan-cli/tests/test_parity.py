@@ -160,6 +160,8 @@ MCP_TO_CLI: dict[str, tuple[str, ...]] = {
     "add_link": ("link", "add"),
     "remove_link": ("link", "rm"),
     "add_comment": ("comment", "add"),
+    "edit_comment": ("comment", "edit"),
+    "delete_comment": ("comment", "delete"),
     "list_comments": ("comment", "list"),
     # labels
     "list_labels": ("label", "list"),
@@ -281,17 +283,6 @@ CLI_ONLY: dict[tuple[str, ...], str] = {
         "needs (assigning a card, or `create_cycle` itself) is already on MCP "
         "and untouched. Re-opening this is an ADR 0019 amendment, not an edit "
         "here."
-    ),
-    ("comment", "edit"): (
-        "reason 2 (KAN-1738): `PATCH /cards/{id}/comments/{cid}` IS a board API call, "
-        "so this is a declined tool and not a missing one. ADR 0019 freezes the MCP "
-        "surface and `mcp/tests/test_schema.py` pins it by name and count; correcting "
-        "a typo'd note is a human-ergonomics affordance, and an agent that got a note "
-        "wrong can post a follow-up with `add_comment`. Re-opening this is an ADR 0019 "
-        "amendment, not an edit here."
-    ),
-    ("comment", "delete"): (
-        "reason 2 (KAN-1738) — see (\"comment\", \"edit\")"
     ),
     ("workspace", "member", "add"): (
         "reason 2 (M9 V69, KAN-1058): `POST /workspaces/{id}/members` IS a board API "
@@ -581,11 +572,11 @@ def test_the_four_gaps_kan_502_closed_are_reachable():
 
 
 def test_the_mcp_surface_is_still_the_frozen_count():
-    """ADR 0019 froze the surface (58 tools as of the no-default-board `use_board`
-    amendment — up from 57 at M8 V59, KAN-980, 56 at
+    """ADR 0019 froze the surface (60 tools as of the comment edit/delete amendment,
+    up from 58 at the no-default-board `use_board` amendment, 57 at M8 V59, KAN-980, 56 at
     M8 V57, up from 54 at M9 V69, up from the original 49); ``mcp/tests/test_schema.py``
     is the authoritative pin. Restating the count here is what makes the ``cli``
     job notice a *removal* on the MCP side, which is the direction that would
     break parity from the other end — and it keeps this file's own mapping honest
     about its scope."""
-    assert len(mcp_tool_names()) == 58
+    assert len(mcp_tool_names()) == 60

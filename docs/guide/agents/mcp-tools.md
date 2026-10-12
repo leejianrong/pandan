@@ -1,11 +1,11 @@
 <!--
 title: "MCP tool reference"
-description: All 58 Pandan MCP tools, grouped by what they touch, plus the fields and full arguments that control payload size.
+description: All 60 Pandan MCP tools, grouped by what they touch, plus the fields and full arguments that control payload size.
 -->
 
 # MCP tool reference
 
-58 tools, one per API capability, identical whether you reach them through the [hosted server or
+60 tools, one per API capability, identical whether you reach them through the [hosted server or
 stdio](mcp-setup.md). Names below are unprefixed. Your client namespaces them by whatever name you gave
 the server: on Claude Code's stdio `.mcp.json` with the recommended `pandan` key, `list_cards` is
 `mcp__pandan__list_cards`.
@@ -77,6 +77,8 @@ Link a story to an epic with `epic_id` on `create_card` or `update_card`.
 | `add_link` | Attach a labelled URL, for a PR, branch or CI run. |
 | `remove_link` | Detach one. |
 | `add_comment` | Add a note to a card. |
+| `edit_comment` | Replace the body of one of your own notes. |
+| `delete_comment` | Permanently delete one of your own notes. |
 | `list_comments` | Read a card's notes. |
 
 Dependencies are not decoration. `next` and `dispatch` skip a card whose blockers are unfinished, so
@@ -184,7 +186,7 @@ reference does not cost you the other thirty-nine:
 Capped at 100 selectors, and not combinable with `limit`/`cursor` — a truncated page would report
 real cards as unresolved.
 
-## Why 58 tools
+## Why 60 tools
 
 The surface was measured against two alternatives, a consolidated verb set and a single tool that just
 executes the CLI, and kept as it is. The reasoning: resident schema turned out to be the small half of

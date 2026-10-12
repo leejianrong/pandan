@@ -281,6 +281,23 @@ def test_remove_link_deletes_link_path(monkeypatch):
     assert out == {"id": 5, "links": []}
 
 
+def test_edit_comment_patches_body(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(200, json={"id": 3, "body": "new"}))
+    out = server.edit_comment(5, 3, "new")
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/cards/5/comments/3"
+    assert json.loads(seen["content"]) == {"body": "new"}
+    assert out == {"id": 3, "body": "new"}
+
+
+def test_delete_comment_returns_deleted_id(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(204))
+    out = server.delete_comment(5, 3)
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/api/v1/cards/5/comments/3"
+    assert out == {"deleted": 3}
+
+
 def test_add_comment_posts_body(monkeypatch):
     seen = _capture_client(
         monkeypatch, httpx.Response(201, json={"id": 3, "body": "hi", "author_id": None})

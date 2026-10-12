@@ -713,6 +713,24 @@ def add_comment(card_id: int, body: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def edit_comment(card_id: int, comment_id: int, body: str) -> dict[str, Any]:
+    """Replace the body of **your own** note ``comment_id`` on story ``card_id``
+    (ids come from ``list_comments``). Returns the updated comment. 403 if someone
+    else wrote it, 404 if it isn't on that card.
+    """
+    return _client_instance().edit_comment(card_id, comment_id, body)
+
+
+@mcp.tool()
+def delete_comment(card_id: int, comment_id: int) -> dict[str, Any]:
+    """Permanently delete **your own** note ``comment_id`` on story ``card_id``.
+    Returns ``{"deleted": comment_id}``. 403 if someone else wrote it, 404 if it
+    isn't on that card.
+    """
+    return _client_instance().delete_comment(card_id, comment_id)
+
+
+@mcp.tool()
 def list_comments(
     card_id: int,
     fields: list[str] | None = None,
