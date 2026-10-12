@@ -205,6 +205,77 @@ def test_client_instance_falls_back_to_the_stdio_singleton_with_no_override(monk
     assert server._client_instance() is singleton
 
 
+# --- API errors reach the model (PAN-229) -----------------------------------
+# The SDK shows the model only `Error executing tool <name>` for any exception that
+# is not a ToolError, so a 404/403/422 used to be indistinguishable. These go through
+# `mcp.call_tool` (the real SDK path), not the bare tool function, because the
+# masking happens in the SDK and a direct call would pass either way.
+
+
+def _call_tool_error(monkeypatch, status, detail, tool, args):
+    import asyncio
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json={"detail": detail})
+
+    client = server._McpClient("http://test", transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(server, "_client", client)
+    monkeypatch.setattr(server, "_session_board_id", None)
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(server.mcp.call_tool(tool, args))
+    return excinfo.value
+
+
+@pytest.mark.parametrize(
+    "status,detail,tool,args",
+    [
+        (404, "Comment not found", "edit_comment", {"card_id": 5, "comment_id": 9, "body": "x"}),
+        (403, "you can only delete your own comments", "delete_comment",
+         {"card_id": 5, "comment_id": 9}),
+        (422, "body: Value error, body must not be empty", "add_comment",
+         {"card_id": 5, "body": " "}),
+    ],
+)
+def test_api_errors_carry_status_and_detail(monkeypatch, status, detail, tool, args):
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+
+    err = _call_tool_error(monkeypatch, status, detail, tool, args)
+    assert isinstance(err, ToolError) and not isinstance(err, UnexpectedToolError)
+    assert str(err).startswith(f"Error executing tool {tool}: ")
+    assert str(status) in str(err)
+    assert detail in str(err)
+
+
+def test_non_api_crashes_stay_generic(monkeypatch):
+    """Only *API* errors are anticipated; anything else is still withheld."""
+    import asyncio
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise RuntimeError("secret internal detail")
+
+    client = server._McpClient("http://test", transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(server, "_client", client)
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(server.mcp.call_tool("delete_comment", {"card_id": 5, "comment_id": 9}))
+    assert "secret internal detail" not in str(excinfo.value)
+
+
+def test_both_client_paths_use_the_error_surfacing_client(monkeypatch):
+    from pandan_mcp.config import Config
+    from pandan_mcp.request_auth import clear_request_token, set_request_token
+
+    monkeypatch.setattr(server, "_client", None)
+    monkeypatch.setattr(
+        server, "load_config", lambda: Config(api_url="http://x", token="pandan_pat_test")
+    )
+    assert isinstance(server._client_instance(), server._McpClient)  # stdio singleton
+    set_request_token("pandan_pat_hosted")
+    try:
+        assert isinstance(server._client_instance(), server._McpClient)  # hosted
+    finally:
+        clear_request_token()
+
+
 # --- dependency tools (KAN-31) ---------------------------------------------
 
 

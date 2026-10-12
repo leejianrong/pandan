@@ -65,7 +65,8 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from mcp.server import MCPServer
-from pandan_client import PandanClient, split_card_selectors
+from mcp.server.mcpserver.exceptions import ToolError
+from pandan_client import PandanApiError, PandanClient, split_card_selectors
 
 from .config import load_config
 from .request_auth import get_request_token
@@ -91,6 +92,24 @@ _client: PandanClient | None = None
 _session_board_id: int | None = None
 
 
+class _McpClient(PandanClient):
+    """``PandanClient`` whose API failures reach the model as a ``ToolError``.
+
+    The MCP SDK treats any exception other than ``ToolError`` as a crash and shows
+    the model only ``Error executing tool <name>`` (the text stays in the server
+    log). A 404/403/422 from the API is not a crash — it is exactly what the model
+    needs to read to correct itself — so the status and the server's own detail
+    are re-raised as an anticipated ``ToolError``. The detail is the API's public
+    error text (the same line the CLI prints), never a credential.
+    """
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        try:
+            return super()._request(method, path, **kwargs)
+        except PandanApiError as exc:
+            raise ToolError(str(exc)) from exc
+
+
 def _client_instance() -> PandanClient:
     """Build the API client — the stdio singleton, or (hosted transport) a
     fresh per-request client from the caller's own bearer.
@@ -108,12 +127,12 @@ def _client_instance() -> PandanClient:
     token_override = get_request_token()
     if token_override is not None:
         config = load_config()
-        return PandanClient(config.api_url, token_override)
+        return _McpClient(config.api_url, token_override)
 
     global _client
     if _client is None:
         config = load_config()
-        _client = PandanClient(config.api_url, config.token)
+        _client = _McpClient(config.api_url, config.token)
     return _client
 
 
