@@ -18,6 +18,7 @@ import {
   deleteView,
   listBoards,
   listCards,
+  generateCycles,
   listCycles,
   listEpics,
   listLabels,
@@ -35,6 +36,7 @@ import {
   type CardMove,
   type CardQuery,
   type Cycle,
+  type CycleGenerateRequest,
   type CardUpdate,
   type Column,
   type Epic,
@@ -202,6 +204,15 @@ export async function refetchCycles(): Promise<void> {
   ) {
     sprintStore.selection = "active";
   }
+}
+
+// Opt the active board into sprints: a run of back-to-back cycles, then reload so
+// the board scopes to the current one. Server-authoritative like every mutation.
+export async function startSprints(payload: CycleGenerateRequest): Promise<void> {
+  const id = boardStore.activeBoardId;
+  if (id == null) return;
+  await generateCycles(id, payload);
+  await refetchCycles();
 }
 
 // The cards the board actually renders: everything the server returned, narrowed

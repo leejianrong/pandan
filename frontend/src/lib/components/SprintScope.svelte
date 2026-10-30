@@ -3,12 +3,18 @@
   // nothing for a board that has no sprints and nothing hidden, so a board that
   // never opted into sprints looks exactly as it did before.
   import {
+    activeBoard,
     hiddenDoneCount,
     setSprintSelection,
     sprintStore,
   } from "../board.svelte";
   import { activeCycle, type SprintSelection } from "../sprintScope";
   import { Select } from "./ui";
+  import SprintStartModal from "./SprintStartModal.svelte";
+
+  let starting = $state(false);
+  // Creating cycles needs editor+; a viewer would only meet a 403.
+  const canStart = $derived(activeBoard()?.role !== "viewer");
 
   const hasSprints = $derived(sprintStore.cycles.length > 0);
   const hidden = $derived(hiddenDoneCount());
@@ -32,7 +38,7 @@
   }
 </script>
 
-{#if hasSprints || hidden > 0 || sprintStore.showAllDone}
+{#if hasSprints || hidden > 0 || sprintStore.showAllDone || canStart}
   <div class="sprint-scope">
     {#if hasSprints}
       <label class="sprint-select">
@@ -46,6 +52,11 @@
         />
       </label>
     {/if}
+    {#if !hasSprints && canStart}
+      <button type="button" class="chip-btn start-sprints" onclick={() => (starting = true)}>
+        Start sprints
+      </button>
+    {/if}
     {#if hidden > 0 || sprintStore.showAllDone}
       <button
         type="button"
@@ -58,6 +69,10 @@
       </button>
     {/if}
   </div>
+{/if}
+
+{#if starting}
+  <SprintStartModal onclose={() => (starting = false)} />
 {/if}
 
 <style>
