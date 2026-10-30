@@ -2,6 +2,7 @@
 // After every mutation we refetch GET /api/cards; the server state is
 // authoritative — no optimistic UI (BREADBOARD §7).
 
+import { scopeCards, type SprintSelection } from "./sprintScope";
 import {
   addDependency,
   addLink,
@@ -17,6 +18,7 @@ import {
   deleteView,
   listBoards,
   listCards,
+  listCycles,
   listEpics,
   listLabels,
   updateLabel,
@@ -32,6 +34,7 @@ import {
   type CardCreate,
   type CardMove,
   type CardQuery,
+  type Cycle,
   type CardUpdate,
   type Column,
   type Epic,
@@ -109,6 +112,7 @@ export async function setActiveBoard(id: number): Promise<void> {
     refetchLabels(),
     refetchViews(),
     refetchBacklog(),
+    refetchCycles(),
   ]);
 }
 
@@ -147,8 +151,76 @@ export const board = $state<{
   error: null,
 });
 
+// Sprint scoping (PAN-235/236). Sprints are optional per board: no cycles => no
+// scoping, only the 14-day Done hide. The selection is remembered per board.
+export const sprintStore = $state<{
+  cycles: Cycle[];
+  selection: SprintSelection;
+  showAllDone: boolean;
+}>({ cycles: [], selection: "active", showAllDone: false });
+
+const SPRINT_SELECTION_KEY = "pandan.sprintSelection.";
+
+function readSelection(boardId: number): SprintSelection {
+  try {
+    const raw = localStorage.getItem(SPRINT_SELECTION_KEY + boardId);
+    if (raw === "all" || raw === "active") return raw;
+    if (raw != null && Number.isInteger(Number(raw))) return Number(raw);
+  } catch {
+    /* storage unavailable — fall through to the default */
+  }
+  return "active";
+}
+
+export function setSprintSelection(selection: SprintSelection): void {
+  sprintStore.selection = selection;
+  const id = boardStore.activeBoardId;
+  if (id == null) return;
+  try {
+    localStorage.setItem(SPRINT_SELECTION_KEY + id, String(selection));
+  } catch {
+    /* per-viewer convenience only */
+  }
+}
+
+export async function refetchCycles(): Promise<void> {
+  const id = boardStore.activeBoardId;
+  if (id == null) {
+    sprintStore.cycles = [];
+    return;
+  }
+  try {
+    sprintStore.cycles = await listCycles(id);
+  } catch {
+    sprintStore.cycles = []; // unscoped board is the safe fallback
+  }
+  sprintStore.selection = readSelection(id);
+  // A remembered sprint that no longer exists falls back to the active one.
+  if (
+    typeof sprintStore.selection === "number" &&
+    !sprintStore.cycles.some((c) => c.id === sprintStore.selection)
+  ) {
+    sprintStore.selection = "active";
+  }
+}
+
+// The cards the board actually renders: everything the server returned, narrowed
+// by the sprint selection and the Done hide.
+const scoped = $derived(
+  scopeCards(board.cards, {
+    cycles: sprintStore.cycles,
+    selection: sprintStore.selection,
+    showAllDone: sprintStore.showAllDone,
+    now: Date.now(),
+  }),
+);
+
+export function hiddenDoneCount(): number {
+  return scoped.hiddenDone;
+}
+
 export function cardsFor(column: Column): Card[] {
-  const cards = board.cards.filter((c) => c.column === column);
+  const cards = scoped.visible.filter((c) => c.column === column);
   // Done reads newest-completed first (PAN-237); cards without a done_at sink.
   if (column === "done") {
     return cards.sort(
