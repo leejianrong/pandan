@@ -36,14 +36,13 @@ Your client takes it from there:
    for the CLI. It's listed and revocable at the board's Tokens tab like any other token, labelled with
    the connecting app's name.
 
-!!! warning "No default board on the hosted path"
+!!! warning "No default board — and no session board on the hosted path"
 
-    A local `PANDAN_BOARD_ID` is per-process, set once in your own config. The hosted server has no
-    equivalent — it's one process serving every caller, so there's nowhere to persist a default per
-    user. Every board-scoped call needs an explicit `board_id`, or `list_*` tools span every board you
-    can reach while `create_*` tools land on your earliest one — the exact behaviour an *unset*
-    `PANDAN_BOARD_ID` produces locally. Call `list_boards` first and pass its id back on the calls that
-    follow.
+    There is no default board anywhere any more. On the stdio server you can call `use_board` once and
+    the session remembers it. The hosted server cannot: it is one process serving every caller, so
+    there is nowhere safe to keep a per-user pick, and `use_board` refuses there. Pass an explicit
+    `board_id` on every board-scoped call — a call without one fails rather than spanning every board
+    or landing on your earliest. Call `list_boards` first and pass its id back on the calls that follow.
 
 Verify with the same two calls as the stdio path below: `warmup`, then `list_boards`.
 
@@ -68,13 +67,11 @@ Other MCP clients use their own config file, but the server entry is the same sh
             "run", "-i", "--rm",
             "-e", "PANDAN_API_URL",
             "-e", "PANDAN_TOKEN",
-            "-e", "PANDAN_BOARD_ID",
             "ghcr.io/leejianrong/pandan-mcp:latest"
           ],
           "env": {
             "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
-            "PANDAN_TOKEN": "pandan_pat_…",
-            "PANDAN_BOARD_ID": "5"
+            "PANDAN_TOKEN": "pandan_pat_…"
           }
         }
       }
@@ -106,8 +103,7 @@ Other MCP clients use their own config file, but the server entry is the same sh
           "args": ["run", "--directory", "./mcp", "python", "-m", "pandan_mcp"],
           "env": {
             "PANDAN_API_URL": "https://simple-kanban-jian.fly.dev",
-            "PANDAN_TOKEN": "pandan_pat_…",
-            "PANDAN_BOARD_ID": "5"
+            "PANDAN_TOKEN": "pandan_pat_…"
           }
         }
       }
@@ -120,21 +116,18 @@ Other MCP clients use their own config file, but the server entry is the same sh
 The repository ships a [`.mcp.json.example`](https://github.com/leejianrong/pandan/blob/main/.mcp.json.example)
 with both entries. Copy it, keep one, delete the other.
 
-## The three settings
+## The two settings
 
 | Variable | What it does |
 | --- | --- |
 | `PANDAN_API_URL` | The API origin. `https://simple-kanban-jian.fly.dev` for the hosted board, or your own. The `/api/v1` prefix is added for you. |
 | `PANDAN_TOKEN` | Your `pandan_pat_…` token. Required. Empty or wrong gives `401`. |
-| `PANDAN_BOARD_ID` | The default board for any call that omits `board_id`. |
 
-!!! warning "Set `PANDAN_BOARD_ID`"
+!!! note "There is no default board"
 
-    Leave it empty and `list_*` tools span **every** board you can reach, while `create_*` tools land
-    on your **earliest** one. That is how an agent files a card onto the wrong board.
-
-    Run `list_boards` once, find your id, and put it in the config. `.mcp.json.example` presets it to
-    `1`, which is the seeded default board and almost certainly not yours.
+    `PANDAN_BOARD_ID` is retired — a leftover one is ignored with a one-line notice on stderr. A
+    default is how an agent files a card onto the wrong board, so board-scoped tools now need a
+    `board_id`, or one `use_board` call per session. Run `list_boards`, pick an id, call `use_board`.
 
 ## The server key names your tools
 
@@ -186,13 +179,13 @@ In Claude Code, just ask:
 
 1. Add `https://simple-kanban-jian.fly.dev/mcp` as a remote server in your client.
 2. Approve the browser consent prompt.
-3. Run `warmup`, then `list_boards` — pass `board_id` on every call after that.
+3. Run `warmup`, then `list_boards` — pass `board_id` on every call after that (the hosted server has no `use_board`).
 
 **Stdio (self-hosting, or a client with no remote-MCP support):**
 
 1. Copy `.mcp.json.example` to `.mcp.json` and keep one server entry.
-2. Set the origin, paste your token, and set `PANDAN_BOARD_ID` to a board you own.
+2. Set the origin and paste your token.
 3. Restart the client, approve the server.
-4. Run `warmup`, then `list_boards`.
+4. Run `warmup`, then `list_boards`, then `use_board` with the board you want.
 
 Next: the [tool reference](mcp-tools.md), or the [workflows](workflows.md) worth handing an agent.

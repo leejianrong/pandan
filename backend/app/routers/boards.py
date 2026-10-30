@@ -55,6 +55,7 @@ from ..metrics import compute_metrics, move_target
 from ..models import Activity, Board, BoardMember, Card, WorkspaceMember
 from ..ordering import next_position, renumber_column, select_next_ready_card
 from ..pagination import NEXT_CURSOR_HEADER, decode_cursor, encode_cursor
+from ..ref_text import render_refs
 from ..schemas import (
     ActivityRead,
     BoardCreate,
@@ -347,7 +348,7 @@ def list_activity(
         default=None,
         description="filter to rows with this action (created/updated/deleted/moved/restored/…)",
     ),
-) -> list[Activity]:
+) -> list[ActivityRead]:
     """The board's activity feed, **newest-first** (KAN-18, reading KAN-17's write
     path). One row per successful create / update / delete / move of a card, epic or
     board.
@@ -398,7 +399,13 @@ def list_activity(
     if limit is not None and len(rows) == limit:
         last = rows[-1]
         response.headers[NEXT_CURSOR_HEADER] = encode_cursor(last.ts, last.id)
-    return rows
+    # Render canonical tickets as board-local refs per read, on validated copies — the
+    # stored summary keeps the immutable ticket (board.key is editable).
+    summaries = render_refs(db, [(r.board_id, r.summary) for r in rows])
+    return [
+        ActivityRead.model_validate(r).model_copy(update={"summary": s})
+        for r, s in zip(rows, summaries, strict=True)
+    ]
 
 
 # --- dispatch + fleet-safe claim (M5 V12, KAN-245) -------------------------

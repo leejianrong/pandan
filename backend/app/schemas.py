@@ -409,6 +409,11 @@ class CommentCreate(BaseModel):
         return v
 
 
+class CommentUpdate(CommentCreate):
+    """Edit your own note: ``PATCH /cards/{id}/comments/{comment_id}``. Same
+    rules as :class:`CommentCreate` (the replacement body is required, non-empty)."""
+
+
 class CommentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

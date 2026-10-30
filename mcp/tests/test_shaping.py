@@ -68,7 +68,8 @@ def _client(monkeypatch, response, seen=None):
     monkeypatch.setattr(
         server, "_client", PandanClient("http://test", transport=httpx.MockTransport(handler))
     )
-    monkeypatch.setattr(server, "_default_board_id", None)
+    # No default board exists; the list reads below need one, so the session picked it.
+    monkeypatch.setattr(server, "_session_board_id", 1)
 
 
 def _cards_response(*cards, headers=None):

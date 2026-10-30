@@ -10,7 +10,13 @@ the API the single source of truth and stops the CLI from growing its own ideas 
 works.
 
 It uses only `argparse` from the standard library, so the binary starts fast and has nothing to
-configure beyond the three settings from [first steps](../first-steps.md).
+configure beyond the settings from [first steps](../first-steps.md).
+
+!!! note "Examples assume a pinned board"
+
+    There is no default board, so board-scoped examples like `pandan list --column todo` assume you ran
+    `pandan board use <id|KEY>` first (or add `--board <id>`). See
+    [configuration](configure.md#picking-a-board).
 
 ## How the commands are organised
 
@@ -18,12 +24,17 @@ Card verbs are top level, because cards are what you touch most:
 
 ```bash
 pandan list                  # query cards
-pandan get KAN-12
+pandan get ENG-12
 pandan create "A new story"
-pandan update KAN-12 --priority high
-pandan move KAN-12 done
-pandan delete KAN-12
+pandan update ENG-12 --priority high
+pandan move ENG-12 done
+pandan delete ENG-12
 ```
+
+`ENG-12` is the card's **board-local ref**: the board's key plus a number that counts up inside that
+board. It is what every row prints and what you should use when you talk about a card. The canonical
+`KAN-955` ticket still works as input, and is the one to use across boards when a board-local ref is
+ambiguous.
 
 Everything else is a nested group, so its verbs cannot collide with the card verbs:
 
@@ -34,9 +45,9 @@ pandan label list
 pandan view list
 pandan cycle list
 pandan template list
-pandan dep add KAN-12 KAN-9
-pandan link add KAN-12 --label "PR #57" --url https://…
-pandan comment add KAN-12 --body "Looked into this"
+pandan dep add ENG-12 ENG-9
+pandan link add ENG-12 --label "PR #57" --url https://…
+pandan comment add ENG-12 --body "Looked into this"
 pandan notify list
 pandan config show
 pandan context status

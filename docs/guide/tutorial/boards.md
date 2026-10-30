@@ -46,11 +46,11 @@ you come back to the same board next time.
 
     ```bash
     pandan board list          # find the id
-    pandan config set --board-id 5
+    pandan board use 5         # pin it for this session
     ```
 
-    Without that, CLI list commands span every board you can reach and `create` lands on your earliest
-    one. Same for `PANDAN_BOARD_ID` in an agent's config.
+    Without that, a board-scoped CLI command fails and lists your boards — there is no default board.
+    An agent over MCP does the same with `use_board` (or passes `board_id` per call).
 
 ## Sharing a board
 
@@ -81,8 +81,8 @@ secret.
     you are an `editor` on someone else's board, your token can write to it. If you hand an agent a
     token, the agent has your access on every board you can reach, not just the one you had in mind.
 
-    Mint a token per agent so you can revoke one without breaking the others, and set
-    `PANDAN_BOARD_ID` so it stays where you meant it to be.
+    Mint a token per agent so you can revoke one without breaking the others, and have it name its
+    board (`pandan board use` / `use_board`) so it stays where you meant it to be.
 
 ## Renaming and deleting
 

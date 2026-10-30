@@ -30,6 +30,7 @@ import pytest
 from pandan_client import PandanApiError
 
 from pandan_cli import __version__, cli, config, context
+from pandan_cli.pin import clear_pin, write_pin
 
 CARDS = [
     {"id": 1, "ticket_number": "KAN-1", "column": "todo", "title": "A", "story_points": 3,
@@ -56,8 +57,8 @@ def sandbox(monkeypatch, tmp_path):
             monkeypatch.delenv(name, raising=False)
     config._warned.clear()
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_test")
-    monkeypatch.setenv("PANDAN_BOARD_ID", "7")
     monkeypatch.setenv("PANDAN_API_URL", "http://api.test")
+    write_pin("http://api.test", 7)
 
 
 class FakeClient:
@@ -244,17 +245,21 @@ def test_install_exec_override_is_used_verbatim(tmp_path):
     command = json.loads(settings_file(tmp_path).read_text())["hooks"]["SessionStart"][0][
         "hooks"
     ][0]["command"]
-    assert command == "/opt/bin/pandan context show --hook --timeout 5 --limit 20"
+    # The hook names its own board, because there is no default one.
+    assert command == "/opt/bin/pandan context show --hook --timeout 5 --limit 20 --board 7"
 
 
 # --- unconfigured: a no-op with a clear message ---------------------------
 
 
-@pytest.mark.parametrize("unset", ["PANDAN_BOARD_ID", "PANDAN_TOKEN"])
+@pytest.mark.parametrize("unset", ["board", "PANDAN_TOKEN"])
 def test_install_without_a_configured_board_is_a_no_op_with_a_message(
     tmp_path, monkeypatch, capsys, unset
 ):
-    monkeypatch.delenv(unset)
+    if unset == "board":
+        clear_pin()  # there is no default board: no pin and no --board is "unset"
+    else:
+        monkeypatch.delenv(unset)
     assert cli.run(["context", "install"]) == 1
     # Proof it was a no-op: the file was not merely left unchanged, it was never
     # created — config is resolved before the settings path is even opened.
@@ -272,7 +277,7 @@ def test_uninstall_works_without_any_config(tmp_path, monkeypatch, capsys):
     assert cli.run(["context", "install"]) == 0
     capsys.readouterr()
     monkeypatch.delenv("PANDAN_TOKEN")
-    monkeypatch.delenv("PANDAN_BOARD_ID")
+    clear_pin()
     assert cli.run(["context", "uninstall"]) == 0
     assert "SessionStart" not in settings_file(tmp_path).read_text()
 
@@ -381,12 +386,41 @@ def test_show_respects_the_card_limit(monkeypatch, capsys):
     assert "KAN-1\ttodo" not in out
 
 
-def test_show_defaults_to_the_configured_board_and_can_be_overridden(monkeypatch):
+def test_show_defaults_to_the_pinned_board_and_can_be_overridden(monkeypatch):
     made = _install_fake(monkeypatch)
     assert cli.run(["context", "show"]) == 0
     assert made[0].calls[0]["board_id"] == 7
     assert cli.run(["context", "show", "--board", "9"]) == 0
     assert made[1].calls[0]["board_id"] == 9
+
+
+def test_install_bakes_the_board_into_the_hook_command(tmp_path):
+    """There is no default board and a session-start hook has no pin of its own, so the
+    command must name its board: the explicit ``--board`` wins, else the pinned one."""
+    def command() -> str:
+        return json.loads(settings_file(tmp_path).read_text())["hooks"]["SessionStart"][0][
+            "hooks"
+        ][0]["command"]
+
+    assert cli.run(["context", "install"]) == 0  # the sandbox pinned board 7
+    assert command().endswith("--board 7")
+    assert cli.run(["context", "install", "--board", "9"]) == 0
+    assert command().endswith("--board 9")
+    assert "--board 7" not in command()
+
+
+def test_install_with_neither_a_pin_nor_a_board_is_refused(tmp_path, capsys):
+    clear_pin()
+    assert cli.run(["context", "install"]) == 1
+    assert not settings_file(tmp_path).exists()
+    assert cli.run(["context", "install", "--board", "9"]) == 0  # explicit is enough
+
+
+def test_the_installed_hook_command_shows_the_board_it_names(monkeypatch):
+    made = _install_fake(monkeypatch)
+    clear_pin()  # the hook must not depend on a pin existing when it fires
+    assert cli.run(["context", "show", "--hook", "--board", "9"]) == 0
+    assert made[0].calls[0]["board_id"] == 9
 
 
 # --- the cold-start guard: bounded, no retry, soft-fail ------------------
@@ -435,7 +469,7 @@ def test_show_hook_soft_fails_silently_on_any_error(monkeypatch, capsys, error):
 
 
 def test_show_hook_soft_fails_even_when_nothing_is_configured(monkeypatch, capsys):
-    monkeypatch.delenv("PANDAN_BOARD_ID")
+    clear_pin()
     assert cli.run(["context", "show", "--hook"]) == 0
     assert capsys.readouterr().out == ""
 
@@ -509,7 +543,7 @@ def test_status_reports_before_and_after_install(tmp_path, capsys):
     assert cli.run(["context", "status"]) == 0
     out = capsys.readouterr().out
     assert "hook\tinstalled" in out
-    assert "board_id\t7" in out
+    assert "pinned_board\t7" in out
     # Never print the token itself.
     assert "token\tset" in out
     assert "pandan_pat_test" not in out

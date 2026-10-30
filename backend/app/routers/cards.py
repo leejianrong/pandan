@@ -24,7 +24,7 @@ from collections.abc import Sequence
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import and_, func, or_, select, tuple_
+from sqlalchemy import and_, case, func, or_, select, tuple_
 from sqlalchemy.orm import Session, aliased
 
 from ..activity import record_activity
@@ -59,6 +59,7 @@ from ..schemas import (
     ColumnEnum,
     CommentCreate,
     CommentRead,
+    CommentUpdate,
     DependencyCreate,
     LinkCreate,
     NeedsHumanRequest,
@@ -112,6 +113,43 @@ def _split_selectors(raw: str, *, param: str) -> list[str]:
             detail=f"{param} was given but contained no selectors",
         )
     return out
+
+
+def _ref_search_predicate(q_text: str, board_id: int | None):
+    """If the whole of ``q`` is a card reference, a predicate matching exactly that
+    card; else ``None`` (plain full-text search).
+
+    Accepts all three grammar forms (``KAN-12``, ``ENG-14``, ``alice/ENG-14``). A
+    canonical ref is global. A board-local ref is matched by board key + ``board_seq``
+    — inside ``board_id`` when given, else across the boards the caller can see, which
+    is already enforced by the caller's visibility filter, so nothing outside it can
+    leak. An owner qualifier narrows to boards whose owner's email equals it or has it
+    as local part. A bare number is deliberately *not* a ref (it is a plain term; use
+    ``ids=`` for a numeric id), and partial refs (``KAN-1``) match only exactly.
+    """
+    parsed = parse_ref(q_text)
+    if parsed is None or parsed.entity != "card":
+        return None
+    if parsed.canonical:
+        return Card.ticket_number == f"KAN-{parsed.number}"
+    board_filter = select(Board.id).where(Board.key == parsed.board_key)
+    if board_id is not None:
+        board_filter = board_filter.where(Board.id == board_id)
+    if parsed.owner is not None:
+        owner = parsed.owner.lower()
+        board_filter = board_filter.where(
+            Board.owner_id.in_(
+                select(User.id).where(
+                    or_(
+                        func.lower(User.email) == owner,
+                        func.lower(User.email).like(owner + "@%"),
+                    )
+                )
+            )
+        )
+    return and_(
+        Card.board_seq == parsed.number, Card.board_id.in_(board_filter)
+    )
 
 
 def _parse_card_selectors(
@@ -567,6 +605,10 @@ def list_cards(
     (an unknown one is a ``422``). These same keys are the structured JSON grammar a
     **saved view** stores (``/boards/{id}/views``), so a view's query replays here.
 
+    Search by ticket: a ``q`` that is exactly a card reference (``KAN-12``, ``ENG-14``,
+    ``alice/ENG-14``) also matches that card, ranked above any full-text hit — see
+    ``_ref_search_predicate``.
+
     Full-text search (M5 V15, KAN-248): ``q`` (a free-text query) narrows the result
     to cards whose ``title``/``description`` match ``websearch_to_tsquery('english',
     q)`` (so ``foo bar`` = both terms, ``"foo bar"`` = the phrase, ``foo -bar`` =
@@ -721,7 +763,14 @@ def list_cards(
         # grammar (bare terms AND-ed, quotes = phrase, ``-`` = exclude). AND-s with
         # every filter above via the ``@@`` predicate, so keyset/limit stay exact.
         tsquery = func.websearch_to_tsquery("english", q_text)
-        query = query.where(Card.search_vector.op("@@")(tsquery))
+        fts_match = Card.search_vector.op("@@")(tsquery)
+        ref_match = _ref_search_predicate(q_text, board_id)
+        if ref_match is None:
+            query = query.where(fts_match)
+        else:
+            # A query that *is* a ticket reference matches that card exactly, OR'd
+            # with the ordinary full-text hits (a card may mention "KAN-12").
+            query = query.where(or_(fts_match, ref_match))
 
     # Ordering precedence: an explicit ``sort`` (M5 V14) always wins; else a non-empty
     # ``q`` ranks by relevance (M5 V15); else the default keyset order.
@@ -737,9 +786,11 @@ def list_cards(
         # Best match first (ts_rank honours the A/B field weighting baked into the
         # vector, so a title hit outranks a description-only hit); ``id`` is the
         # stable tiebreaker for equal ranks.
-        query = query.order_by(
-            func.ts_rank(Card.search_vector, tsquery).desc(), Card.id
-        )
+        rank_keys = [func.ts_rank(Card.search_vector, tsquery).desc(), Card.id]
+        if ref_match is not None:
+            # The exact reference hit sorts above any full-text relevance.
+            rank_keys.insert(0, case((ref_match, 0), else_=1))
+        query = query.order_by(*rank_keys)
     else:
         query = query.order_by(Card.updated_at, Card.id)
 
@@ -1533,6 +1584,49 @@ def add_comment(
     return comment
 
 
+def _get_own_comment(
+    db: Session, card: Card, comment_id: int, principal: User, verb: str
+) -> CardComment:
+    """Resolve ``comment_id`` on ``card`` for an edit/delete: **404** if it isn't
+    on the card, **403** if someone else wrote it (own-only, KAN-33)."""
+    comment = db.scalars(
+        select(CardComment).where(
+            CardComment.id == comment_id,
+            CardComment.card_id == card.id,
+        )
+    ).first()
+    if comment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
+        )
+    if comment.author_id != principal.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"you can only {verb} your own comments",
+        )
+    return comment
+
+
+@router.patch("/{card_id}/comments/{comment_id}", response_model=CommentRead)
+def edit_comment(
+    card_id: int,
+    comment_id: int,
+    payload: CommentUpdate,
+    db: Session = Depends(get_db),
+    principal: User = Depends(get_principal),
+) -> CardComment:
+    """Edit **your own** note's body. **404** if no such comment belongs to the
+    card; **403** if someone else authored it (edit-own-only, like delete).
+    Owner-gated on the card's board. Returns the updated comment."""
+    card = _get_or_404(db, card_id)
+    authorize_board(db, principal, card.board_id, Access.WRITE)
+    comment = _get_own_comment(db, card, comment_id, principal, "edit")
+    comment.body = payload.body
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
 @router.delete(
     "/{card_id}/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT
 )
@@ -1547,21 +1641,7 @@ def remove_comment(
     Owner-gated on the card's board."""
     card = _get_or_404(db, card_id)
     authorize_board(db, principal, card.board_id, Access.WRITE)
-    comment = db.scalars(
-        select(CardComment).where(
-            CardComment.id == comment_id,
-            CardComment.card_id == card.id,
-        )
-    ).first()
-    if comment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
-        )
-    if comment.author_id != principal.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="you can only delete your own comments",
-        )
+    comment = _get_own_comment(db, card, comment_id, principal, "delete")
     db.delete(comment)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

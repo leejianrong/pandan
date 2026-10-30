@@ -134,6 +134,8 @@ safe — a card's `ticket_number` never moves.
 | `DELETE` | `/api/v1/cards/{card_id}/links/{link_id}` | |
 | `GET` | `/api/v1/cards/{card_id}/comments` | |
 | `POST` | `/api/v1/cards/{card_id}/comments` | |
+| `PATCH` | `/api/v1/cards/{card_id}/comments/{comment_id}` | Your own comments only (`403` otherwise). |
+| `DELETE` | `/api/v1/cards/{card_id}/comments/{comment_id}` | Your own comments only; permanent. |
 
 #### Reading many cards by id or ticket
 

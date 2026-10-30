@@ -17,7 +17,7 @@ add_comment(card_id, body="Starting on this, will open a PR shortly.")
 
 ```bash
 pandan next --claim --assignee claude
-pandan comment add KAN-601 --body "Starting on this, will open a PR shortly."
+pandan comment add ENG-14 --body "Starting on this, will open a PR shortly."
 ```
 
 `dispatch` finds the highest-priority ready card, skips anything blocked, and claims it atomically.
@@ -38,8 +38,8 @@ add_comment(card_id, body="Root cause: list prints next_cursor but has no --curs
 ```
 
 ```bash
-pandan link add KAN-601 --label "PR #267" --url https://github.com/…/267
-pandan comment add KAN-601 --body "Root cause: …"
+pandan link add ENG-14 --label "PR #267" --url https://github.com/…/267
+pandan comment add ENG-14 --body "Root cause: …"
 ```
 
 Attach the PR as soon as it exists, not at the end. If the agent's session dies mid-task, the link is
@@ -51,12 +51,12 @@ When an agent discovers that a card cannot proceed until another one lands:
 
 ```
 add_dependency(card_id, blocker_id)
-add_comment(card_id, body="Blocked: needs the cursor flag from KAN-591 first.")
+add_comment(card_id, body="Blocked: needs the cursor flag from ENG-9 first.")
 ```
 
 ```bash
-pandan dep add KAN-601 --blocked-by KAN-591
-pandan comment add KAN-601 --body "Blocked: needs the cursor flag from KAN-591 first."
+pandan dep add ENG-14 --blocked-by ENG-9
+pandan comment add ENG-14 --body "Blocked: needs the cursor flag from ENG-9 first."
 ```
 
 This changes behaviour rather than just recording a fact. A blocked card is skipped by `dispatch`, so
@@ -78,7 +78,7 @@ contract says list is a one-shot query. Needs a call on which one wins.")
 ```
 
 ```bash
-pandan needs-human KAN-601 --note "Two valid designs. …"
+pandan needs-human ENG-14 --note "Two valid designs. …"
 ```
 
 The card gets flagged, the note is stored, and it shows up in `list_cards(needs_human=true)` and in the
@@ -101,7 +101,7 @@ move_card(card_id, column="done")
 ```
 
 ```bash
-pandan move KAN-601 done
+pandan move ENG-14 done
 ```
 
 If the card had a blocker recorded that turned out not to apply, clear it first. A `done` card with a
@@ -151,13 +151,13 @@ pandan context install
 ```bash
 pandan warmup
 pandan next --claim --assignee claude                        # take it
-pandan comment add KAN-601 --body "Starting on this"
+pandan comment add ENG-14 --body "Starting on this"
 # … do the work …
-pandan link add KAN-601 --label "PR #267" --url https://…    # record it
-pandan needs-human KAN-601 --note "Needs a call on X"        # if stuck
+pandan link add ENG-14 --label "PR #267" --url https://…    # record it
+pandan needs-human ENG-14 --note "Needs a call on X"        # if stuck
 # … human answers …
-pandan resolve KAN-601
-pandan move KAN-601 done                                     # finish
+pandan resolve ENG-14
+pandan move ENG-14 done                                     # finish
 ```
 
 ## What not to do

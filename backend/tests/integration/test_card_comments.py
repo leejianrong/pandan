@@ -97,6 +97,113 @@ def test_delete_comment_belonging_to_other_card_404(client):
     assert len(client.get(f"{CARDS}/{a['id']}/comments").json()) == 1
 
 
+# --- edit own ----------------------------------------------------------------
+
+
+def test_edit_own_comment(client):
+    card = _card(client, "editable")
+    created = _add_comment(client, card["id"], "first draft").json()
+
+    r = client.patch(
+        f"{CARDS}/{card['id']}/comments/{created['id']}", json={"body": "revised"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["body"] == "revised"
+    # Identity and ordering are untouched by an edit.
+    assert body["id"] == created["id"]
+    assert body["author_id"] == created["author_id"]
+    assert body["created_at"] == created["created_at"]
+    listed = client.get(f"{CARDS}/{card['id']}/comments").json()
+    assert [c["body"] for c in listed] == ["revised"]
+
+
+def test_edit_comment_empty_body_422(client):
+    card = _card(client, "edit-bad")
+    cid = _add_comment(client, card["id"], "keep me").json()["id"]
+    url = f"{CARDS}/{card['id']}/comments/{cid}"
+    assert client.patch(url, json={"body": "   "}).status_code == 422
+    assert client.patch(url, json={}).status_code == 422
+    assert client.get(f"{CARDS}/{card['id']}/comments").json()[0]["body"] == "keep me"
+
+
+def test_edit_missing_comment_404(client):
+    card = _card(client, "no-comment")
+    r = client.patch(f"{CARDS}/{card['id']}/comments/999999", json={"body": "x"})
+    assert r.status_code == 404
+
+
+def test_edit_comment_on_missing_card_404(client):
+    r = client.patch(f"{CARDS}/999999/comments/1", json={"body": "x"})
+    assert r.status_code == 404
+
+
+def test_edit_comment_belonging_to_other_card_404(client):
+    a = _card(client, "A")
+    b = _card(client, "B")
+    cid = _add_comment(client, a["id"], "orig").json()["id"]
+    r = client.patch(f"{CARDS}/{b['id']}/comments/{cid}", json={"body": "hijack"})
+    assert r.status_code == 404
+    assert client.get(f"{CARDS}/{a['id']}/comments").json()[0]["body"] == "orig"
+
+
+def test_edit_another_authors_comment_403(client):
+    """Edit-own-only, mirroring delete: seed a foreign-authored comment directly
+    (boards are single-owner, so no second principal can post via the API)."""
+    from sqlalchemy import text
+
+    from app.db import engine
+
+    card = client.post(CARDS, json={"title": "shared-card"}).json()
+    with engine.begin() as conn:
+        other_id = conn.execute(
+            text(
+                'INSERT INTO "user" '
+                "(id, email, hashed_password, is_active, is_superuser, is_verified) "
+                "VALUES (gen_random_uuid(), 'editor-else@example.com', 'x', "
+                "true, false, false) RETURNING id"
+            )
+        ).scalar_one()
+        foreign_id = conn.execute(
+            text(
+                "INSERT INTO card_comment (card_id, author_id, body) "
+                "VALUES (:cid, :aid, 'not yours') RETURNING id"
+            ),
+            {"cid": card["id"], "aid": other_id},
+        ).scalar_one()
+
+    r = client.patch(
+        f"{CARDS}/{card['id']}/comments/{foreign_id}", json={"body": "mine now"}
+    )
+    assert r.status_code == 403, r.text
+    listed = client.get(f"{CARDS}/{card['id']}/comments").json()
+    assert [c["body"] for c in listed] == ["not yours"]
+
+
+def test_non_owner_cannot_edit_comment_403(login_as):
+    alice = login_as(*ALICE)
+    a_board = alice.get(BOARDS).json()[0]["id"]
+    card = alice.post(CARDS, json={"title": "owned", "board_id": a_board}).json()
+    cid = _add_comment(alice, card["id"], "orig").json()["id"]
+
+    bob = login_as(*BOB)
+    r = bob.patch(f"{CARDS}/{card['id']}/comments/{cid}", json={"body": "x"})
+    assert r.status_code == 403
+    assert alice.get(f"{CARDS}/{card['id']}/comments").json()[0]["body"] == "orig"
+
+
+def test_unauthenticated_cannot_edit_comment_401(client):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    card = _card(client, "owned")
+    cid = _add_comment(client, card["id"]).json()["id"]
+    with TestClient(app) as anon:
+        r = anon.patch(f"{CARDS}/{card['id']}/comments/{cid}", json={"body": "x"})
+        assert r.status_code == 401
+
+
 # --- guards ------------------------------------------------------------------
 
 

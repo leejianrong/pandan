@@ -1,6 +1,6 @@
 """Config resolution for the MCP server (V40, KAN-423, ADR 0018).
 
-The rebrand introduced ``PANDAN_API_URL`` / ``PANDAN_TOKEN`` / ``PANDAN_BOARD_ID``
+The rebrand introduced ``PANDAN_API_URL`` / ``PANDAN_TOKEN``
 and kept the pre-rebrand ``KANBAN_*`` names as a **deprecated fallback**, read
 second, so a live ``.mcp.json`` can't be bricked mid-cutover. These tests pin that
 precedence, the one-line stderr notice, and that the notice never reaches stdout —
@@ -39,7 +39,6 @@ def test_defaults_when_nothing_is_set():
     cfg = load_config()
     assert cfg.api_url == DEFAULT_API_URL
     assert cfg.token is None
-    assert cfg.board_id is None
 
 
 def test_pandan_env_wins_over_kanban_env(monkeypatch, capsys):
@@ -47,31 +46,26 @@ def test_pandan_env_wins_over_kanban_env(monkeypatch, capsys):
     monkeypatch.setenv("KANBAN_API_URL", "https://old.example")
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_new")
     monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_old")
-    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
-    monkeypatch.setenv("KANBAN_BOARD_ID", "9")
 
     cfg = load_config()
 
     assert cfg.api_url == "https://new.example"
     assert cfg.token == "pandan_pat_new"
-    assert cfg.board_id == 5
     assert capsys.readouterr().err == ""  # nothing deprecated was used
 
 
 def test_kanban_env_alone_still_resolves_and_warns_on_stderr(monkeypatch, capsys):
     monkeypatch.setenv("KANBAN_API_URL", "https://old.example")
     monkeypatch.setenv("KANBAN_TOKEN", "kanban_pat_old")
-    monkeypatch.setenv("KANBAN_BOARD_ID", "9")
 
     cfg = load_config()
 
     assert cfg.api_url == "https://old.example"
     assert cfg.token == "kanban_pat_old"
-    assert cfg.board_id == 9
     captured = capsys.readouterr()
     # stdout is the JSON-RPC channel — it MUST stay empty.
     assert captured.out == ""
-    for name in ("KANBAN_API_URL", "KANBAN_TOKEN", "KANBAN_BOARD_ID"):
+    for name in ("KANBAN_API_URL", "KANBAN_TOKEN"):
         assert name in captured.err
         assert name.replace("KANBAN_", "PANDAN_") in captured.err
     assert "deprecated" in captured.err
@@ -87,10 +81,10 @@ def test_notice_is_emitted_once_per_process(monkeypatch, capsys):
 
 def test_mixed_env_resolves_per_value(monkeypatch):
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_new")
-    monkeypatch.setenv("KANBAN_BOARD_ID", "9")
+    monkeypatch.setenv("KANBAN_API_URL", "https://old.example")
     cfg = load_config()
     assert cfg.token == "pandan_pat_new"
-    assert cfg.board_id == 9
+    assert cfg.api_url == "https://old.example"
 
 
 def test_empty_string_is_treated_as_unset(monkeypatch):
@@ -100,11 +94,17 @@ def test_empty_string_is_treated_as_unset(monkeypatch):
     assert load_config().token == "kanban_pat_old"
 
 
-def test_non_integer_board_id_names_the_current_env_var(monkeypatch):
-    monkeypatch.setenv("KANBAN_BOARD_ID", "not-a-number")
-    with pytest.raises(ValueError) as excinfo:
-        load_config()
-    assert "PANDAN_BOARD_ID" in str(excinfo.value)
+def test_a_leftover_default_board_is_ignored_with_a_stderr_notice(monkeypatch, capsys):
+    """An existing .mcp.json that still sets PANDAN_BOARD_ID must keep launching —
+    and must not silently pick a board, which is the stale default being removed."""
+    monkeypatch.setenv("PANDAN_BOARD_ID", "5")
+    monkeypatch.setenv("KANBAN_BOARD_ID", "not-a-number")  # no longer even parsed
+    cfg = load_config()
+    assert not hasattr(cfg, "board_id")
+    captured = capsys.readouterr()
+    assert captured.out == ""  # stdout is the JSON-RPC channel
+    assert "PANDAN_BOARD_ID" in captured.err and "ignored" in captured.err
+    assert "use_board" in captured.err
 
 
 # --- the config-file fallback (ADR 0024, KAN-1731) ---------------------------
@@ -121,12 +121,11 @@ def test_falls_back_to_the_cli_config_file_when_no_env_is_set(tmp_path):
     autouse ``clean_env`` fixture."""
     _write_config_file(
         tmp_path,
-        '[pandan]\napi_url = "https://file.example"\ntoken = "pandan_pat_fromfile"\nboard_id = 7\n',
+        '[pandan]\napi_url = "https://file.example"\ntoken = "pandan_pat_fromfile"\n',
     )
     cfg = load_config()
     assert cfg.api_url == "https://file.example"
     assert cfg.token == "pandan_pat_fromfile"
-    assert cfg.board_id == 7
 
 
 def test_env_wins_over_the_config_file_per_value(tmp_path, monkeypatch):
@@ -135,14 +134,13 @@ def test_env_wins_over_the_config_file_per_value(tmp_path, monkeypatch):
     values disappear."""
     _write_config_file(
         tmp_path,
-        '[pandan]\napi_url = "https://file.example"\ntoken = "pandan_pat_fromfile"\nboard_id = 7\n',
+        '[pandan]\napi_url = "https://file.example"\ntoken = "pandan_pat_fromfile"\n',
     )
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_fromenv")
 
     cfg = load_config()
     assert cfg.token == "pandan_pat_fromenv"  # env wins
     assert cfg.api_url == "https://file.example"  # file still supplies the rest
-    assert cfg.board_id == 7
 
 
 def test_a_deprecated_env_spelling_still_beats_the_config_file(tmp_path, monkeypatch):

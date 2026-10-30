@@ -5,7 +5,7 @@ description: >-
   the primary interface — with the `mcp__pandan__*` MCP tools as the fallback. Use whenever the task
   is to look at, create, update, move, or organise cards/epics/boards on Pandan (the board at
   simple-kanban-jian.fly.dev or a self-hosted instance): "add a card", "what's on the board", "move
-  KAN-12 to done", "list my epics", "track this work on kanban". For orchestrating a whole backlog as
+  ENG-12 to done", "list my epics", "find card ENG-14", "which board am I on", "write up these stories", "break this into an epic", "track this work on kanban". For orchestrating a whole backlog as
   a scrum-master, see the pandan-pm skill; this skill is the tool reference it builds on.
 ---
 
@@ -18,45 +18,50 @@ fallback**, for when the CLI isn't installed or errors. Cards, boards, epics, la
 card templates, dependencies, work-links, comments, dispatch/claim, needs-human handoff, metrics and
 the activity feed are all reachable from either.
 
-> **Parity now holds in both directions as of `pandan 0.19.0` — and it is a test, not a claim.**
-> This section used to assert "full parity as of v0.3.0" while the *same file* documented a `curl`
-> workaround for a missing CLI verb forty lines below. KAN-432 / ADR 0019 verified the relationship was
-> **MCP ⊇ CLI** and named four gaps; **KAN-502 closed all four** — `pandan board get/update/delete`,
-> `pandan claim <id> --assignee X` (an atomic claim of a *chosen* card), and `pandan batch-create`
-> (N creates in one invocation), plus `pandan epic get`.
->
-> What makes this different from the claim it replaces: `pandan-cli/tests/test_parity.py` enumerates the
-> MCP tool surface out of `mcp/pandan_mcp/server.py` and the CLI verb surface out of the real argparse
-> parser, and asserts the mapping **mechanically** in both directions — including
-> `MCP_ONLY == {}`. If a future tool or verb breaks parity, that test fails; nobody has to
-> notice a stale paragraph. The only CLI verbs with no MCP twin are the local ones
-> (`login`, `config`, `context`, the bare `overview`), which touch your installation, not the board.
->
-> Still don't repeat "full parity" as bare prose: the old shorthand was inherited into a roadmap card
-> and nearly justified deleting the MCP surface. Cite the test.
+> CLI/MCP parity is asserted mechanically in both directions by `pandan-cli/tests/test_parity.py`
+> (ADR 0019); the only CLI verbs with no MCP twin are local ones (`login`, `config`, `context`, bare
+> `overview`, `board use/current`). Cite the test, not "full parity".
 
 Prefer `pandan`. Drop to MCP only when you have to, and say why when you do.
 
 ## Setup
 
-`pandan` needs three config values, and resolves each one independently from the first source that
-supplies it, in this precedence order:
+`pandan` needs two config values (the server and your token), and resolves each one independently from the
+first source that supplies it, in this precedence order:
 
-1. **Environment** — `PANDAN_API_URL` / `PANDAN_TOKEN` / `PANDAN_BOARD_ID`.
+1. **Environment** — `PANDAN_API_URL` / `PANDAN_TOKEN`.
 2. **User config file** — `~/.config/pandan/config.toml` (`$XDG_CONFIG_HOME`-aware), written once by
    `pandan login` / `pandan config set` at mode `0600`. **This is how you authenticate one time and never
    pass the token again** (see below). A pre-rebrand `~/.config/kan/config.toml` is migrated across on
    first use and left in place (V40, KAN-423; `pandan_cli/config.py:100-107`).
 3. **`.mcp.json`** — the nearest one walking up from the CWD, read from `.mcpServers.pandan.env.*`.
 
-The three values:
+The two values:
 
 - `PANDAN_API_URL` — the board origin, e.g. `https://simple-kanban-jian.fly.dev` (or a self-host URL).
 - `PANDAN_TOKEN` — a PAT (`pandan_pat_…`). Minted at the board's **Tokens** tab after logging in.
   It acts as you and reaches boards you own **or are a member of**. `warmup` is the one command that
   needs no token.
-- `PANDAN_BOARD_ID` — the default board id. Set it. Without it, `list`/`create` span all your boards
-  or land on your earliest one, which is an easy way to touch the wrong board.
+
+### Pick a board — there is no default board
+
+A board-scoped verb (`list`, `create`, `next`, `metrics`, `epic list`, `label list`, …) with **no `--board`
+and no pin fails** with `error	board_required	…` listing your boards (`id KEY 'name'`). That is on
+purpose: a default is how an agent files a card on the wrong board. Say which board you mean, once:
+
+```bash
+pandan board list                  # id, key, name of every board you can reach
+pandan board use ENG               # pin it: an id or a board KEY (case-insensitive)
+pandan list                        # …now every board-scoped verb uses it
+pandan list --board 7              # --board always overrides the pin
+pandan board current               # which board is pinned here?   pandan board use --clear
+```
+
+The pin lives in a small state file (`$XDG_STATE_HOME/pandan/pins/`), **per working directory** (a `cd` into
+a subdirectory keeps it), for the server it was made against, and **lapses after 12 hours idle** — so a
+fresh session re-picks rather than inheriting a stale board. `PANDAN_BOARD_ID`, the config-file `board_id`
+and `require_board` are retired: a leftover one is ignored with a one-line stderr notice. Card verbs that
+take a ticket (`get`, `move`, `update`, …) need no board; `pandan list --refs KAN-12` is a global batch read.
 
 Because of the precedence chain, **in a Claude Code project you usually don't have to set anything**:
 `pandan` finds the PAT in the repo's `.mcp.json` on its own (source 3). For a standalone machine or CI,
@@ -69,16 +74,15 @@ it, or paste the literal `pandan_pat_…` value into any command you write — a
 the model context (and the transcript). The value must only ever move *machine-to-machine*.
 
 In a Claude Code project the token already lives in **`.mcp.json`** at the repo root, under
-`.mcpServers.pandan.env.PANDAN_TOKEN` (alongside `PANDAN_API_URL` and `PANDAN_BOARD_ID`). Load it into
+`.mcpServers.pandan.env.PANDAN_TOKEN` (alongside `PANDAN_API_URL`). Load it into
 the shell **by reference** with command substitution, so the value is resolved by the shell at runtime
 and never appears in what you write or in the output. The Bash tool starts a fresh shell each call and
 does **not** persist env vars, so prefix every `pandan` call with the load:
 
 ```bash
-# All three, straight from .mcp.json — the literal token never surfaces:
+# Both, straight from .mcp.json — the literal token never surfaces:
 export PANDAN_TOKEN=$(jq -r '.mcpServers.pandan.env.PANDAN_TOKEN' .mcp.json)
 export PANDAN_API_URL=$(jq -r '.mcpServers.pandan.env.PANDAN_API_URL' .mcp.json)
-export PANDAN_BOARD_ID=$(jq -r '.mcpServers.pandan.env.PANDAN_BOARD_ID' .mcp.json)
 pandan board list
 ```
 
@@ -89,7 +93,7 @@ walking up from the CWD if it isn't in the working directory):
 eval "$(jq -r '.mcpServers.pandan.env | to_entries[] | "export \(.key)=\(.value|@sh)"' .mcp.json)" && pandan board list
 ```
 
-If there is no `.mcp.json` (non–Claude Code shell, CI, self-host), expect the three vars to already be
+If there is no `.mcp.json` (non–Claude Code shell, CI, self-host), expect the two vars to already be
 in the environment — still don't echo `PANDAN_TOKEN`. If the token genuinely isn't reachable any way,
 stop and ask the user rather than requesting they paste it into the chat. (The **MCP fallback** never
 has this problem: the MCP server process inherits the token from `.mcp.json` directly, so
@@ -101,19 +105,12 @@ Install the CLI (either works; the binary needs no Python):
 # Prebuilt binary from the latest release (Linux glibc >= 2.28 / macOS arm64):
 curl -L -o pandan https://github.com/leejianrong/pandan/releases/latest/download/pandan-linux-x86_64
 chmod +x pandan && mv pandan ~/.local/bin/        # ~/.local/bin is on PATH, no sudo
-ln -sf ~/.local/bin/pandan ~/.local/bin/pdn       # optional short name — see note below
 
 # or, if you have Python + uv:
 uv tool install "git+https://github.com/leejianrong/pandan.git#subdirectory=pandan-cli"
 ```
 
-> **`pandan` is the only command; any short name is a symlink you make.** A `pdn`
-> `[project.scripts]` alias was declared in V40 and **withdrawn in KAN-442** (see ADR 0018's
-> amendment): console scripts are generated by the *packaging* installer, so it existed for
-> `uv tool install` but never for the `--onefile` release, which ships one executable. A symlink
-> works on both paths, and the same trick keeps the retired name alive if you have the muscle
-> memory: `ln -sf ~/.local/bin/pandan ~/.local/bin/kan` — which also guarantees the old name
-> isn't a stale pre-rebrand build sitting on your `PATH`.
+`pandan` is the only command name; make a symlink if you want a short one.
 
 Confirm it works: `pandan --version`, `pandan warmup` (should print `ok`), then `pandan me` — one row
 of `<user_id>	<email>` when the token is good, and exit **3** when it isn't (no board is involved, so
@@ -139,8 +136,7 @@ or your context. Pipe it in from wherever it already lives, by reference:
 # From a Claude Code .mcp.json (token resolved by jq at runtime, never printed):
 jq -r '.mcpServers.pandan.env.PANDAN_TOKEN' .mcp.json \
   | pandan login --token-stdin \
-      --api-url https://simple-kanban-jian.fly.dev \
-      --board-id <your-board-id>     # persists all three to ~/.config/pandan/config.toml (0600)
+      --api-url https://simple-kanban-jian.fly.dev   # persists both to ~/.config/pandan/config.toml (0600)
 ```
 
 If you're setting up by hand and the PAT is in some other secret store, pipe *that* into
@@ -163,13 +159,97 @@ rides out the wake, and exits `0` once the API is up. In a script:
 until pandan warmup; do sleep 2; done
 ```
 
+## Refer to cards by their board-local ref
+
+Every card and epic carries a **board-local `ref`** — `ENG-14` for a card, `ENG-E7` for an epic, built
+from the board's key. **Use it, in your messages, commit/branch names, comments and notes, and as the
+argument to every verb** (`pandan move ENG-14 done`). It is what the human rows and `--json` `.ref`
+show, and it is the name the board's users see in the web UI.
+
+The canonical `KAN-955` (`ticket_number`) still exists and still resolves, but it is a cross-board
+address, not a name: reach for it only when a board-local ref is ambiguous (the CLI's
+`ambiguous_ref` error says so and lists the boards) or when no `ref` was returned. Don't copy
+`ticket_number` out of `--json` into prose. `--fields ticket` stays canonical on purpose.
+
+To **find** a card by its ref, just pass it: `pandan get ENG-14`, or `pandan list --q ENG-14` (also
+`KAN-955` and `alice/ENG-14`; exact match, ranked above full-text hits). A board-local ref resolves
+inside the pinned board or `--board`; with none it is looked up across boards you can see and may
+report `ambiguous_ref`.
+
+## Writing epics and stories
+
+A card is read by someone with none of your context — often another agent, cold. Write it so they
+can start without asking. The failure to avoid is the **wall of text**: one paragraph mixing why,
+what, history, status and half-remembered constraints.
+
+**Story** — one vertical slice a single agent can finish in one sitting and demo. Points 1–5; an 8
+or 13 is a signal to split it, or to make it an epic. If you can't say how you'd check it's done,
+it isn't a story yet.
+
+- **Title**: outcome in the imperative, specific, ≤ ~70 chars — `Search cards by board-local ref`, not
+  `Search improvements`. No status tags (`DONE`, `DEFERRED`, `(human)`), no ticket numbers, no
+  milestone prefixes. Status lives in the column, assignee and `needs-human`, never in the title.
+- **Description** (Markdown, ≤ ~150 words; longer means split it or link a doc). This shape, in this
+  order, dropping a section only when it would be empty:
+
+  ```markdown
+  **Why** — one or two sentences: who needs this and what hurts today. Link the issue/ADR by URL.
+
+  **Do** — what should be true after, not a step-by-step. Name a file or endpoint only when the
+  choice isn't obvious.
+
+  **Done when**
+  - [ ] 2–5 observable, checkable outcomes (a command's output, a status code, a screen state)
+  - [ ] Tests/docs updated where the change needs them
+
+  **Not in scope** — what a reader might assume is included but isn't.
+  ```
+- **Dependencies are structure, not prose**: `pandan dep add ENG-14 --blocked-by ENG-9`. Reference other
+  cards by board-local ref. Never write "blocked by X" or "see KAN-424" as the only record.
+- **Progress, findings and history go in comments** (`pandan comment add ENG-14 --body "…"`), not the description. The
+  description states intent and stays true after the card ships; don't edit it into a changelog.
+- **One card, one outcome.** "And also…" means a second card. Checklists of unrelated chores belong
+  as separate cards; a checklist inside **Done when** is for verifying one outcome.
+- Need a human decision or console work? `pandan needs-human ENG-14 --note "…"` or assign it — don't
+  encode it in the title.
+
+**Epic** — an outcome with a boundary, usually 3–10 stories. Name it as the outcome
+(`Board collaboration`, `Hosted MCP server`), not an activity (`Backend work`) or a date bucket.
+Description, three short parts: **Goal** (the outcome, one sentence), **Done when** (how you'd know
+the *epic* is finished, observable), **Not in scope**. File the epic first, then its stories with
+`--epic ENG-E3` so every story traces to a goal. A grab-bag of unrelated cards is a label or a
+backlog, not an epic.
+
+**Before** (typical wall of text):
+
+> `Search stuff` — Users can't find cards. Should probably support the ticket numbers like KAN-12 and
+> the new board ones, see the thing from last week, also check the palette, might need backend
+> changes, ask about partial matches, DONE for the UI part already.
+
+**After**:
+
+> `Search cards by board-local ref` (3 pts, epic `Legible at scale`)
+> **Why** — typing `ENG-14` in the search box returns nothing, so people fall back to scrolling.
+> **Do** — treat a query that is exactly a card ref (`ENG-14`, `KAN-12`, `alice/ENG-14`) as an exact
+> match ranked above full-text hits.
+> **Done when**
+> - [ ] `pandan list --q ENG-14` returns that card first
+> - [ ] The web search box does the same
+> - [ ] A ref on a board you can't see returns nothing
+> **Not in scope** — partial refs (`ENG-1` does not match `ENG-12`).
+
+Creating a plan in bulk: write the epic, then `pandan batch-create - < stories.json` with each
+object's `title`, `description` (the template above), `story_points` and `epic_id`. Re-read one card
+back with `pandan get` before filing forty. It is not atomic: if one card is rejected, the earlier ones
+stay created, so re-run only the remainder.
+
 ## Command surface
 
 Cards are the top-level verbs; `board`, `epic`, `label`, `view`, `template`, `dep`, `link`, and
 `comment` are nested groups. Columns are `todo`, `in_progress`, `done`. Story points are one of
 {1,2,3,5,8,13}. Priority is one of `none`/`low`/`medium`/`high`/`urgent`. Every command takes `--json`
 for machine-readable output you can pipe into `jq`; the human line for a card is
-`ticket  column  title  pts=N` (`pts=-` when unestimated).
+`ref  column  title  pts=N` (`pts=-` when unestimated).
 
 **`--json` output is enveloped for list verbs, bare for single reads — don't guess the shape**
 (KAN-434, verified 2026-07-31). `--json` is a verbatim passthrough of the shared client's return
@@ -191,9 +271,9 @@ differs per verb:
 | `metrics`, `cycle metrics`, `config show` | **bare object** — no envelope |
 
 ```bash
-pandan list --json | jq -r '.cards[] | "\(.ticket_number)\t\(.title)"'   # NOT .[]
-pandan next --json | jq -r '.card.ticket_number // "none ready"'
-pandan get KAN-7 --json | jq -r .title                                   # single reads are BARE
+pandan list --json | jq -r '.cards[] | "\(.ref)\t\(.title)"'            # NOT .[]
+pandan next --json | jq -r '.card.ref // "none ready"'
+pandan get ENG-7 --json | jq -r .title                                   # single reads are BARE
 ```
 
 The envelope is load-bearing (`next_cursor` rides there, and a `summary` field is coming) — treat it
@@ -203,19 +283,19 @@ as the contract, not an accident.
 you want two or three extra columns rather than the whole record:
 
 ```bash
-pandan list --column todo --fields ticket,title,priority   # tab-separated, `-` for null
+pandan list --column todo --fields ref,title,priority   # tab-separated, `-` for null
 ```
 
 The vocabulary is that row's own `--json` keys plus the aliases `ticket` and `pts`/`points`; an unknown
 name is a clean error naming it. Omitting `--fields` leaves the default
-`ticket  column  title  pts=N` row byte-identical, and `--fields` **does not** affect `--json` (that's
+`ref  column  title  pts=N` row byte-identical, and `--fields` **does not** affect `--json` (that's
 already the full record). Not available on single-entity verbs like `get` — there it's a usage error,
 not a silent no-op. Don't confuse it with `--sort`, whose help line lists **`Sort keys:`**.
 
 Cards:
 
 - `pandan list [--board N] [--column C] [--epic ID] [--priority P] [--label ID] [--assignee A] [--due-before ISO] [--overdue] [--needs-human] [--q TEXT] [--sort SPEC] [--limit N] [--json]`
-  — query/filter cards. `--q` is full-text search over title+description; `--sort` takes
+  — query/filter cards. `--q` is full-text search over title+description, plus an exact match when it is a ref (`ENG-14`); `--sort` takes
   comma-separated keys, `-` prefix = descending (e.g. `--sort -priority,position`). Large results
   paginate; the output includes a next-cursor to continue.
 - `pandan get <card_id> [--json]`
@@ -233,8 +313,9 @@ Cards:
   POST per card and the cards created *before* a rejection stay created. On failure re-run with the
   remainder, not the whole array. Object fields use the API's own names (`title` required, then
   `description`/`column`/`story_points`/`assignee`/`epic_id`/`cycle_id`/`priority`/`due_date`/
-  `label_ids`/`board_id`); `--board` (or `PANDAN_BOARD_ID`) fills in `board_id` for objects that omit
-  it, so a batch can't silently land on your earliest board.
+  `label_ids`/`board_id`); `--board` (or the `board use` pin) fills in `board_id` for objects that omit
+  it; an object with no `board_id` and no board selected is refused, so a batch can't silently land on your
+  earliest board.
 - `pandan claim <card_id> --assignee A [--json]` — claim a **chosen** card in one call: move it to
   `in_progress` **and** set its assignee. Use this when you already know which card you want;
   `next --claim` is the one that picks the card for you. `--assignee` is required (this path has no
@@ -253,11 +334,14 @@ Dependencies, work-links, comments (nested groups):
 - `pandan dep add <card_id> --blocked-by <other_id>` · `pandan dep rm <card_id> --blocked-by <other_id>` ·
   `pandan dep list <card_id>`
 - `pandan link add <card_id> --url <url> --label <label>` · `pandan link rm <card_id> --link-id <id>`
-- `pandan comment add <card_id> --body "…"` · `pandan comment list <card_id>`
+- `pandan comment add <card_id> --body "…"` · `pandan comment list <card_id>` ·
+  `pandan comment edit <card_id> <comment_id> --body "…"` · `pandan comment delete <card_id> <comment_id> --yes`
+  (comment ids are the first column of `comment list`; you can only edit/delete your own; MCP: `edit_comment` / `delete_comment`)
 
 Boards, epics, labels, saved views, templates:
 
 - `pandan board list [--json]` · `pandan board get <board_id> [--json]` · `pandan board create "<name>" [--json]`
+- `pandan board use <id|KEY>` · `pandan board use --clear` · `pandan board current` — pin the session's board (above)
 - `pandan board update <board_id> [--name N] [--outbound-webhook-url URL]
   [--outbound-webhook-secret S | --outbound-webhook-secret-stdin]
   [--outbound-webhook-enabled | --outbound-webhook-disabled] [--json]` — **this is how you rename a
@@ -318,48 +402,49 @@ depended on the identifier form rather than the failure.
 
 ## Example workflows
 
-Orient, then pick up a card and start on it:
+Orient, pin a board, then pick up a card and start on it:
 
 ```bash
 pandan warmup
+pandan board list                         # which boards can I reach?
+pandan board use ENG                      # once per session; --board N overrides per call
 pandan list --column todo                 # what's available
-pandan get 42                             # read the card fully
-pandan move 42 in_progress                # start it
-pandan update 42 --assignee "agent:me"    # note who's on it
+pandan get ENG-42                         # read the card fully
+pandan move ENG-42 in_progress            # start it
+pandan update ENG-42 --assignee "agent:me"
 ```
 
 Add a chunk of work under an epic:
 
 ```bash
-EPIC=$(pandan epic create "Onboarding flow" --json | jq -r .id)
+EPIC=$(pandan epic create "Onboarding flow" --json | jq -r .ref)
 pandan create "Landing page" --epic "$EPIC" --points 3
 pandan create "GitHub login button" --epic "$EPIC" --points 2
 ```
 
-Finish and close out:
-
-```bash
-pandan move 42 done
-```
+Finish and close out: `pandan move ENG-42 done`.
 
 ## When to fall back to MCP
 
 Use the `mcp__pandan__*` tools instead of `pandan` when the CLI isn't installed / not on PATH, or a
-`pandan` command errors for an environment reason (not a 4xx from the API). **Every one of the 49 MCP
-tools has a CLI verb and every board-touching CLI verb has an MCP tool** — asserted by
+`pandan` command errors for an environment reason (not a 4xx from the API). **Every MCP
+tool has a CLI verb and every board-touching CLI verb has an MCP tool** — asserted by
 `pandan-cli/tests/test_parity.py`, not by this sentence (see the note at the top of this file, and
-ADR 0019 for why the surface is frozen at 49 rather than trimmed):
+ADR 0019 for why the surface is frozen rather than trimmed):
 
 - **Cards:** `list_cards`, `get_card`, `create_card`, `create_cards` / `update_cards` (batch),
   `update_card`, `move_card`, `claim_card`, `delete_card`.
 - **Dispatch & handoff:** `dispatch`, `next`, `needs_human`, `resolve`.
 - **Dependencies / links / comments:** `add_dependency` / `remove_dependency` / `list_dependencies`,
-  `add_link` / `remove_link`, `add_comment` / `list_comments`. (Card reads include
+  `add_link` / `remove_link`, `add_comment` / `edit_comment` / `delete_comment` / `list_comments`. (Card reads include
   `blocked_by`/`blocks`/`blocked` and `links` either way.)
 - **Boards / epics / labels / views / templates:** `list_boards` / `create_board` / `get_board` /
   `update_board` / `delete_board`, and the parallel `*_epic`, `*_label`, `*_view`, and `*_template`
   (incl. `apply_template`) families.
 - **Reporting & ops:** `metrics`, `activity`, `warmup`.
+- **Board selection:** MCP has no default board either. Pass `board_id` on each board-scoped call, or
+  call `use_board` once to set it for the stdio session (an explicit `board_id` still wins). On the
+  hosted MCP endpoint `use_board` is refused — always pass `board_id`.
 
 The MCP server loads at session start, so a newly added MCP *tool* isn't callable until Claude Code is
 restarted; a new API *field*, though, shows up immediately since the tools pass JSON straight through.

@@ -123,6 +123,7 @@ import pathlib
 import pytest
 
 from pandan_cli import cli, config
+from pandan_cli.pin import write_pin
 
 CLIENT_SOURCE = (
     pathlib.Path(__file__).resolve().parents[2]
@@ -409,6 +410,7 @@ def isolate_config(monkeypatch, tmp_path):
             monkeypatch.delenv(name, raising=False)
     config._warned.clear()
     monkeypatch.setenv("PANDAN_TOKEN", "pandan_pat_test")
+    write_pin(config.DEFAULT_API_URL, 1)
 
 
 def run_capture(monkeypatch, capsys, argv, result) -> str:

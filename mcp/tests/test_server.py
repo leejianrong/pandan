@@ -5,6 +5,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 from pandan_client import PandanClient
 
 # The expected tool-name set is the V49 freeze, and it lives in exactly one place:
@@ -53,7 +54,7 @@ def _stub_client(monkeypatch, default_board_id):
 
     client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
-    monkeypatch.setattr(server, "_default_board_id", default_board_id)
+    monkeypatch.setattr(server, "_session_board_id", default_board_id)
     return seen
 
 
@@ -69,10 +70,92 @@ def test_per_call_board_id_overrides_the_default(monkeypatch):
     assert json.loads(seen["content"]) == {"board_id": 3, "title": "T"}
 
 
-def test_no_board_id_and_no_default_sends_none(monkeypatch):
+def test_no_board_id_and_no_session_board_is_refused(monkeypatch):
+    """There is no default board: a call that names none must fail *before* any request
+    rather than span every board (read) or land on the earliest one (create)."""
     seen = _stub_client(monkeypatch, default_board_id=None)
-    server.list_cards()
-    assert seen["params"] == {}
+    for call in (
+        lambda: server.list_cards(),
+        lambda: server.list_epics(),
+        lambda: server.create_card("T"),
+        lambda: server.create_epic("E"),
+        lambda: server.create_cards([{"title": "T"}]),
+        lambda: server.list_labels(),
+    ):
+        with pytest.raises(ValueError, match="no default board"):
+            call()
+    assert seen == {}  # nothing was sent
+
+
+def test_a_batch_read_by_canonical_ref_needs_no_board(monkeypatch):
+    seen = _stub_client(monkeypatch, default_board_id=None)
+    server.list_cards(refs="KAN-12")
+    assert seen["params"] == {"refs": "KAN-12"}
+
+
+def test_create_cards_fills_the_session_board_and_keeps_an_explicit_one(monkeypatch):
+    sent = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(201, json={"id": 1})
+
+    monkeypatch.setattr(
+        server, "_client", PandanClient("http://test", transport=httpx.MockTransport(handler))
+    )
+    monkeypatch.setattr(server, "_session_board_id", 7)
+    server.create_cards([{"title": "a"}, {"title": "b", "board_id": 3}])
+    assert [c["board_id"] for c in sent] == [7, 3]
+
+
+# --- use_board: the stdio session's board (and why hosted refuses) -----------
+
+
+def test_use_board_sets_the_session_board_after_verifying_it(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/boards/4")
+        return httpx.Response(200, json={"id": 4, "key": "ENG", "name": "Eng"})
+
+    monkeypatch.setattr(
+        server, "_client", PandanClient("http://test", transport=httpx.MockTransport(handler))
+    )
+    monkeypatch.setattr(server, "_session_board_id", None)
+    assert server.use_board(4)["key"] == "ENG"
+    assert server._require_board(None) == 4
+    assert server._require_board(9) == 9  # an explicit board_id still wins
+
+
+def test_use_board_sets_nothing_for_a_board_you_cannot_see(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_client",
+        PandanClient(
+            "http://test",
+            transport=httpx.MockTransport(lambda r: httpx.Response(403, json={"detail": "no"})),
+        ),
+    )
+    monkeypatch.setattr(server, "_session_board_id", None)
+    with pytest.raises(Exception):  # noqa: B017 - the client's own API error
+        server.use_board(4)
+    assert server._session_board_id is None
+
+
+def test_the_hosted_transport_neither_sets_nor_honours_a_session_board(monkeypatch):
+    """One hosted process serves every caller, so a module-level pick would leak one
+    user's board into another's calls."""
+    from pandan_mcp.request_auth import clear_request_token, set_request_token
+
+    monkeypatch.setattr(server, "_session_board_id", 99)  # as if a stdio pick existed
+    set_request_token("pandan_pat_hosted_caller")
+    try:
+        with pytest.raises(ValueError, match="hosted"):
+            server.use_board(4)
+        with pytest.raises(ValueError, match="no default board"):
+            server._require_board(None)
+        assert server._require_board(5) == 5
+    finally:
+        clear_request_token()
+    assert server._session_board_id == 99  # untouched
 
 
 # --- per-request client override for the hosted transport (KAN-1732) -------
@@ -98,7 +181,7 @@ def test_client_instance_uses_the_per_request_override_when_present(monkeypatch)
     singleton = PandanClient("http://singleton-must-not-be-used")
     monkeypatch.setattr(server, "_client", singleton)
     monkeypatch.setattr(
-        server, "load_config", lambda: Config(api_url="http://hosted", token=None, board_id=None)
+        server, "load_config", lambda: Config(api_url="http://hosted", token=None)
     )
 
     set_request_token("pandan_pat_hosted_caller")
@@ -122,6 +205,112 @@ def test_client_instance_falls_back_to_the_stdio_singleton_with_no_override(monk
     assert server._client_instance() is singleton
 
 
+# --- API errors reach the model (PAN-229) -----------------------------------
+# The SDK shows the model only `Error executing tool <name>` for any exception that
+# is not a ToolError, so a 404/403/422 used to be indistinguishable. These go through
+# `mcp.call_tool` (the real SDK path), not the bare tool function, because the
+# masking happens in the SDK and a direct call would pass either way.
+
+
+def _call_tool_error(monkeypatch, status, detail, tool, args):
+    import asyncio
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json={"detail": detail})
+
+    client = server._McpClient("http://test", transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(server, "_client", client)
+    monkeypatch.setattr(server, "_session_board_id", None)
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(server.mcp.call_tool(tool, args))
+    return excinfo.value
+
+
+@pytest.mark.parametrize(
+    "status,detail,tool,args",
+    [
+        (404, "Comment not found", "edit_comment", {"card_id": 5, "comment_id": 9, "body": "x"}),
+        (403, "you can only delete your own comments", "delete_comment",
+         {"card_id": 5, "comment_id": 9}),
+        (422, "body: Value error, body must not be empty", "add_comment",
+         {"card_id": 5, "body": " "}),
+    ],
+)
+def test_api_errors_carry_status_and_detail(monkeypatch, status, detail, tool, args):
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+
+    err = _call_tool_error(monkeypatch, status, detail, tool, args)
+    assert isinstance(err, ToolError) and not isinstance(err, UnexpectedToolError)
+    assert str(err).startswith(f"Error executing tool {tool}: ")
+    assert str(status) in str(err)
+    assert detail in str(err)
+
+
+@pytest.mark.parametrize(
+    "tool,args,expect",
+    [
+        # PAN-230: `list_cards(limit=5)` with no board used to read as a bare
+        # "Error executing tool list_cards" — the SDK withheld the plain ValueError.
+        ("list_cards", {"limit": 5}, "board_id is required"),
+        ("list_cards", {"limit": 5}, "list_boards"),
+        ("list_cards", {"board_id": 5, "fields": ["nope"]}, "unknown field 'nope'"),
+        ("use_board", {"board_id": 5}, "not available on the hosted transport"),
+    ],
+)
+def test_caller_mistakes_are_shown_to_the_model(monkeypatch, tool, args, expect):
+    import asyncio
+
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+
+    from pandan_mcp.request_auth import clear_request_token, set_request_token
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"cards": [{"id": 1, "title": "t"}]})
+
+    client = server._McpClient("http://test", transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(server, "_client", client)
+    monkeypatch.setattr(server, "_session_board_id", None)
+    if tool == "use_board":
+        set_request_token("pandan_pat_hosted")
+    try:
+        with pytest.raises(ToolError) as excinfo:
+            asyncio.run(server.mcp.call_tool(tool, args))
+    finally:
+        clear_request_token()
+    assert not isinstance(excinfo.value, UnexpectedToolError)
+    assert expect in str(excinfo.value)
+
+
+def test_non_api_crashes_stay_generic(monkeypatch):
+    """Only *API* errors are anticipated; anything else is still withheld."""
+    import asyncio
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise RuntimeError("secret internal detail")
+
+    client = server._McpClient("http://test", transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(server, "_client", client)
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(server.mcp.call_tool("delete_comment", {"card_id": 5, "comment_id": 9}))
+    assert "secret internal detail" not in str(excinfo.value)
+
+
+def test_both_client_paths_use_the_error_surfacing_client(monkeypatch):
+    from pandan_mcp.config import Config
+    from pandan_mcp.request_auth import clear_request_token, set_request_token
+
+    monkeypatch.setattr(server, "_client", None)
+    monkeypatch.setattr(
+        server, "load_config", lambda: Config(api_url="http://x", token="pandan_pat_test")
+    )
+    assert isinstance(server._client_instance(), server._McpClient)  # stdio singleton
+    set_request_token("pandan_pat_hosted")
+    try:
+        assert isinstance(server._client_instance(), server._McpClient)  # hosted
+    finally:
+        clear_request_token()
+
+
 # --- dependency tools (KAN-31) ---------------------------------------------
 
 
@@ -138,7 +327,7 @@ def _capture_client(monkeypatch, response):
 
     client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
-    monkeypatch.setattr(server, "_default_board_id", None)
+    monkeypatch.setattr(server, "_session_board_id", None)
     return seen
 
 
@@ -196,6 +385,23 @@ def test_remove_link_deletes_link_path(monkeypatch):
     assert seen["method"] == "DELETE"
     assert seen["path"] == "/api/v1/cards/5/links/2"
     assert out == {"id": 5, "links": []}
+
+
+def test_edit_comment_patches_body(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(200, json={"id": 3, "body": "new"}))
+    out = server.edit_comment(5, 3, "new")
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/cards/5/comments/3"
+    assert json.loads(seen["content"]) == {"body": "new"}
+    assert out == {"id": 3, "body": "new"}
+
+
+def test_delete_comment_returns_deleted_id(monkeypatch):
+    seen = _capture_client(monkeypatch, httpx.Response(204))
+    out = server.delete_comment(5, 3)
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/api/v1/cards/5/comments/3"
+    assert out == {"deleted": 3}
 
 
 def test_add_comment_posts_body(monkeypatch):
@@ -261,7 +467,7 @@ def test_list_cards_passes_sort_and_assignee(monkeypatch):
 
     client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
-    monkeypatch.setattr(server, "_default_board_id", None)
+    monkeypatch.setattr(server, "_session_board_id", None)
     server.list_cards(board_id=3, sort="-priority", assignee="agent-7")
     assert seen["params"] == {"board_id": "3", "sort": "-priority", "assignee": "agent-7"}
 
@@ -326,7 +532,7 @@ def _capture_get(monkeypatch, response):
 
     client = PandanClient("http://test", transport=httpx.MockTransport(handler))
     monkeypatch.setattr(server, "_client", client)
-    monkeypatch.setattr(server, "_default_board_id", None)
+    monkeypatch.setattr(server, "_session_board_id", None)
     return seen
 
 
@@ -517,8 +723,8 @@ def test_list_cards_passes_backlog_and_parked(monkeypatch):
 
 def test_create_card_passes_parked(monkeypatch):
     seen = _capture_client(monkeypatch, httpx.Response(201, json={"id": 1}))
-    server.create_card("T", parked=True)
-    assert json.loads(seen["content"]) == {"title": "T", "parked": True}
+    server.create_card("T", board_id=1, parked=True)
+    assert json.loads(seen["content"]) == {"board_id": 1, "title": "T", "parked": True}
 
 
 def test_update_card_passes_parked(monkeypatch):

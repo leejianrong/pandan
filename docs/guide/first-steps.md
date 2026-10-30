@@ -1,6 +1,6 @@
 <!--
 title: "First steps"
-description: Point the CLI at a board, mint a personal access token, pick a default board, and read your first card.
+description: Point the CLI at a board, mint a personal access token, pick a board, and read your first card.
 -->
 
 # First steps
@@ -99,22 +99,21 @@ The config file is written with `600` permissions, so only your user can read it
 
 !!! tip "One command for the whole setup"
 
-    `login` also takes the other two settings, so a fresh machine needs a single command:
+    `login` also takes the origin, so a fresh machine needs a single command:
 
     ```bash
     printf %s 'pandan_pat_…' | pandan login --token-stdin \
-      --api-url https://simple-kanban-jian.fly.dev \
-      --board-id 5
+      --api-url https://simple-kanban-jian.fly.dev
     ```
 
 ### Where configuration comes from
 
 Three sources, checked in order, first non-empty value wins. This is resolved **per value**, so you
-can keep the token in a file and override the board id with an environment variable.
+can keep the token in a file and override the origin with an environment variable.
 
 | Order | Source | Notes |
 | --- | --- | --- |
-| 1 | `PANDAN_API_URL`, `PANDAN_TOKEN`, `PANDAN_BOARD_ID` | Environment. Good for CI. |
+| 1 | `PANDAN_API_URL`, `PANDAN_TOKEN` | Environment. Good for CI. |
 | 2 | `~/.config/pandan/config.toml` | Written by `pandan login` and `pandan config set`. |
 | 3 | `.mcp.json` | Nearest one up the directory tree, read from `.mcpServers.pandan.env`. Lets a repository checkout share one setting with your agent. |
 
@@ -124,8 +123,8 @@ Check what actually resolved, with the token redacted:
 $ pandan config show
 api_url	https://simple-kanban-jian.fly.dev
 token	set (…c_DE)
-board_id	5
 max_text_chars	500
+pinned_board	None
 config_file	/home/you/.config/pandan/config.toml
 mcp_json	None
 ```
@@ -143,7 +142,7 @@ Your user id and your email. If the token is missing, mistyped, or revoked you g
 exit `3` instead. Nothing else can go wrong here — there is no board involved, so a `4` (forbidden)
 is not reachable, which is what makes `me` the clean answer to "did my token work?".
 
-## Pick a default board
+## Pick a board
 
 Now list what you can reach.
 
@@ -155,16 +154,18 @@ $ pandan board list
 4 boards
 ```
 
-The first column is the board id. Save the one you work in:
+The first column is the board id. Pin the one you work in for this session (an id or a board key):
 
 ```bash
-pandan config set --board-id 5
+pandan board use 5
 ```
 
-!!! warning "Set a default board"
+!!! note "There is no default board"
 
-    Without `board_id`, list commands span **every** board you can reach and `create` lands on the
-    earliest one. That is an easy way to file a card onto the wrong board without noticing.
+    A board-scoped command with no `--board` and no pin fails and lists your boards, rather than
+    guessing — a guess is how a card ends up on the wrong board. The pin lasts a working session
+    (12 hours idle, per directory); `--board` on any command overrides it. See
+    [configuration](cli/configure.md#picking-a-board).
 
 If `board list` prints nothing on the hosted instance, log in to the web UI once so your first login
 claims a board. If it fails, the exit code tells you what went wrong:
@@ -230,9 +231,9 @@ pandan warmup
 # 3. save the PAT you minted in the Tokens tab
 printf %s 'pandan_pat_…' | pandan login --token-stdin
 
-# 4. find your board and make it the default
+# 4. find your board and pin it for this session
 pandan board list
-pandan config set --board-id 5
+pandan board use 5
 
 # 5. read it
 pandan overview

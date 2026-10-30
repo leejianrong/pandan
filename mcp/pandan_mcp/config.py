@@ -8,12 +8,13 @@ back to the CLI's own config file (ADR 0024, KAN-1731).
   (``pandan_pat_…``, created in the SPA Tokens UI, V9/ADR 0014; a pre-rebrand
   ``kanban_pat_…`` token still authenticates). Empty/unset → no Authorization
   header, which the server rejects with ``401``.
-- ``PANDAN_BOARD_ID`` — optional default board (an integer id) for board-scoped
-  tools when a call omits ``board_id`` (V10). Unset → the API's own fallback
-  (list = all your boards; create = your earliest board).
+**There is no default board.** ``PANDAN_BOARD_ID`` / ``KANBAN_BOARD_ID`` is
+retired: board-scoped tools require ``board_id`` per call, or one ``use_board`` call
+for the (stdio) session. A leftover value is ignored with a one-line stderr notice
+rather than an error, so an existing ``.mcp.json`` keeps launching.
 
-Each of the three also has a **deprecated** pre-rebrand spelling — ``KANBAN_API_URL``
-/ ``KANBAN_TOKEN`` / ``KANBAN_BOARD_ID`` — read **second**, with a one-line notice on
+Each of the two also has a **deprecated** pre-rebrand spelling — ``KANBAN_API_URL``
+/ ``KANBAN_TOKEN`` — read **second**, with a one-line notice on
 stderr (V40, KAN-423, ADR 0018). stderr specifically: an MCP stdio server's *stdout*
 is the JSON-RPC channel, so anything printed there would corrupt the protocol. The
 fallback exists so the cutover can't brick a live ``.mcp.json``; it is scheduled for
@@ -49,8 +50,9 @@ DEFAULT_API_URL = "http://localhost:8000"
 _ENV_NAMES: dict[str, tuple[str, ...]] = {
     "api_url": ("PANDAN_API_URL", "KANBAN_API_URL"),
     "token": ("PANDAN_TOKEN", "KANBAN_TOKEN"),
-    "board_id": ("PANDAN_BOARD_ID", "KANBAN_BOARD_ID"),
 }
+# Retired: the default board. Recognised only to say it is ignored.
+_RETIRED_ENV_NAMES = ("PANDAN_BOARD_ID", "KANBAN_BOARD_ID")
 
 # The config file's TOML table, current name only (see module docstring: this
 # fallback is deliberately narrower than the CLI's own, which also reads a
@@ -65,7 +67,6 @@ _warned: set[str] = set()
 class Config:
     api_url: str
     token: str | None
-    board_id: int | None
 
 
 def _config_file_path() -> Path:
@@ -130,21 +131,15 @@ def _resolve(key: str, file_values: dict[str, str]) -> str:
 
 
 def load_config() -> Config:
+    for name in _RETIRED_ENV_NAMES:
+        if os.environ.get(name, "").strip() and name not in _warned:
+            _warned.add(name)
+            print(
+                f"pandan-mcp: {name} is ignored — there is no default board any more. "
+                "Pass board_id on each call, or call use_board once per session.",
+                file=sys.stderr,
+            )
     file_values = _from_config_file()
     api_url = _resolve("api_url", file_values) or DEFAULT_API_URL
     token = _resolve("token", file_values) or None
-    board_id = _parse_board_id(_resolve("board_id", file_values))
-    return Config(api_url=api_url, token=token, board_id=board_id)
-
-
-def _parse_board_id(raw: str) -> int | None:
-    """Parse the optional default board id; empty → None, non-integer → a clear error."""
-    raw = raw.strip()
-    if not raw:
-        return None
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise ValueError(
-            f"{_ENV_NAMES['board_id'][0]} must be an integer, got {raw!r}"
-        ) from exc
+    return Config(api_url=api_url, token=token)
