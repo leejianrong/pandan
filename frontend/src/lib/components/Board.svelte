@@ -3,6 +3,7 @@
   import { handleBoardKeydown } from "../keyboard.svelte";
   import Column from "./Column.svelte";
   import ViewSwitcher from "./ViewSwitcher.svelte";
+  import SprintScope from "./SprintScope.svelte";
   import BoardTable from "./BoardTable.svelte";
 
   // Below the mobile breakpoint (app.css's `@media (max-width: 768px)` on
@@ -53,6 +54,7 @@
 {/if}
 
 <ViewSwitcher />
+<SprintScope />
 
 {#if board.loading && board.cards.length === 0}
   <p class="hint">Loading…</p>

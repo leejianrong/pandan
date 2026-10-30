@@ -44,6 +44,8 @@ export interface Card {
   // Deliberately-parked flag (M8 V56, KAN-977) — distinct from the backlog itself,
   // which is derived (no cycle assigned) rather than stored.
   parked: boolean;
+  // The sprint this card belongs to; null = unscheduled (the backlog).
+  cycle_id?: number | null;
   // Card-to-card dependencies (KAN-28/KAN-30): ids of cards that block this one
   // (blocked_by) and ids of cards this one blocks (blocks). `blocked` is the
   // derived signal — true when >=1 blocker is not yet done (KAN-29).
@@ -54,6 +56,8 @@ export interface Card {
   links: CardLink[];
   created_at: string;
   updated_at: string;
+  // When the card last entered done (PAN-237); null while it isn't done.
+  done_at?: string | null;
 }
 
 // A board-scoped, colored label a card can carry (M5 V11, KAN-244).
@@ -1187,6 +1191,8 @@ export interface Cycle {
   // The planning interval this cycle belongs to, if any (M8 V57, KAN-978) — a
   // grouping one level above the cycle, e.g. a quarter containing several sprints.
   planning_interval_id: number | null;
+  // Set when the cycle was explicitly closed (M8 V59); null = open.
+  closed_at?: string | null;
 }
 
 // A board-scoped grouping one level above the cycle (M8 V57, KAN-978) —
@@ -1224,6 +1230,28 @@ export interface CycleMetrics {
   velocity: number;
   unit: "points" | "count";
   burndown: BurndownPoint[];
+}
+
+export interface CycleGenerateRequest {
+  start: string; // calendar day, YYYY-MM-DD
+  length_days: number;
+  count: number;
+  // `{n}` interpolates the 1-indexed position in this run, e.g. "Sprint {n}".
+  name_template: string;
+}
+
+// Back-to-back [starts_on, ends_on) cycles in one all-or-nothing call (M8 V58).
+export async function generateCycles(
+  boardId: number,
+  payload: CycleGenerateRequest,
+): Promise<Cycle[]> {
+  const res = await fetch(`${API}/boards/${boardId}/cycles/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
 }
 
 export async function listCycles(boardId: number): Promise<Cycle[]> {

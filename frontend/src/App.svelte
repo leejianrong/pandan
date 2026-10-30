@@ -22,7 +22,7 @@
   import ShortcutsHelp from "./lib/components/ShortcutsHelp.svelte";
   import { DropdownMenu } from "./lib/components/ui";
   import type { MenuItem } from "./lib/components/ui";
-  import { refetch, refetchBacklog, refetchBoards, refetchEpics, refetchLabels, refetchViews, setQuery } from "./lib/board.svelte";
+  import { refetch, refetchBacklog, refetchBoards, refetchCycles, refetchEpics, refetchLabels, refetchViews, setQuery } from "./lib/board.svelte";
   import { refetchTokens } from "./lib/tokens.svelte";
   import { refetchWorkspaces } from "./lib/workspaces.svelte";
   import { startNotificationPolling, stopNotificationPolling } from "./lib/notifications.svelte";
@@ -168,6 +168,7 @@
       refetchLabels();
       refetchViews();
       refetchBacklog();
+      refetchCycles();
       // Workspaces are user-scoped, not board-scoped (M9 V70) — load once here, not
       // per-board-switch, and eagerly (not lazily like Tokens) because the
       // BoardSwitcher's Workspace picker needs the list too.
