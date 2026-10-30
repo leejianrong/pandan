@@ -1232,6 +1232,28 @@ export interface CycleMetrics {
   burndown: BurndownPoint[];
 }
 
+export interface CycleGenerateRequest {
+  start: string; // calendar day, YYYY-MM-DD
+  length_days: number;
+  count: number;
+  // `{n}` interpolates the 1-indexed position in this run, e.g. "Sprint {n}".
+  name_template: string;
+}
+
+// Back-to-back [starts_on, ends_on) cycles in one all-or-nothing call (M8 V58).
+export async function generateCycles(
+  boardId: number,
+  payload: CycleGenerateRequest,
+): Promise<Cycle[]> {
+  const res = await fetch(`${API}/boards/${boardId}/cycles/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new ApiError(res.status, await parseError(res));
+  return res.json();
+}
+
 export async function listCycles(boardId: number): Promise<Cycle[]> {
   const res = await fetch(`${API}/boards/${boardId}/cycles`);
   if (!res.ok) throw new ApiError(res.status, await parseError(res));
