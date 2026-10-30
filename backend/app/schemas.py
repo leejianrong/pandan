@@ -474,6 +474,8 @@ class CardRead(BaseModel):
     links: list[LinkRead] = []
     created_at: datetime
     updated_at: datetime
+    # When the card last entered ``done`` (PAN-237); null while it is not done.
+    done_at: datetime | None = None
 
 
 class CardTrashRead(CardRead):
@@ -1132,6 +1134,7 @@ CARD_SORT_FIELDS = (
     "due_date",
     "created_at",
     "updated_at",
+    "done_at",
     "story_points",
     "assignee",
     "title",

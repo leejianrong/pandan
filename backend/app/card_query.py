@@ -29,6 +29,7 @@ def _sort_expressions() -> dict[str, Any]:
         "due_date": Card.due_date,
         "created_at": Card.created_at,
         "updated_at": Card.updated_at,
+        "done_at": Card.done_at,
         "story_points": Card.story_points,
         "assignee": Card.assignee,
         "title": Card.title,

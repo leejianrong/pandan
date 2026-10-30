@@ -23,7 +23,7 @@ belong to (ADR 0009). Key mechanisms:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi_users_db_sqlalchemy.generics import GUID
 from sqlalchemy import (
@@ -39,6 +39,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
     text,
 )
@@ -706,6 +707,13 @@ class Card(Base):
     parked: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # When the card last entered ``done`` (PAN-237). Maintained by the ``set`` listener
+    # on ``Card.column`` below, so every path that changes the column (move, dispatch,
+    # autosync, create) stamps it; cleared on a move out. ``updated_at`` can't serve —
+    # any later edit bumps it.
+    done_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Full-text search vector over title + description (M5 V15, KAN-248). A Postgres
     # ``GENERATED ALWAYS AS (...) STORED`` column (the migration owns the DDL) with a
     # GIN index, so it is maintained by the DB on every INSERT/UPDATE — no trigger,
@@ -936,3 +944,11 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+@event.listens_for(Card.column, "set")
+def _stamp_done_at(target: Card, value: str, oldvalue, initiator) -> None:
+    """Keep ``card.done_at`` in step with ``card.column`` (PAN-237)."""
+    if value == oldvalue:
+        return
+    target.done_at = datetime.now(timezone.utc) if value == "done" else None

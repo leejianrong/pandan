@@ -3707,7 +3707,7 @@ def build_parser() -> argparse.ArgumentParser:
             "sort keys, comma-separated, '-' prefix = descending. Both the space "
             "and equals forms work, e.g. --sort -priority,position or "
             "--sort=-priority,position. Sort keys: position/priority/due_date/"
-            "created_at/updated_at/story_points/assignee/title/column/id "
+            "created_at/updated_at/done_at/story_points/assignee/title/column/id "
             "(these order the rows; to choose which COLUMNS print, use --fields)"
         ),
     )

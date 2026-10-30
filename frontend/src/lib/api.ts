@@ -54,6 +54,8 @@ export interface Card {
   links: CardLink[];
   created_at: string;
   updated_at: string;
+  // When the card last entered done (PAN-237); null while it isn't done.
+  done_at?: string | null;
 }
 
 // A board-scoped, colored label a card can carry (M5 V11, KAN-244).

@@ -94,3 +94,29 @@ def test_move_to_specific_index_in_other_column(client):
     assert cards[x["id"]]["position"] == 0
     assert cards[a["id"]]["position"] == 1
     assert cards[y["id"]]["position"] == 2
+
+
+def test_done_at_stamped_on_move_to_done_and_cleared_on_move_out(client):
+    a = _create(client, "A", "todo")
+    assert a["done_at"] is None
+    r = client.post(f"/api/v1/cards/{a['id']}/move", json={"column": "done"}).json()
+    assert r["done_at"] is not None
+    r = client.post(f"/api/v1/cards/{a['id']}/move", json={"column": "todo"}).json()
+    assert r["done_at"] is None
+
+
+def test_done_at_survives_edit_and_orders_done_by_completion(client):
+    first = _create(client, "first", "todo")
+    second = _create(client, "second", "todo")
+    for c in (first, second):
+        client.post(f"/api/v1/cards/{c['id']}/move", json={"column": "done"})
+    # Editing the older done card bumps updated_at but must not change done_at.
+    before = client.get(f"/api/v1/cards/{first['id']}").json()["done_at"]
+    client.patch(f"/api/v1/cards/{first['id']}", json={"title": "first, edited"})
+    assert client.get(f"/api/v1/cards/{first['id']}").json()["done_at"] == before
+    rows = client.get("/api/v1/cards?column=done&sort=-done_at").json()
+    assert [c["id"] for c in rows][:2] == [second["id"], first["id"]]
+
+
+def test_card_created_directly_in_done_has_done_at(client):
+    assert _create(client, "born done", "done")["done_at"] is not None

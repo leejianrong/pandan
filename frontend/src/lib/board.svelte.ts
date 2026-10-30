@@ -148,9 +148,16 @@ export const board = $state<{
 });
 
 export function cardsFor(column: Column): Card[] {
-  return board.cards
-    .filter((c) => c.column === column)
-    .sort((a, b) => a.position - b.position);
+  const cards = board.cards.filter((c) => c.column === column);
+  // Done reads newest-completed first (PAN-237); cards without a done_at sink.
+  if (column === "done") {
+    return cards.sort(
+      (a, b) =>
+        (b.done_at ? Date.parse(b.done_at) : 0) - (a.done_at ? Date.parse(a.done_at) : 0) ||
+        a.position - b.position,
+    );
+  }
+  return cards.sort((a, b) => a.position - b.position);
 }
 
 // A card by id, for rendering dependency references (blocked_by / blocks) by
