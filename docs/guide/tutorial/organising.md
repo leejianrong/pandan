@@ -130,6 +130,19 @@ pandan cycle metrics 3
     reporting, not to enforce a process. Carrying work forward is a decision you make, not one the board
     makes for you.
 
+### What the board shows once a board has sprints
+
+A board with no cycles looks exactly as it always did. Once it has any, the board shows its
+**current sprint**: the cards in the sprint whose dates contain today, plus work that is not in any sprint
+yet and is still open. Cards in a closed or future sprint leave the board but stay one click away. Use the
+**Sprint** selector above the board to open a past sprint, or choose **All cards** for the old behaviour.
+The choice is remembered per board, in your browser.
+
+Separately, a **Done** card that belongs to no sprint is hidden from the board 14 days after it was
+completed, so finished work does not pile up. The board says how many are hidden, and **Show all**
+brings them back. A Done card inside a sprint is never hidden by age. The Done column is ordered by when
+each card was completed, newest first.
+
 ## Templates
 
 A template is a named set of cards you can stamp onto a board repeatedly. Good for a checklist that
